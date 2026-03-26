@@ -2,6 +2,10 @@
 
 A secure, local-first password manager built with Tauri + React.
 
+**Last Updated**: 2026-03-26
+**Repository**: https://github.com/chaojimaimi/PwdVault (Private)
+**Current Branch**: `feature/phase1-crypto`
+
 ---
 
 ## 1. Project Architecture & Key Files
@@ -11,7 +15,7 @@ A secure, local-first password manager built with Tauri + React.
 - **Backend**: Tauri v2 + Rust
 - **Database**: redb (pure Rust, ACID-compliant, embedded)
 - **Encryption**: AES-256-GCM + Argon2id key derivation
-- **Browser Extension**: Chrome/Firefox extension via native messaging (HTTP server on port 17429)
+- **Browser Extension**: Chrome/Firefox extension via HTTP server (port 17429)
 
 ### Directory Structure
 ```
@@ -41,17 +45,24 @@ PwdVault/
 │   │   ├── native_messaging.rs   # HTTP server for browser extension
 │   │   ├── crypto/               # Encryption module
 │   │   │   ├── mod.rs
-│   │   │   ├── aes.rs            # AES-256-GCM encryption
+│   │   │   ├── cipher.rs         # AES-256-GCM encryption
 │   │   │   ├── kdf.rs            # Argon2id key derivation
-│   │   │   └── keystore.rs       # In-memory key management
+│   │   │   ├── keystore.rs       # In-memory key management
+│   │   │   └── verification.rs   # Password verification
 │   │   └── database/             # Database module
-│   │       ├── mod.rs
-│   │       └── schema.rs         # redb tables and operations
+│   │       └── mod.rs            # redb tables and operations
 │   ├── Cargo.toml                # Rust dependencies
 │   └── tauri.conf.json           # Tauri configuration
 │
-├── extensions/                   # Browser extension (in progress)
-│   └── chrome/
+├── extensions/                   # Browser extension
+│   ├── chrome/                   # Chrome extension files
+│   │   ├── manifest.json
+│   │   ├── src/
+│   │   │   ├── background.js
+│   │   │   ├── content.js
+│   │   │   └── popup/
+│   │   └── native-host/
+│   └── native-host/              # Native messaging host (Rust)
 │
 ├── VERSION                       # 4-digit version (MAJOR.MINOR.PATCH.MICRO)
 ├── CHANGELOG.md                  # Version history
@@ -85,7 +96,7 @@ PwdVault/
 
 ## 2. Current Status & Progress
 
-### Completed Features
+### Completed Features (2026-03-26)
 - [x] Tauri v2 desktop application with React frontend
 - [x] Vault initialization with master password
 - [x] Vault unlock/lock functionality
@@ -97,8 +108,10 @@ PwdVault/
 - [x] Unified API client (Tauri + HTTP)
 - [x] Platform-specific database paths
 - [x] Database lock conflict resolution
+- [x] Chrome extension skeleton
+- [x] Project pushed to GitHub (private repo)
 
-### Known Issues Fixed Today
+### Bugs Fixed Today
 1. **Rust cfg attribute bug**: `get_db_path()` was incorrectly structured - `.join("vault.db")` wasn't being executed. Fixed by wrapping cfg blocks in `let base_dir = {...}`.
 
 2. **Tauri state type mismatch**: Commands expected `State<AppState>` but `.manage()` stored `Arc<AppState>`. Fixed by updating all command signatures to `State<'_, Arc<AppState>>`.
@@ -115,7 +128,7 @@ PwdVault/
 
 ## 3. TODO / Backlog
 
-### High Priority
+### High Priority (Next Session)
 - [ ] Browser extension completion (Chrome/Firefox)
   - [ ] Popup UI for quick password access
   - [ ] Content script for auto-fill
@@ -159,7 +172,7 @@ PwdVault/
 
 ---
 
-## Development Commands
+## 5. Development Commands
 
 ```bash
 # Start development server (desktop app)
@@ -168,19 +181,52 @@ source ~/.cargo/env && pnpm tauri dev
 # Build production release
 pnpm tauri build
 
-# Run tests
+# Run Rust tests
 cd src-tauri && cargo test
 
 # Type check frontend
 pnpm tsc --noEmit
+
+# Git workflow
+git status
+git add -A
+git commit -m "feat: description"
+git push origin feature/phase1-crypto
 ```
 
 ---
 
-## Security Notes
+## 6. Security Notes
 
 - Master password is zeroized after key derivation
 - All sensitive data (passwords, notes) encrypted before database storage
 - Verification header stored to validate master password without revealing key
 - Nonces are randomly generated for each encryption operation
 - Database file is locked exclusively while open
+- `vault.db` is excluded from git tracking (user data)
+
+---
+
+## 7. Session Log
+
+### 2026-03-26 (Phase 1 - Crypto & Core)
+**Duration**: Full day
+**Commits**: 3 commits
+- `c0b00c2` - Initialize PwdVault
+- `3010745` - Add project configuration files
+- `cabb999` - Implement core password manager functionality
+
+**Lines Changed**: 12,075 additions, 205 deletions
+**Files**: 45 files
+
+**Key Achievements**:
+- Complete encryption system (AES-256-GCM + Argon2id)
+- Working desktop application
+- HTTP API for browser extension
+- All CRUD operations functional
+- Pushed to GitHub private repo
+
+**Next Session Focus**:
+- Browser extension popup UI
+- Auto-fill functionality
+- Clipboard integration
