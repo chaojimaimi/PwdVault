@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PwdVault Extension Test Page</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+      color: #e0e0e0;
+    }
+    .container {
+      max-width: 500px;
+      margin: 0 auto;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 10px;
+      color: #6366f1;
+    }
+    .subtitle {
+      text-align: center;
+      color: #888;
+      margin-bottom: 40px;
+    }
+    .test-section {
+      background: #1e1e2e;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      border: 1px solid #333;
+    }
+    .test-section h2 {
+      font-size: 18px;
+      margin-bottom: 16px;
+      color: #6366f1;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #888;
+    }
+    input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #333;
+      border-radius: 8px;
+      background: #262637;
+      color: #fff;
+      font-size: 14px;
+    }
+    input:focus {
+      outline: none;
+      border-color: #6366f1;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      background: #6366f1;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #4f46e5;
+    }
+    .info-box {
+      background: rgba(99, 102, 241, 0.1);
+      border: 1px solid #6366f1;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 24px;
+    }
+    .info-box h3 {
+      font-size: 14px;
+      margin-bottom: 8px;
+      color: #6366f1;
+    }
+    .info-box ul {
+      list-style: none;
+      font-size: 13px;
+      color: #888;
+    }
+    .info-box li {
+      margin-bottom: 4px;
+      padding-left: 16px;
+      position: relative;
+    }
+    .info-box li::before {
+      content: "→";
+      position: absolute;
+      left: 0;
+      color: #6366f1;
+    }
+    .result {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      display: none;
+    }
+    .result.success {
+      background: rgba(22, 163, 74, 0.1);
+      border: 1px solid #16a34a;
+      color: #4ade80;
+      display: block;
+    }
+    .result.error {
+      background: rgba(220, 38, 38, 0.1);
+      border: 1px solid #dc2626;
+      color: #f87171;
+      display: block;
+    }
+    .status-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .status-item {
+      background: #262637;
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+    .status-item .label {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 4px;
+    }
+    .status-item .value {
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .status-item .value.success { color: #4ade80; }
+    .status-item .value.error { color: #f87171; }
+    .status-item .value.pending { color: #fbbf24; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔐 PwdVault Test Page</h1>
+    <p class="subtitle">Test the browser extension auto-fill functionality</p>
+
+    <div class="info-box">
+      <h3>How to Test</h3>
+      <ul>
+        <li>Click the PwdVault extension icon in Chrome toolbar</li>
+        <li>Or use keyboard shortcut: Cmd+Shift+P (Mac) / Ctrl+Shift+P (Windows)</li>
+        <li>Look for the floating button near the password field below</li>
+        <li>Right-click on input fields for context menu options</li>
+      </ul>
+    </div>
+
+    <!-- API Status -->
+    <div class="test-section">
+      <h2>📡 API Status</h2>
+      <button id="check-status-btn">Check Server Status</button>
+      <div class="status-grid">
+        <div class="status-item">
+          <div class="label">Server</div>
+          <div class="value pending" id="server-status">Checking...</div>
+        </div>
+        <div class="status-item">
+          <div class="label">Vault</div>
+          <div class="value pending" id="vault-status">Checking...</div>
+        </div>
+      </div>
+      <div id="status-result" class="result"></div>
+    </div>
+
+    <!-- Login Form -->
+    <div class="test-section">
+      <h2>🔑 Login Form Test</h2>
+      <p style="font-size: 13px; color: #888; margin-bottom: 16px;">
+        This form simulates a typical login page. The extension should detect the password field.
+      </p>
+      <form id="login-form">
+        <div class="form-group">
+          <label for="username">Username or Email</label>
+          <input type="email" id="username" name="username" placeholder="Enter your email" autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" placeholder="Enter your password" autocomplete="current-password">
+        </div>
+        <button type="submit">Sign In</button>
+      </form>
+      <div id="form-result" class="result"></div>
+    </div>
+
+    <!-- Password Generator Test -->
+    <div class="test-section">
+      <h2>🎲 Password Generator Test</h2>
+      <div class="form-group">
+        <label for="generated-password">Generated Password</label>
+        <input type="text" id="generated-password" placeholder="Click button to generate" readonly>
+      </div>
+      <button id="generate-btn" type="button">Generate Password</button>
+      <div id="generate-result" class="result"></div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'http://127.0.0.1:17429/';
+
+    // Check server status
+    document.getElementById('check-status-btn').addEventListener('click', async () => {
+      const serverStatus = document.getElementById('server-status');
+      const vaultStatus = document.getElementById('vault-status');
+      const resultDiv = document.getElementById('status-result');
+
+      serverStatus.textContent = 'Checking...';
+      serverStatus.className = 'value pending';
+      vaultStatus.textContent = 'Checking...';
+      vaultStatus.className = 'value pending';
+
+      try {
+        // Check server
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: 1, command: 'is_vault_initialized' })
+        });
+        const data = await response.json();
+
+        serverStatus.textContent = 'Online';
+        serverStatus.className = 'value success';
+
+        // Check vault status
+        const unlockResponse = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: 2, command: 'is_vault_unlocked' })
+        });
+        const unlockData = await unlockResponse.json();
+
+        if (unlockData.data) {
+          vaultStatus.textContent = 'Unlocked';
+          vaultStatus.className = 'value success';
+        } else {
+          vaultStatus.textContent = 'Locked';
+          vaultStatus.className = 'value error';
+        }
+
+        resultDiv.textContent = '✅ Server is running and responding correctly';
+        resultDiv.className = 'result success';
+      } catch (error) {
+        serverStatus.textContent = 'Offline';
+        serverStatus.className = 'value error';
+        vaultStatus.textContent = 'Unknown';
+        vaultStatus.className = 'value error';
+        resultDiv.textContent = '❌ Cannot connect to PwdVault server. Is the desktop app running?';
+        resultDiv.className = 'result error';
+      }
+    });
+
+    // Login form submit
+    document.getElementById('login-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      const resultDiv = document.getElementById('form-result');
+
+      if (username && password) {
+        resultDiv.textContent = `✅ Login submitted!\nUsername: ${username}\nPassword: ${'*'.repeat(password.length)}`;
+        resultDiv.className = 'result success';
+      } else {
+        resultDiv.textContent = '❌ Please fill in both fields';
+        resultDiv.className = 'result error';
+      }
+    });
+
+    // Generate password
+    document.getElementById('generate-btn').addEventListener('click', async () => {
+      const input = document.getElementById('generated-password');
+      const resultDiv = document.getElementById('generate-result');
+
+      try {
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: 1,
+            command: 'generate_password',
+            options: { length: 20 }
+          })
+        });
+        const data = await response.json();
+
+        if (data.success) {
+          input.value = data.data;
+          resultDiv.textContent = '✅ Password generated successfully!';
+          resultDiv.className = 'result success';
+        } else {
+          resultDiv.textContent = `❌ Error: ${data.error}`;
+          resultDiv.className = 'result error';
+        }
+      } catch (error) {
+        resultDiv.textContent = '❌ Cannot connect to server';
+        resultDiv.className = 'result error';
+      }
+    });
+
+    // Auto-check status on load
+    setTimeout(() => {
+      document.getElementById('check-status-btn').click();
+    }, 500);
+  </script>
+</body>
+</html>

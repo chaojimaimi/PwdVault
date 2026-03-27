@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "PwdVault",
-  "version": "0.0.1.0",
-  "identifier": "com.pwdvault.app",
+  "version": "0.0.1",
+  "identifier": "com.pwdvault.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
