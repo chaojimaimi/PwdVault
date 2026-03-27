@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { generatePassword } from '../api/vault';
+import { getPasswordStrength } from '../utils/passwordStrength';
+import { copyWithTimeout } from '../utils/clipboard';
+import { showToast } from '../utils/toast';
 import type { CreateEntryRequest } from '../types';
 
 export function EntryScreen() {
@@ -22,6 +25,7 @@ export function EntryScreen() {
   const [tagInput, setTagInput] = useState('');
   const [showGenerator, setShowGenerator] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState('');
+  const strength = getPasswordStrength(formData.password);
 
   useEffect(() => {
     if (state.selectedEntry) {
@@ -112,8 +116,9 @@ export function EntryScreen() {
     setGeneratedPassword('');
   };
 
-  const handleCopyPassword = () => {
-    navigator.clipboard.writeText(formData.password);
+  const handleCopyPassword = async () => {
+    await copyWithTimeout(formData.password);
+    showToast('Password copied (auto-clears in 30s)');
   };
 
   if (showGenerator) {
@@ -230,6 +235,17 @@ export function EntryScreen() {
               </svg>
             </button>
           </div>
+          {formData.password && (
+            <div className="strength-meter">
+              <div
+                className="strength-bar"
+                style={{ width: `${strength.score}%`, backgroundColor: strength.color }}
+              />
+              <span className="strength-label" style={{ color: strength.color }}>
+                {strength.label}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="form-group">

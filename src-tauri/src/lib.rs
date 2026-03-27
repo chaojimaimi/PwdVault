@@ -9,7 +9,11 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::TrayIconBuilder,
+    Manager, State,
+};
 use zeroize::Zeroize;
 
 use crypto::{
@@ -509,7 +513,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(state.clone())
-        .setup(move |_app| {
+        .setup(move |app| {
             // Start native messaging server in background thread
             let state_for_server = state.clone();
 
@@ -518,6 +522,66 @@ pub fn run() {
                     eprintln!("Failed to start native messaging server: {}", e);
                 }
             });
+
+            // Build system tray menu
+            let show_i = MenuItem::with_id(app, "show", "Show PwdVault", true, None::<&str>)?;
+            let lock_i = MenuItem::with_id(app, "lock", "Lock Vault", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_i, &lock_i, &quit_i])?;
+
+            // Create tray icon
+            let tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .tooltip("PwdVault")
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "lock" => {
+                        clear_key();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = window.eval("window.location.reload()");
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // Prevent the window from being destroyed on close — hide to tray instead
+            if let Some(window) = app.get_webview_window("main") {
+                let tray_handle = tray.clone();
+                let win = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = win.hide();
+                        let _ = &tray_handle;
+                    }
+                });
+            }
 
             Ok(())
         })

@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { generatePassword } from '../api/vault';
+import { getPasswordStrength } from '../utils/passwordStrength';
+import { copyWithTimeout } from '../utils/clipboard';
+import { showToast } from '../utils/toast';
 import type { PasswordGeneratorOptions } from '../types';
 
 export function GeneratorScreen() {
@@ -29,9 +32,10 @@ export function GeneratorScreen() {
     }
   };
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(password);
+  const handleCopy = async () => {
+    await copyWithTimeout(password);
     setCopied(true);
+    showToast('Password copied (auto-clears in 30s)');
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -59,6 +63,20 @@ export function GeneratorScreen() {
         <div className="password-preview">
           {password || 'Generating...'}
         </div>
+        {password && (() => {
+          const strength = getPasswordStrength(password);
+          return (
+            <div className="strength-meter">
+              <div
+                className="strength-bar"
+                style={{ width: `${strength.score}%`, backgroundColor: strength.color }}
+              />
+              <span className="strength-label" style={{ color: strength.color }}>
+                {strength.label}
+              </span>
+            </div>
+          );
+        })()}
 
         <div className="option-group">
           <div className="option-row">

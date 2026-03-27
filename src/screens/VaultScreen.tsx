@@ -1,5 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { copyWithTimeout } from '../utils/clipboard';
+import { showToast } from '../utils/toast';
 import type { EntrySummary } from '../types';
 
 function getInitials(title: string): string {
@@ -8,6 +10,7 @@ function getInitials(title: string): string {
 
 export function VaultScreen() {
   const { state, actions } = useApp();
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (state.isUnlocked) {
@@ -28,6 +31,24 @@ export function VaultScreen() {
   const handleEntryClick = async (entry: EntrySummary) => {
     await actions.selectEntry(entry.id);
     actions.navigate('entry');
+  };
+
+  const handleCopyUsername = async (e: React.MouseEvent, username: string) => {
+    e.stopPropagation();
+    await copyWithTimeout(username);
+    showToast('Username copied');
+  };
+
+  const handleCopyPassword = async (e: React.MouseEvent, entry: EntrySummary) => {
+    e.stopPropagation();
+    // Need to get full entry with password
+    const fullEntry = await actions.getEntry(entry.id);
+    if (fullEntry?.password) {
+      await copyWithTimeout(fullEntry.password);
+      setCopiedId(entry.id);
+      showToast('Password copied (auto-clears in 30s)');
+      setTimeout(() => setCopiedId(null), 2000);
+    }
   };
 
   const handleAddClick = () => {
@@ -95,6 +116,28 @@ export function VaultScreen() {
               <div className="entry-info">
                 <h3>{entry.title}</h3>
                 <p>{entry.username}</p>
+              </div>
+              <div className="entry-actions-inline">
+                <button
+                  className="btn btn-icon btn-copy"
+                  onClick={(e) => handleCopyUsername(e, entry.username)}
+                  title="Copy username"
+                >
+                  <svg className="icon icon-small" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
+                </button>
+                <button
+                  className={`btn btn-icon btn-copy ${copiedId === entry.id ? 'copied' : ''}`}
+                  onClick={(e) => handleCopyPassword(e, entry)}
+                  title={copiedId === entry.id ? 'Copied!' : 'Copy password'}
+                >
+                  <svg className="icon icon-small" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
+                </button>
               </div>
             </div>
           ))

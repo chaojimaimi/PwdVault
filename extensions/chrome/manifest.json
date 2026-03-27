@@ -6,12 +6,12 @@
   "permissions": [
     "activeTab",
     "storage",
-    "nativeMessaging",
     "contextMenus",
     "clipboardWrite"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "http://127.0.0.1:17429/*"
   ],
   "background": {
     "service_worker": "src/background.js",

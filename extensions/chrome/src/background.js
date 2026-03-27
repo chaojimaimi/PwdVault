@@ -1,83 +1,50 @@
 // PwdVault Background Service Worker
-// Handles communication between content scripts, popup, and native app
+// Handles communication between content scripts, popup, and desktop app via HTTP API
 
-const NATIVE_HOST_NAME = 'com.pwdvault.app';
-const PORT_KEY = 'pwdvault_port';
+const API_BASE = 'http://127.0.0.1:17429';
 
-let nativePort = null;
 let connectionStatus = 'disconnected';
-let pendingRequests = new Map();
 let requestId = 0;
 
 // ============================================================================
-// Native Messaging
+// HTTP API Communication
 // ============================================================================
 
-function connectToNativeApp() {
-  if (nativePort) {
-    return nativePort;
-  }
+async function sendToApp(command, params = {}) {
+  const id = ++requestId;
 
   try {
-    nativePort = chrome.runtime.connectNative(NATIVE_HOST_NAME);
-
-    nativePort.onMessage.addListener((response) => {
-      const { id, success, data, error } = response;
-
-      if (pendingRequests.has(id)) {
-        const { resolve, reject } = pendingRequests.get(id);
-        pendingRequests.delete(id);
-
-        if (success) {
-          resolve(data);
-        } else {
-          reject(new Error(error || 'Unknown error'));
-        }
-      }
+    const response = await fetch(`${API_BASE}/api/${command}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, command, ...params }),
     });
 
-    nativePort.onDisconnect.addListener(() => {
-      nativePort = null;
-      connectionStatus = 'disconnected';
-      console.log('Disconnected from native app');
+    const data = await response.json();
 
-      // Reject all pending requests
-      for (const [id, { reject }] of pendingRequests) {
-        reject(new Error('Connection lost'));
-      }
-      pendingRequests.clear();
-    });
-
-    connectionStatus = 'connected';
-    console.log('Connected to native app');
-    return nativePort;
+    if (data.success) {
+      connectionStatus = 'connected';
+      return data.data;
+    } else {
+      throw new Error(data.error || 'Unknown error');
+    }
   } catch (error) {
-    connectionStatus = 'disconnected';
-    console.error('Failed to connect to native app:', error);
-    return null;
+    if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+      connectionStatus = 'disconnected';
+      throw new Error('Cannot connect to PwdVault desktop app. Is it running?');
+    }
+    throw error;
   }
 }
 
-function sendToNativeApp(command, params = {}) {
-  return new Promise((resolve, reject) => {
-    if (!nativePort && !connectToNativeApp()) {
-      reject(new Error('Cannot connect to native app'));
-      return;
-    }
-
-    const id = ++requestId;
-    pendingRequests.set(id, { resolve, reject });
-
-    nativePort.postMessage({ id, command, ...params });
-
-    // Timeout after 10 seconds
-    setTimeout(() => {
-      if (pendingRequests.has(id)) {
-        pendingRequests.delete(id);
-        reject(new Error('Request timeout'));
-      }
-    }, 10000);
-  });
+async function checkConnection() {
+  try {
+    await sendToApp('is_vault_initialized');
+    connectionStatus = 'connected';
+  } catch {
+    connectionStatus = 'disconnected';
+  }
+  return connectionStatus;
 }
 
 // ============================================================================
@@ -85,42 +52,42 @@ function sendToNativeApp(command, params = {}) {
 // ============================================================================
 
 async function isVaultInitialized() {
-  return sendToNativeApp('is_vault_initialized');
+  return sendToApp('is_vault_initialized');
 }
 
 async function isVaultUnlocked() {
-  return sendToNativeApp('is_vault_unlocked');
+  return sendToApp('is_vault_unlocked');
 }
 
 async function initVault(password) {
-  return sendToNativeApp('init_vault', { password });
+  return sendToApp('init_vault', { password });
 }
 
 async function unlockVault(password) {
-  return sendToNativeApp('unlock_vault', { password });
+  return sendToApp('unlock_vault', { password });
 }
 
 async function lockVault() {
-  return sendToNativeApp('lock_vault');
+  return sendToApp('lock_vault');
 }
 
 async function createEntry(entry) {
-  return sendToNativeApp('create_entry', {
+  return sendToApp('create_entry', {
     title: entry.title,
     url: entry.url,
     username: entry.username,
     password: entry.password,
     notes: entry.notes,
-    tags: entry.tags || []
+    tags: entry.tags || [],
   });
 }
 
 async function getEntries() {
-  return sendToNativeApp('list_all_entries');
+  return sendToApp('list_all_entries');
 }
 
 async function getEntry(id) {
-  return sendToNativeApp('get_entry', { id_param: id });
+  return sendToApp('get_entry', { id_param: id });
 }
 
 async function getEntriesForUrl(url) {
@@ -140,12 +107,14 @@ async function getEntriesForUrl(url) {
 }
 
 async function generatePassword(options = {}) {
-  return sendToNativeApp('generate_password', {
-    length: options.length || 16,
-    include_uppercase: options.uppercase !== false,
-    include_lowercase: options.lowercase !== false,
-    include_numbers: options.numbers !== false,
-    include_symbols: options.symbols !== false,
+  return sendToApp('generate_password', {
+    options: {
+      length: options.length || 16,
+      include_uppercase: options.uppercase !== false,
+      include_lowercase: options.lowercase !== false,
+      include_numbers: options.numbers !== false,
+      include_symbols: options.symbols !== false,
+    },
   });
 }
 
@@ -204,7 +173,7 @@ async function handleMessage(message, sender) {
   switch (message.type) {
     case 'GET_STATUS':
       return {
-        status: connectionStatus,
+        status: await checkConnection(),
         initialized: await isVaultInitialized().catch(() => false),
         unlocked: await isVaultUnlocked().catch(() => false),
       };
@@ -245,8 +214,7 @@ async function handleMessage(message, sender) {
       return { success: true };
 
     case 'CONNECT':
-      connectToNativeApp();
-      return { status: connectionStatus };
+      return { status: await checkConnection() };
 
     default:
       throw new Error(`Unknown message type: ${message.type}`);
@@ -282,18 +250,15 @@ chrome.commands.onCommand.addListener(async (command) => {
 // Initialization
 // ============================================================================
 
-// Setup on install
 chrome.runtime.onInstalled.addListener(() => {
   setupContextMenu();
-  connectToNativeApp();
+  checkConnection();
 });
 
-// Setup on startup
 chrome.runtime.onStartup.addListener(() => {
   setupContextMenu();
-  connectToNativeApp();
+  checkConnection();
 });
 
-// Initial connection
 setupContextMenu();
-connectToNativeApp();
+checkConnection();

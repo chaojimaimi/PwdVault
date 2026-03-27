@@ -78,6 +78,7 @@ interface AppContextValue {
     lock: () => void;
     loadEntries: () => Promise<void>;
     selectEntry: (id: string | null) => Promise<void>;
+    getEntry: (id: string) => Promise<EntryResponse | null>;
     createEntry: (data: Parameters<typeof api.createEntry>[0]) => Promise<EntrySummary>;
     updateEntry: (id: string, data: Parameters<typeof api.updateEntry>[1]) => Promise<EntrySummary>;
     deleteEntry: (id: string) => Promise<void>;
@@ -167,6 +168,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'SET_SELECTED_ENTRY', payload: entry });
       } catch (error) {
         dispatch({ type: 'SET_ERROR', payload: formatError(error) });
+      }
+    },
+
+    getEntry: async (id: string) => {
+      try {
+        return await api.getEntry(id);
+      } catch {
+        return null;
       }
     },
 

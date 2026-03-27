@@ -463,6 +463,81 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             Ok(serde_json::json!(password))
         }
 
+        "update_entry" => {
+            if !crypto::is_unlocked() {
+                return Err("Vault locked".to_string());
+            }
+
+            let id = req.id_param.ok_or("Entry ID required")?;
+            let title = req.title.ok_or("Title required")?;
+            let username = req.username.ok_or("Username required")?;
+            let password = req.password.ok_or("Password required")?;
+
+            let db_guard = state.database.lock().unwrap();
+            let db = db_guard.as_ref().ok_or("Database not initialized")?;
+            let key = crypto::get_key().map_err(|e| e.to_string())?;
+
+            let mut entry = database::load_entry(db, &id)
+                .map_err(|e| e.to_string())?
+                .ok_or("Entry not found")?;
+
+            entry.title = title;
+            entry.url = req.url;
+            entry.username = username;
+            entry.tags = req.tags.unwrap_or_default();
+            entry.updated_at = chrono::Utc::now().timestamp();
+
+            let encrypted_password = crypto::encrypt(&key, password.as_bytes())
+                .map_err(|e| e.to_string())?;
+            entry.encrypted_password = bincode::serialize(&encrypted_password)
+                .map_err(|e| e.to_string())?;
+
+            entry.encrypted_notes = if let Some(notes) = &req.notes {
+                let encrypted = crypto::encrypt(&key, notes.as_bytes())
+                    .map_err(|e| e.to_string())?;
+                Some(bincode::serialize(&encrypted).map_err(|e| e.to_string())?)
+            } else {
+                None
+            };
+
+            database::save_entry(db, &entry).map_err(|e| e.to_string())?;
+
+            Ok(serde_json::json!({
+                "id": entry.id,
+                "title": entry.title,
+                "url": entry.url,
+                "username": entry.username,
+                "tags": entry.tags,
+                "created_at": entry.created_at,
+                "updated_at": entry.updated_at,
+            }))
+        }
+
+        "remove_entry" => {
+            if !crypto::is_unlocked() {
+                return Err("Vault locked".to_string());
+            }
+
+            let id = req.id_param.ok_or("Entry ID required")?;
+            let db_guard = state.database.lock().unwrap();
+            let db = db_guard.as_ref().ok_or("Database not initialized")?;
+
+            let existed = database::delete_entry(db, &id).map_err(|e| e.to_string())?;
+            Ok(serde_json::json!(existed))
+        }
+
+        "get_entry_count" => {
+            if !crypto::is_unlocked() {
+                return Err("Vault locked".to_string());
+            }
+
+            let db_guard = state.database.lock().unwrap();
+            let db = db_guard.as_ref().ok_or("Database not initialized")?;
+
+            let count = database::count_entries(db).map_err(|e| e.to_string())?;
+            Ok(serde_json::json!(count))
+        }
+
         _ => Err(format!("Unknown command: {}", req.command))
     }
 }
