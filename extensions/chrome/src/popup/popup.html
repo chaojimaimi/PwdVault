@@ -647,6 +647,54 @@
     .no-results p {
       font-size: 14px;
     }
+
+    /* Create Form */
+    .create-form {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .password-input-group {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .password-input-group .form-input {
+      flex: 1;
+    }
+
+    .icon-btn-sm {
+      width: 32px;
+      height: 38px;
+      border: 1px solid #333;
+      border-radius: 8px;
+      background: #262637;
+      color: #888;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+
+    .icon-btn-sm:hover {
+      background: #333;
+      color: #a78bfa;
+      border-color: #7c3aed;
+    }
+
+    .icon-btn-sm svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .form-textarea {
+      resize: vertical;
+      min-height: 48px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
   </style>
 </head>
 <body>

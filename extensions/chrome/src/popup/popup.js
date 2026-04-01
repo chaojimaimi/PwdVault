@@ -223,6 +223,10 @@ class PopupApp {
         app.innerHTML = this.renderMain();
         this.attachMainEvents();
         break;
+      case 'creating':
+        app.innerHTML = this.renderCreateForm();
+        this.attachCreateFormEvents();
+        break;
       case 'disconnected':
         app.innerHTML = this.renderDisconnected();
         this.attachDisconnectedEvents();
@@ -287,6 +291,12 @@ class PopupApp {
           <h1>PwdVault</h1>
         </div>
         <div class="header-actions">
+          <button class="icon-btn" id="add-btn" title="Add Password">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+          </button>
           <button class="icon-btn" id="generator-btn" title="Generate Password">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
@@ -329,6 +339,67 @@ class PopupApp {
           </svg>
           <span>${entries.length} password${entries.length !== 1 ? 's' : ''}</span>
         </div>
+      </div>
+    `;
+  }
+
+  renderCreateForm() {
+    return `
+      <div class="header">
+        <div class="header-brand">
+          <button class="icon-btn" id="back-btn" title="Back">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+          </button>
+          <h1>New Password</h1>
+        </div>
+      </div>
+
+      <div class="content">
+        ${this.state.error ? `<div class="error-message">${this.escapeHtml(this.state.error)}</div>` : ''}
+
+        <form id="create-form" class="create-form">
+          <div class="form-group">
+            <label for="entry-title">Title *</label>
+            <input type="text" id="entry-title" class="form-input" placeholder="e.g. GitHub" required autofocus />
+          </div>
+
+          <div class="form-group">
+            <label for="entry-username">Username / Email *</label>
+            <input type="text" id="entry-username" class="form-input" placeholder="e.g. user@example.com" required />
+          </div>
+
+          <div class="form-group">
+            <label for="entry-password">Password *</label>
+            <div class="password-input-group">
+              <input type="password" id="entry-password" class="form-input" placeholder="Enter password" required />
+              <button type="button" class="icon-btn-sm" id="toggle-pw-visibility" title="Show/Hide">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              </button>
+              <button type="button" class="icon-btn-sm" id="gen-pw-btn" title="Generate Password">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="entry-url">Website URL</label>
+            <input type="text" id="entry-url" class="form-input" placeholder="e.g. https://github.com" />
+          </div>
+
+          <div class="form-group">
+            <label for="entry-notes">Notes</label>
+            <textarea id="entry-notes" class="form-input form-textarea" placeholder="Optional notes..." rows="2"></textarea>
+          </div>
+
+          <button type="submit" class="btn btn-primary" style="width:100%;margin-top:12px;">Save Password</button>
+        </form>
       </div>
     `;
   }
@@ -455,7 +526,7 @@ class PopupApp {
           </svg>
         </div>
         <h3>No passwords yet</h3>
-        <p>Add passwords using the desktop app</p>
+        <p>Click + to add a new password</p>
       </div>
     `;
   }
@@ -535,6 +606,16 @@ class PopupApp {
       };
     }
 
+    // Add button
+    const addBtn = document.getElementById('add-btn');
+    if (addBtn) {
+      addBtn.onclick = () => {
+        this.state.status = 'creating';
+        this.state.error = null;
+        this.render();
+      };
+    }
+
     // Lock button
     const lockBtn = document.getElementById('lock-btn');
     if (lockBtn) {
@@ -554,6 +635,97 @@ class PopupApp {
     const retryBtn = document.getElementById('retry-btn');
     if (retryBtn) {
       retryBtn.onclick = () => this.init();
+    }
+  }
+
+  attachCreateFormEvents() {
+    // Back button
+    const backBtn = document.getElementById('back-btn');
+    if (backBtn) {
+      backBtn.onclick = () => {
+        this.state.status = 'unlocked';
+        this.state.error = null;
+        this.render();
+      };
+    }
+
+    // Toggle password visibility
+    const togglePwBtn = document.getElementById('toggle-pw-visibility');
+    if (togglePwBtn) {
+      togglePwBtn.onclick = () => {
+        const pwInput = document.getElementById('entry-password');
+        pwInput.type = pwInput.type === 'password' ? 'text' : 'password';
+      };
+    }
+
+    // Generate password
+    const genPwBtn = document.getElementById('gen-pw-btn');
+    if (genPwBtn) {
+      genPwBtn.onclick = async () => {
+        try {
+          const password = await this.sendMessage({
+            type: 'GENERATE_PASSWORD',
+            options: { length: 20 }
+          });
+          if (password) {
+            const pwInput = document.getElementById('entry-password');
+            pwInput.value = password;
+            pwInput.type = 'text';
+          }
+        } catch {
+          this.showToast('Failed to generate password');
+        }
+      };
+    }
+
+    // Submit form
+    const form = document.getElementById('create-form');
+    if (form) {
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+
+        const title = document.getElementById('entry-title').value.trim();
+        const username = document.getElementById('entry-username').value.trim();
+        const password = document.getElementById('entry-password').value;
+        const url = document.getElementById('entry-url').value.trim();
+        const notes = document.getElementById('entry-notes').value.trim();
+
+        if (!title || !username || !password) {
+          this.state.error = 'Title, username, and password are required';
+          this.render();
+          return;
+        }
+
+        try {
+          const result = await this.sendMessage({
+            type: 'CREATE_ENTRY',
+            entry: {
+              title,
+              username,
+              password,
+              url: url || null,
+              notes: notes || null,
+              tags: [],
+            },
+          });
+
+          if (result && result.error) {
+            this.state.error = result.error;
+            this.render();
+            return;
+          }
+
+          // Success — go back to main view and reload entries
+          this.state.status = 'unlocked';
+          this.state.error = null;
+          await this.loadEntries();
+          this.render();
+          this.showToast('Password saved!');
+        } catch (error) {
+          this.state.error = error.message;
+          this.render();
+        }
+      };
     }
   }
 

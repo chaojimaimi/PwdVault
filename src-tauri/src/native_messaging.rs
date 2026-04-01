@@ -3,7 +3,6 @@
 //! Provides an HTTP server for browser extension communication.
 
 use std::sync::Arc;
-use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use tiny_http::{Request, Response, Server};
@@ -11,48 +10,7 @@ use tiny_http::{Request, Response, Server};
 use crate::AppState;
 use crate::crypto;
 use crate::database;
-
-/// Get the database file path (same as Tauri app)
-fn get_db_path() -> PathBuf {
-    // Use platform-specific app data directory
-    let base_dir = {
-        #[cfg(target_os = "macos")]
-        {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| std::env::current_dir().unwrap())
-                .join("com.pwdvault.app")
-        }
-        #[cfg(target_os = "windows")]
-        {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| std::env::current_dir().unwrap())
-                .join("PwdVault")
-        }
-        #[cfg(target_os = "linux")]
-        {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| std::env::current_dir().unwrap())
-                .join("pwdvault")
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-        {
-            std::env::current_dir().unwrap()
-        }
-    };
-    base_dir.join("vault.db")
-}
-
-/// Ensure database directory exists
-fn ensure_db_dir() -> Result<PathBuf, String> {
-    let db_path = get_db_path();
-    eprintln!("[DEBUG NM] Database path: {:?}", db_path);
-    if let Some(parent) = db_path.parent() {
-        eprintln!("[DEBUG NM] Parent directory: {:?}", parent);
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
-    }
-    Ok(db_path)
-}
+use crate::paths;
 
 /// Native messaging request
 #[derive(Debug, Deserialize)]
@@ -125,13 +83,13 @@ pub fn start_server(port: u16, state: Arc<AppState>) -> Result<(), String> {
 
 fn add_cors_headers(response: &mut Response<std::io::Cursor<Vec<u8>>>) {
     response.add_header(
-        tiny_http::Header::from_bytes("Access-Control-Allow-Origin".as_bytes(), "*".as_bytes()).unwrap()
+        tiny_http::Header::from_bytes("Access-Control-Allow-Origin".as_bytes(), "*".as_bytes()).expect("valid CORS header")
     );
     response.add_header(
-        tiny_http::Header::from_bytes("Access-Control-Allow-Methods".as_bytes(), "POST, OPTIONS".as_bytes()).unwrap()
+        tiny_http::Header::from_bytes("Access-Control-Allow-Methods".as_bytes(), "POST, OPTIONS".as_bytes()).expect("valid CORS header")
     );
     response.add_header(
-        tiny_http::Header::from_bytes("Access-Control-Allow-Headers".as_bytes(), "Content-Type".as_bytes()).unwrap()
+        tiny_http::Header::from_bytes("Access-Control-Allow-Headers".as_bytes(), "Content-Type".as_bytes()).expect("valid CORS header")
     );
 }
 
@@ -140,13 +98,13 @@ fn handle_request(mut request: Request, state: Arc<AppState>) {
     if request.method() == &tiny_http::Method::Options {
         let response = Response::empty(204)
             .with_header(
-                tiny_http::Header::from_bytes("Access-Control-Allow-Origin".as_bytes(), "*".as_bytes()).unwrap()
+                tiny_http::Header::from_bytes("Access-Control-Allow-Origin".as_bytes(), "*".as_bytes()).expect("valid CORS header")
             )
             .with_header(
-                tiny_http::Header::from_bytes("Access-Control-Allow-Methods".as_bytes(), "POST, OPTIONS".as_bytes()).unwrap()
+                tiny_http::Header::from_bytes("Access-Control-Allow-Methods".as_bytes(), "POST, OPTIONS".as_bytes()).expect("valid CORS header")
             )
             .with_header(
-                tiny_http::Header::from_bytes("Access-Control-Allow-Headers".as_bytes(), "Content-Type".as_bytes()).unwrap()
+                tiny_http::Header::from_bytes("Access-Control-Allow-Headers".as_bytes(), "Content-Type".as_bytes()).expect("valid CORS header")
             );
         let _ = request.respond(response);
         return;
@@ -198,7 +156,7 @@ fn create_json_response(response: &NativeResponse) -> Response<std::io::Cursor<V
     let body = serde_json::to_vec(response).unwrap_or_default();
     let mut response = Response::from_data(body)
         .with_header(
-            tiny_http::Header::from_bytes("Content-Type".as_bytes(), "application/json".as_bytes()).unwrap()
+            tiny_http::Header::from_bytes("Content-Type".as_bytes(), "application/json".as_bytes()).expect("valid Content-Type header")
         );
     add_cors_headers(&mut response);
     response
@@ -217,7 +175,7 @@ fn create_error_response(id: u32, error: String) -> Response<std::io::Cursor<Vec
 fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_json::Value, String> {
     match req.command.as_str() {
         "is_vault_initialized" => {
-            let initialized = state.verification_data.lock().unwrap().is_some();
+            let initialized = state.verification_data.lock().expect("verification lock poisoned").is_some();
             Ok(serde_json::json!(initialized))
         }
 
@@ -228,13 +186,13 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
         "setup_vault" => {
             // Check if database is already loaded in state
             {
-                let db_guard = state.database.lock().unwrap();
-                if db_guard.is_some() && state.verification_data.lock().unwrap().is_some() {
+                let db_guard = state.database.lock().expect("db lock poisoned");
+                if db_guard.is_some() && state.verification_data.lock().expect("verification lock poisoned").is_some() {
                     return Ok(serde_json::json!(true));
                 }
             }
 
-            let db_path = get_db_path();
+            let db_path = paths::get_db_path();
 
             if !db_path.exists() {
                 return Ok(serde_json::json!(false));
@@ -247,8 +205,8 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let verification_data = database::load_verification_data(&db).map_err(|e| e.to_string())?;
 
             if let Some(data) = verification_data {
-                *state.verification_data.lock().unwrap() = Some(data);
-                *state.database.lock().unwrap() = Some(db);
+                *state.verification_data.lock().expect("verification lock poisoned") = Some(data);
+                *state.database.lock().expect("db lock poisoned") = Some(db);
                 return Ok(serde_json::json!(true));
             }
 
@@ -259,7 +217,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let password = req.password.ok_or("Password required")?;
 
             // Check if already initialized
-            if state.verification_data.lock().unwrap().is_some() {
+            if state.verification_data.lock().expect("verification lock poisoned").is_some() {
                 return Err("Vault already initialized".to_string());
             }
 
@@ -272,25 +230,18 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let verification_data = crypto::create_verification_header(&key, salt, params)
                 .map_err(|e| e.to_string())?;
 
-            // Initialize database with consistent path
-            let db_path = ensure_db_dir()?;
-            eprintln!("[DEBUG] About to init database at: {:?}", db_path);
-            eprintln!("[DEBUG] Path exists: {}", db_path.exists());
-            if db_path.exists() {
-                eprintln!("[DEBUG] Is directory: {}", db_path.is_dir());
-            }
-            let db = database::init_database(&db_path).map_err(|e| {
-                eprintln!("[DEBUG] Database init error: {}", e);
-                e.to_string()
-            })?;
+            // Initialize database
+            let db_path = paths::ensure_db_dir().map_err(|e| e.to_string())?;
+            let db = database::init_database(&db_path)
+                .map_err(|e| e.to_string())?;
 
             // Save verification data
             database::save_verification_data(&db, &verification_data)
                 .map_err(|e| e.to_string())?;
 
             // Update state
-            *state.verification_data.lock().unwrap() = Some(verification_data);
-            *state.database.lock().unwrap() = Some(std::sync::Arc::new(db));
+            *state.verification_data.lock().expect("verification lock poisoned") = Some(verification_data);
+            *state.database.lock().expect("db lock poisoned") = Some(std::sync::Arc::new(db));
 
             // Set key in memory
             crypto::set_key(key).map_err(|e| e.to_string())?;
@@ -300,15 +251,20 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
 
         "unlock_vault" => {
             let password = req.password.ok_or("Password required")?;
-            let verification_data = state.verification_data.lock().unwrap();
+            let verification_data = state.verification_data.lock().expect("verification lock poisoned");
             let data = verification_data.as_ref().ok_or("Vault not initialized")?;
             let success = crypto::unlock_with_password(&password, data)
                 .map_err(|e| e.to_string())?;
+            if success {
+                state.touch_activity();
+                state.update_lock_menu("Lock Vault");
+            }
             Ok(serde_json::json!(success))
         }
 
         "lock_vault" => {
-            crypto::clear_key();
+            state.lock_vault();
+            state.update_lock_menu("Unlock Vault");
             Ok(serde_json::json!(null))
         }
 
@@ -321,7 +277,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let username = req.username.ok_or("Username required")?;
             let password = req.password.ok_or("Password required")?;
 
-            let db_guard = state.database.lock().unwrap();
+            let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
             let key = crypto::get_key().map_err(|e| e.to_string())?;
@@ -348,6 +304,8 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
 
             database::save_entry(db, &entry).map_err(|e| e.to_string())?;
 
+            state.touch_activity();
+
             Ok(serde_json::json!({
                 "id": entry.id,
                 "title": entry.title,
@@ -364,7 +322,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                 return Err("Vault locked".to_string());
             }
 
-            let db_guard = state.database.lock().unwrap();
+            let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
             let ids = database::list_entries(db).map_err(|e| e.to_string())?;
@@ -372,9 +330,11 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
 
             for id in ids {
                 if let Some(entry) = database::load_entry(db, &id).map_err(|e| e.to_string())? {
-                    entries.push(serde_json::to_value(entry).unwrap());
+                    entries.push(serde_json::to_value(entry).expect("entry serializable"));
                 }
             }
+
+            state.touch_activity();
 
             Ok(serde_json::json!(entries))
         }
@@ -385,7 +345,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             }
 
             let id = req.id_param.ok_or("Entry ID required")?;
-            let db_guard = state.database.lock().unwrap();
+            let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
             let entry = database::load_entry(db, &id)
@@ -408,6 +368,8 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             } else {
                 None
             };
+
+            state.touch_activity();
 
             Ok(serde_json::json!({
                 "id": entry.id,
@@ -473,7 +435,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let username = req.username.ok_or("Username required")?;
             let password = req.password.ok_or("Password required")?;
 
-            let db_guard = state.database.lock().unwrap();
+            let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
             let key = crypto::get_key().map_err(|e| e.to_string())?;
 
@@ -502,6 +464,8 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
 
             database::save_entry(db, &entry).map_err(|e| e.to_string())?;
 
+            state.touch_activity();
+
             Ok(serde_json::json!({
                 "id": entry.id,
                 "title": entry.title,
@@ -519,10 +483,13 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             }
 
             let id = req.id_param.ok_or("Entry ID required")?;
-            let db_guard = state.database.lock().unwrap();
+            let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
             let existed = database::delete_entry(db, &id).map_err(|e| e.to_string())?;
+
+            state.touch_activity();
+
             Ok(serde_json::json!(existed))
         }
 
@@ -531,13 +498,489 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                 return Err("Vault locked".to_string());
             }
 
-            let db_guard = state.database.lock().unwrap();
+            let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
             let count = database::count_entries(db).map_err(|e| e.to_string())?;
+
+            state.touch_activity();
+
             Ok(serde_json::json!(count))
         }
 
         _ => Err(format!("Unknown command: {}", req.command))
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto;
+    use tempfile::TempDir;
+
+    /// Helper: create a test AppState with a temp database
+    fn setup_test_state() -> (Arc<AppState>, TempDir) {
+        crypto::clear_key();
+
+        let temp = TempDir::new().expect("create temp dir");
+        let db_path = temp.path().join("test_vault.db");
+        let db = Arc::new(database::init_database(&db_path).expect("init db"));
+
+        let state = Arc::new(AppState::default());
+        *state.database.lock().expect("db lock") = Some(db);
+        (state, temp)
+    }
+
+    /// Helper: initialize vault with a password in the given state
+    fn init_test_vault(state: &Arc<AppState>, password: &str) {
+        // Clear any leftover key from parallel tests sharing global keystore
+        crypto::clear_key();
+
+        let salt = crypto::kdf::generate_salt();
+        let (key, params) = crypto::kdf::derive_key(password, &salt).expect("derive key");
+        let verification = crypto::create_verification_header(&key, salt.clone(), params).expect("create verification");
+
+        let db = state.database.lock().expect("db lock").clone().expect("db exists");
+        database::save_verification_data(&db, &verification).expect("save verification");
+
+        *state.verification_data.lock().expect("v lock") = Some(verification);
+        crypto::set_key(key).expect("set key");
+        state.touch_activity();
+    }
+
+    fn make_request(command: &str, id: u32) -> NativeRequest {
+        NativeRequest {
+            id,
+            command: command.to_string(),
+            password: None,
+            url: None,
+            id_param: None,
+            title: None,
+            username: None,
+            notes: None,
+            tags: None,
+            request: None,
+            options: None,
+        }
+    }
+
+    // ---- is_vault_initialized ----
+
+    #[test]
+    fn test_is_vault_initialized_false() {
+        let (state, _temp) = setup_test_state();
+        let req = make_request("is_vault_initialized", 1);
+        let result = execute_command(req, state).unwrap();
+        assert_eq!(result, serde_json::json!(false));
+    }
+
+    #[test]
+    fn test_is_vault_initialized_true() {
+        let (state, _temp) = setup_test_state();
+        init_test_vault(&state, "master123");
+
+        let req = make_request("is_vault_initialized", 1);
+        let result = execute_command(req, state).unwrap();
+        assert_eq!(result, serde_json::json!(true));
+    }
+
+    // ---- is_vault_unlocked ----
+
+    #[test]
+    fn test_is_vault_unlocked() {
+        let (state, _temp) = setup_test_state();
+        let req = make_request("is_vault_unlocked", 1);
+        // Not unlocked initially
+        let result = execute_command(req, state).unwrap();
+        assert_eq!(result, serde_json::json!(false));
+    }
+
+    // ---- lock_vault ----
+
+    #[test]
+    fn test_lock_vault() {
+        let (state, _temp) = setup_test_state();
+        init_test_vault(&state, "master123");
+
+        assert!(crypto::is_unlocked());
+
+        let req = make_request("lock_vault", 1);
+        let result = execute_command(req, state).unwrap();
+        assert_eq!(result, serde_json::json!(null));
+
+        assert!(!crypto::is_unlocked());
+    }
+
+    // ---- create_entry ----
+
+    #[test]
+    fn test_create_entry() {
+        let (state, _temp) = setup_test_state();
+        init_test_vault(&state, "master123");
+
+        let req = NativeRequest {
+            id: 1,
+            command: "create_entry".to_string(),
+            password: Some("secret123".to_string()),
+            url: Some("https://github.com".to_string()),
+            id_param: None,
+            title: Some("GitHub".to_string()),
+            username: Some("user@example.com".to_string()),
+            notes: Some("My GitHub account".to_string()),
+            tags: Some(vec!["dev".to_string()]),
+            request: None,
+            options: None,
+        };
+
+        let result = execute_command(req, state.clone()).unwrap();
+        assert_eq!(result["title"], "GitHub");
+        assert_eq!(result["username"], "user@example.com");
+        assert_eq!(result["url"], "https://github.com");
+        assert_eq!(result["tags"], serde_json::json!(["dev"]));
+        assert!(result["id"].is_string());
+    }
+
+    #[test]
+    fn test_create_entry_locked() {
+        let (state, _temp) = setup_test_state();
+        // Don't init vault — stays locked
+
+        let req = NativeRequest {
+            id: 1,
+            command: "create_entry".to_string(),
+            password: Some("secret".to_string()),
+            url: None,
+            id_param: None,
+            title: Some("Test".to_string()),
+            username: Some("user".to_string()),
+            notes: None,
+            tags: None,
+            request: None,
+            options: None,
+        };
+
+        let result = execute_command(req, state);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("locked"));
+    }
+
+    // ---- get_entry ----
+
+    #[test]
+    fn test_get_entry() {
+        let (state, _temp) = setup_test_state();
+        init_test_vault(&state, "master123");
+
+        // Create an entry first
+        let create_req = NativeRequest {
+            id: 1,
+            command: "create_entry".to_string(),
+            password: Some("my_password".to_string()),
+            url: None,
+            id_param: None,
+            title: Some("Site".to_string()),
+            username: Some("user".to_string()),
+            notes: Some("some notes".to_string()),
+            tags: None,
+            request: None,
+            options: None,
+        };
+        let created = execute_command(create_req, state.clone()).unwrap();
+        let entry_id = created["id"].as_str().unwrap().to_string();
+
+        // Get the entry
+        let get_req = NativeRequest {
+            id: 2,
+            command: "get_entry".to_string(),
+            password: None,
+            url: None,
+            id_param: Some(entry_id),
+            title: None,
+            username: None,
+            notes: None,
+            tags: None,
+            request: None,
+            options: None,
+        };
+        let result = execute_command(get_req, state).unwrap();
+        assert_eq!(result["password"], "my_password");
+        assert_eq!(result["notes"], "some notes");
+        assert_eq!(result["title"], "Site");
+    }
+
+    // ---- list_all_entries ----
+
+    #[test]
+    fn test_list_all_entries() {
+        let (state, _temp) = setup_test_state();
+        init_test_vault(&state, "master123");
+
+        // Create 3 entries
+        for i in 0..3 {
+            let req = NativeRequest {
+                id: i,
+                command: "create_entry".to_string(),
+                password: Some(format!("pass{}", i)),
+                url: None,
+                id_param: None,
+                title: Some(format!("Site {}", i)),
+                username: Some(format!("user{}@test.com", i)),
+                notes: None,
+                tags: None,
+                request: None,
+                options: None,
+            };
+            execute_command(req, state.clone()).unwrap();
+        }
+
+        let list_req = make_request("list_all_entries", 10);
+        let result = execute_command(list_req, state).unwrap();
+        let entries = result.as_array().unwrap();
+        assert_eq!(entries.len(), 3);
+    }
+
+    // ---- update_entry ----
+
+    #[test]
+    fn test_update_entry() {
+        let (state, _temp) = setup_test_state();
+        init_test_vault(&state, "master123");
+
+        // Create an entry
+        let create_req = NativeRequest {
+            id: 1,
+            command: "create_entry".to_string(),
+            password: Some("old_pass".to_string()),
+            url: Some("https://old.com".to_string()),
+            id_param: None,
+            title: Some("Old Title".to_string()),
+            username: Some("old_user".to_string()),
+            notes: None,
+            tags: None,
+            request: None,
+            options: None,
+        };
+        let created = execute_command(create_req, state.clone()).unwrap();
+        let entry_id = created["id"].as_str().unwrap().to_string();
+
+        // Update the entry
+        let update_req = NativeRequest {
+            id: 2,
+            command: "update_entry".to_string(),
+            password: Some("new_pass".to_string()),
+            url: Some("https://new.com".to_string()),
+            id_param: Some(entry_id),
+            title: Some("New Title".to_string()),
+            username: Some("new_user".to_string()),
+            notes: Some("updated notes".to_string()),
+            tags: Some(vec!["updated".to_string()]),
+            request: None,
+            options: None,
+        };
+        let result = execute_command(update_req, state.clone()).unwrap();
+        assert_eq!(result["title"], "New Title");
+        assert_eq!(result["username"], "new_user");
+        assert_eq!(result["tags"], serde_json::json!(["updated"]));
+
+        // Verify password was re-encrypted
+        let db = state.database.lock().expect("db lock").clone().expect("db");
+        let entry = database::load_entry(&db, &result["id"].as_str().unwrap()).unwrap().unwrap();
+        let key = crypto::get_key().unwrap();
+        let enc: crypto::EncryptedData = bincode::deserialize(&entry.encrypted_password).unwrap();
+        let decrypted = crypto::decrypt(&key, &enc).unwrap();
+        assert_eq!(String::from_utf8(decrypted).unwrap(), "new_pass");
+    }
+
+    // ---- remove_entry ----
+
+    #[test]
+    fn test_remove_entry() {
+        let (state, _temp) = setup_test_state();
+        init_test_vault(&state, "master123");
+
+        // Create an entry
+        let create_req = NativeRequest {
+            id: 1,
+            command: "create_entry".to_string(),
+            password: Some("pass".to_string()),
+            url: None,
+            id_param: None,
+            title: Some("To Delete".to_string()),
+            username: Some("user".to_string()),
+            notes: None,
+            tags: None,
+            request: None,
+            options: None,
+        };
+        let created = execute_command(create_req, state.clone()).unwrap();
+        let entry_id = created["id"].as_str().unwrap().to_string();
+
+        // Remove it
+        let remove_req = NativeRequest {
+            id: 2,
+            command: "remove_entry".to_string(),
+            password: None,
+            url: None,
+            id_param: Some(entry_id),
+            title: None,
+            username: None,
+            notes: None,
+            tags: None,
+            request: None,
+            options: None,
+        };
+        let result = execute_command(remove_req, state.clone()).unwrap();
+        assert_eq!(result, serde_json::json!(true));
+
+        // Verify count is 0
+        let count_req = make_request("get_entry_count", 3);
+        let count = execute_command(count_req, state).unwrap();
+        assert_eq!(count, serde_json::json!(0));
+    }
+
+    // ---- get_entry_count ----
+
+    #[test]
+    fn test_get_entry_count() {
+        let (state, _temp) = setup_test_state();
+        init_test_vault(&state, "master123");
+
+        let req = make_request("get_entry_count", 1);
+        let result = execute_command(req, state.clone()).unwrap();
+        assert_eq!(result, serde_json::json!(0));
+
+        // Create an entry
+        let create_req = NativeRequest {
+            id: 2,
+            command: "create_entry".to_string(),
+            password: Some("pass".to_string()),
+            url: None,
+            id_param: None,
+            title: Some("Test".to_string()),
+            username: Some("u".to_string()),
+            notes: None,
+            tags: None,
+            request: None,
+            options: None,
+        };
+        execute_command(create_req, state.clone()).unwrap();
+
+        let count_req = make_request("get_entry_count", 3);
+        let count = execute_command(count_req, state).unwrap();
+        assert_eq!(count, serde_json::json!(1));
+    }
+
+    // ---- generate_password ----
+
+    #[test]
+    fn test_generate_password_default() {
+        let (state, _temp) = setup_test_state();
+        let req = make_request("generate_password", 1);
+        let result = execute_command(req, state).unwrap();
+        let password = result.as_str().unwrap();
+        assert_eq!(password.len(), 16);
+    }
+
+    #[test]
+    fn test_generate_password_custom_length() {
+        let (state, _temp) = setup_test_state();
+        let req = NativeRequest {
+            id: 1,
+            command: "generate_password".to_string(),
+            password: None,
+            url: None,
+            id_param: None,
+            title: None,
+            username: None,
+            notes: None,
+            tags: None,
+            request: None,
+            options: Some(GeneratorOptions {
+                length: 32,
+                include_uppercase: true,
+                include_lowercase: true,
+                include_numbers: true,
+                include_symbols: false,
+            }),
+        };
+        let result = execute_command(req, state).unwrap();
+        let password = result.as_str().unwrap();
+        assert_eq!(password.len(), 32);
+    }
+
+    // ---- unknown command ----
+
+    #[test]
+    fn test_unknown_command() {
+        let (state, _temp) = setup_test_state();
+        let req = make_request("nonexistent", 1);
+        let result = execute_command(req, state);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown command"));
+    }
+
+    // ---- operations when locked ----
+
+    #[test]
+    fn test_get_entry_locked() {
+        let (state, _temp) = setup_test_state();
+        let req = NativeRequest {
+            id: 1,
+            command: "get_entry".to_string(),
+            id_param: Some("some-id".to_string()),
+            ..make_request("get_entry", 1)
+        };
+        let result = execute_command(req, state);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_list_entries_locked() {
+        let (state, _temp) = setup_test_state();
+        let req = make_request("list_all_entries", 1);
+        let result = execute_command(req, state);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("locked"));
+    }
+
+    #[test]
+    fn test_update_entry_locked() {
+        let (state, _temp) = setup_test_state();
+        let req = NativeRequest {
+            id: 1,
+            command: "update_entry".to_string(),
+            id_param: Some("id".to_string()),
+            title: Some("t".to_string()),
+            username: Some("u".to_string()),
+            password: Some("p".to_string()),
+            ..make_request("update_entry", 1)
+        };
+        let result = execute_command(req, state);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_remove_entry_locked() {
+        let (state, _temp) = setup_test_state();
+        let req = NativeRequest {
+            id: 1,
+            command: "remove_entry".to_string(),
+            id_param: Some("id".to_string()),
+            ..make_request("remove_entry", 1)
+        };
+        let result = execute_command(req, state);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_entry_count_locked() {
+        let (state, _temp) = setup_test_state();
+        let req = make_request("get_entry_count", 1);
+        let result = execute_command(req, state);
+        assert!(result.is_err());
     }
 }

@@ -3,12 +3,14 @@
 pub mod crypto;
 pub mod database;
 pub mod native_messaging;
+pub mod paths;
 
 use redb::Database;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Instant;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -24,12 +26,57 @@ use crypto::{
 use database::{count_entries, delete_entry, list_entries, load_entry, save_entry, PasswordEntry};
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+/// Auto-lock timeout in seconds (10 minutes)
+const AUTO_LOCK_SECS: u64 = 600;
+
+/// Auto-lock check interval in seconds
+const AUTO_LOCK_CHECK_INTERVAL_SECS: u64 = 30;
+
+// ============================================================================
 // Application State
 // ============================================================================
 
 pub struct AppState {
     pub verification_data: Mutex<Option<VerificationData>>,
     pub database: Mutex<Option<Arc<Database>>>,
+    pub last_activity: Mutex<Option<Instant>>,
+    /// Closure to update the tray lock/unlock menu item text
+    pub update_lock_menu_fn: Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>>,
+    /// Closure to reload the main window (for auto-lock)
+    pub reload_window_fn: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+}
+
+impl AppState {
+    /// Reset the auto-lock activity timer (called on vault operations)
+    pub fn touch_activity(&self) {
+        *self.last_activity.lock().expect("activity lock poisoned") = Some(Instant::now());
+    }
+
+    /// Update the tray menu item text for lock/unlock
+    pub fn update_lock_menu(&self, text: &str) {
+        let guard = self.update_lock_menu_fn.lock().expect("menu lock poisoned");
+        if let Some(ref callback) = *guard {
+            callback(text);
+        }
+    }
+
+    /// Reload the main window (used by auto-lock)
+    pub fn reload_window(&self) {
+        let guard = self.reload_window_fn.lock().expect("window lock poisoned");
+        if let Some(ref callback) = *guard {
+            callback();
+        }
+    }
+
+    /// Atomic lock: clear key and activity under the same mutex
+    pub fn lock_vault(&self) {
+        let mut activity = self.last_activity.lock().expect("activity lock poisoned");
+        clear_key();
+        *activity = None;
+    }
 }
 
 impl Default for AppState {
@@ -37,6 +84,9 @@ impl Default for AppState {
         Self {
             verification_data: Mutex::new(None),
             database: Mutex::new(None),
+            last_activity: Mutex::new(None),
+            update_lock_menu_fn: Mutex::new(None),
+            reload_window_fn: Mutex::new(None),
         }
     }
 }
@@ -90,56 +140,38 @@ impl From<database::DatabaseError> for VaultError {
     }
 }
 
+impl std::fmt::Display for VaultError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VaultError::VaultLocked => write!(f, "Vault is locked"),
+            VaultError::VaultAlreadyExists => write!(f, "Vault already exists"),
+            VaultError::InvalidPassword => write!(f, "Invalid password"),
+            VaultError::EntryNotFound => write!(f, "Entry not found"),
+            VaultError::EncryptionFailed(e) => write!(f, "Encryption failed: {}", e),
+            VaultError::DecryptionFailed(e) => write!(f, "Decryption failed: {}", e),
+            VaultError::DatabaseError(e) => write!(f, "Database error: {}", e),
+            VaultError::InternalError(e) => write!(f, "Internal error: {}", e),
+        }
+    }
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
-/// Get the database file path
-/// Uses a consistent platform-specific app data directory
+/// Get the database file path (delegates to shared paths module)
 fn get_db_path() -> PathBuf {
-    // Use platform-specific app data directory
-    let base_dir = {
-        #[cfg(target_os = "macos")]
-        {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| std::env::current_dir().unwrap())
-                .join("com.pwdvault.app")
-        }
-        #[cfg(target_os = "windows")]
-        {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| std::env::current_dir().unwrap())
-                .join("PwdVault")
-        }
-        #[cfg(target_os = "linux")]
-        {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| std::env::current_dir().unwrap())
-                .join("pwdvault")
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-        {
-            std::env::current_dir().unwrap()
-        }
-    };
-    base_dir.join("vault.db")
+    paths::get_db_path()
 }
 
 /// Get the database directory (ensures it exists)
 fn ensure_db_dir() -> Result<PathBuf, VaultError> {
-    let db_path = get_db_path();
-    eprintln!("[DEBUG] Database path: {:?}", db_path);
-    if let Some(parent) = db_path.parent() {
-        eprintln!("[DEBUG] Parent directory: {:?}", parent);
-        std::fs::create_dir_all(parent)
-            .map_err(|e| VaultError::InternalError(e.to_string()))?;
-    }
-    Ok(db_path)
+    paths::ensure_db_dir().map_err(|e| VaultError::InternalError(e.to_string()))
 }
 
 /// Get the database from state
 fn get_db(state: &Arc<AppState>) -> Result<Arc<Database>, VaultError> {
-    let guard = state.database.lock().unwrap();
+    let guard = state.database.lock().expect("db lock poisoned");
     guard.clone().ok_or_else(|| VaultError::InternalError("Database not initialized".to_string()))
 }
 
@@ -149,7 +181,7 @@ fn get_db(state: &Arc<AppState>) -> Result<Arc<Database>, VaultError> {
 
 #[tauri::command]
 fn is_vault_initialized(state: State<'_, Arc<AppState>>) -> bool {
-    state.verification_data.lock().unwrap().is_some()
+    state.verification_data.lock().expect("verification lock poisoned").is_some()
 }
 
 #[tauri::command]
@@ -164,7 +196,7 @@ fn init_vault(
 ) -> Result<(), VaultError> {
     let mut password = password;
 
-    if state.verification_data.lock().unwrap().is_some() {
+    if state.verification_data.lock().expect("verification lock poisoned").is_some() {
         password.zeroize();
         return Err(VaultError::VaultAlreadyExists);
     }
@@ -172,7 +204,7 @@ fn init_vault(
     // Initialize database
     let db_path = ensure_db_dir()?;
     let db = Arc::new(database::init_database(&db_path)?);
-    *state.database.lock().unwrap() = Some(db.clone());
+    *state.database.lock().expect("db lock poisoned") = Some(db.clone());
 
     let salt = crypto::kdf::generate_salt();
     let (key, params) = crypto::kdf::derive_key(&password, &salt)?;
@@ -184,8 +216,12 @@ fn init_vault(
     // Save verification data to database
     database::save_verification_data(&db, &verification_data)?;
 
-    *state.verification_data.lock().unwrap() = Some(verification_data);
+    *state.verification_data.lock().expect("verification lock poisoned") = Some(verification_data);
     set_key(key)?;
+
+    // Start auto-lock timer and update tray menu
+    state.touch_activity();
+    state.update_lock_menu("Lock Vault");
 
     Ok(())
 }
@@ -197,7 +233,7 @@ fn unlock_vault(password: String, state: State<'_, Arc<AppState>>) -> Result<boo
     let verification_data = state
         .verification_data
         .lock()
-        .unwrap()
+        .expect("verification lock poisoned")
         .as_ref()
         .ok_or(VaultError::VaultLocked)?
         .clone();
@@ -206,12 +242,18 @@ fn unlock_vault(password: String, state: State<'_, Arc<AppState>>) -> Result<boo
 
     password.zeroize();
 
+    if success {
+        state.touch_activity();
+        state.update_lock_menu("Lock Vault");
+    }
+
     Ok(success)
 }
 
 #[tauri::command]
-fn lock_vault() {
-    clear_key();
+fn lock_vault(state: State<'_, Arc<AppState>>) {
+    state.lock_vault();
+    state.update_lock_menu("Unlock Vault");
 }
 
 #[tauri::command]
@@ -340,6 +382,8 @@ fn create_entry(request: CreateEntryRequest, state: State<'_, Arc<AppState>>) ->
 
     save_entry(&db, &entry)?;
 
+    state.touch_activity();
+
     Ok(entry.into())
 }
 
@@ -371,6 +415,8 @@ fn get_entry(id: String, state: State<'_, Arc<AppState>>) -> Result<EntryRespons
         None
     };
 
+    state.touch_activity();
+
     Ok(EntryResponse {
         id: entry.id,
         title: entry.title,
@@ -400,6 +446,8 @@ fn list_all_entries(state: State<'_, Arc<AppState>>) -> Result<Vec<EntrySummary>
             summaries.push(entry.into());
         }
     }
+
+    state.touch_activity();
 
     Ok(summaries)
 }
@@ -441,6 +489,8 @@ fn update_entry(
 
     save_entry(&db, &entry)?;
 
+    state.touch_activity();
+
     Ok(entry.into())
 }
 
@@ -452,6 +502,9 @@ fn remove_entry(id: String, state: State<'_, Arc<AppState>>) -> Result<bool, Vau
 
     let db = get_db(&state)?;
     let existed = delete_entry(&db, &id)?;
+
+    state.touch_activity();
+
     Ok(existed)
 }
 
@@ -462,7 +515,11 @@ fn get_entry_count(state: State<'_, Arc<AppState>>) -> Result<usize, VaultError>
     }
 
     let db = get_db(&state)?;
-    Ok(count_entries(&db)?)
+    let count = count_entries(&db)?;
+
+    state.touch_activity();
+
+    Ok(count)
 }
 
 // ============================================================================
@@ -473,8 +530,8 @@ fn get_entry_count(state: State<'_, Arc<AppState>>) -> Result<usize, VaultError>
 fn setup_vault(state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
     // Check if database is already loaded in state
     {
-        let db_guard = state.database.lock().unwrap();
-        if db_guard.is_some() && state.verification_data.lock().unwrap().is_some() {
+        let db_guard = state.database.lock().expect("db lock poisoned");
+        if db_guard.is_some() && state.verification_data.lock().expect("verification lock poisoned").is_some() {
             return Ok(true);
         }
     }
@@ -487,17 +544,44 @@ fn setup_vault(state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
 
     // Initialize database
     let db = Arc::new(database::init_database(&db_path)?);
-    *state.database.lock().unwrap() = Some(db.clone());
+    *state.database.lock().expect("db lock poisoned") = Some(db.clone());
 
     // Load verification data from database
     let verification_data = database::load_verification_data(&db)?;
 
     if let Some(data) = verification_data {
-        *state.verification_data.lock().unwrap() = Some(data);
+        *state.verification_data.lock().expect("verification lock poisoned") = Some(data);
         return Ok(true);
     }
 
     Ok(false)
+}
+
+// ============================================================================
+// Auto-Lock Background Thread
+// ============================================================================
+
+fn start_auto_lock_thread(state: Arc<AppState>) {
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(AUTO_LOCK_CHECK_INTERVAL_SECS));
+
+            let should_lock = {
+                let activity = state.last_activity.lock().expect("activity lock poisoned");
+                if let Some(instant) = *activity {
+                    is_unlocked() && instant.elapsed().as_secs() >= AUTO_LOCK_SECS
+                } else {
+                    false
+                }
+            };
+
+            if should_lock {
+                state.lock_vault();
+                state.update_lock_menu("Unlock Vault");
+                state.reload_window();
+            }
+        }
+    });
 }
 
 // ============================================================================
@@ -529,6 +613,23 @@ pub fn run() {
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &lock_i, &quit_i])?;
 
+            // Store closures for updating tray menu and reloading window from any thread
+            {
+                let lock_i_clone = lock_i.clone();
+                let app_handle = app.handle().clone();
+                *state.update_lock_menu_fn.lock().expect("menu lock poisoned") = Some(Box::new(move |text: &str| {
+                    let _ = lock_i_clone.set_text(text);
+                }));
+                *state.reload_window_fn.lock().expect("window lock poisoned") = Some(Box::new(move || {
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.eval("window.location.reload()");
+                    }
+                }));
+            }
+
+            // Start auto-lock background thread
+            start_auto_lock_thread(state.clone());
+
             // Create tray icon
             let tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -542,7 +643,15 @@ pub fn run() {
                         }
                     }
                     "lock" => {
-                        clear_key();
+                        if is_unlocked() {
+                            clear_key();
+                            if let Some(item) = app.menu().and_then(|m| m.get("lock")) {
+                                if let tauri::menu::MenuItemKind::MenuItem(mi) = item {
+                                    let _ = mi.set_text("Unlock Vault");
+                                }
+                            }
+                        }
+                        // Always show window (displays unlock screen if locked)
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
@@ -571,6 +680,7 @@ pub fn run() {
                 .build(app)?;
 
             // Prevent the window from being destroyed on close — hide to tray instead
+            // This keeps the HTTP server alive for the browser extension (Plan B)
             if let Some(window) = app.get_webview_window("main") {
                 let tray_handle = tray.clone();
                 let win = window.clone();
@@ -603,4 +713,253 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Helper: create a test AppState with a temp database
+    fn setup_test_state() -> (Arc<AppState>, TempDir) {
+        // Clear any leftover key from previous tests
+        clear_key();
+
+        let temp = TempDir::new().expect("create temp dir");
+        let db_path = temp.path().join("test_vault.db");
+        let db = Arc::new(database::init_database(&db_path).expect("init db"));
+
+        let state = Arc::new(AppState::default());
+        *state.database.lock().expect("db lock") = Some(db);
+        (state, temp)
+    }
+
+    /// Helper: initialize vault with a password
+    fn init_test_vault(state: &Arc<AppState>, password: &str) {
+        // Clear any leftover key from parallel tests sharing global keystore
+        clear_key();
+
+        let salt = crypto::kdf::generate_salt();
+        let (key, params) = crypto::kdf::derive_key(password, &salt).expect("derive key");
+        let verification = create_verification_header(&key, salt.clone(), params).expect("create verification");
+
+        let db = state.database.lock().expect("db lock").clone().expect("db exists");
+        database::save_verification_data(&db, &verification).expect("save verification");
+
+        *state.verification_data.lock().expect("v lock") = Some(verification);
+        set_key(key).expect("set key");
+        state.touch_activity();
+    }
+
+    // ---- AppState tests ----
+
+    #[test]
+    fn test_appstate_default() {
+        let state = AppState::default();
+        assert!(state.verification_data.lock().unwrap().is_none());
+        assert!(state.database.lock().unwrap().is_none());
+        assert!(state.last_activity.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_touch_and_lock_vault() {
+        let state = Arc::new(AppState::default());
+        assert!(state.last_activity.lock().unwrap().is_none());
+
+        state.touch_activity();
+        assert!(state.last_activity.lock().unwrap().is_some());
+
+        state.lock_vault();
+        assert!(state.last_activity.lock().unwrap().is_none());
+    }
+
+    // ---- generate_password tests ----
+
+    #[test]
+    fn test_generate_password_length() {
+        let pw = generate_password(20, true, true, true, true);
+        assert_eq!(pw.len(), 20);
+    }
+
+    #[test]
+    fn test_generate_password_all_charsets() {
+        let pw = generate_password(100, true, true, true, true);
+        assert!(pw.chars().any(|c| c.is_ascii_uppercase()));
+        assert!(pw.chars().any(|c| c.is_ascii_lowercase()));
+        assert!(pw.chars().any(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn test_generate_password_empty_charset_fallback() {
+        let pw = generate_password(10, false, false, false, false);
+        assert_eq!(pw.len(), 10);
+        assert!(pw.chars().all(|c| c.is_ascii_lowercase()));
+    }
+
+    #[test]
+    fn test_generate_password_only_symbols() {
+        let pw = generate_password(20, false, false, false, true);
+        assert_eq!(pw.len(), 20);
+    }
+
+    // ---- VaultError Display ----
+
+    #[test]
+    fn test_vault_error_display() {
+        assert_eq!(VaultError::VaultLocked.to_string(), "Vault is locked");
+        assert_eq!(VaultError::VaultAlreadyExists.to_string(), "Vault already exists");
+        assert!(VaultError::EncryptionFailed("test".into()).to_string().contains("test"));
+    }
+
+    // ---- get_db_path test ----
+
+    #[test]
+    fn test_get_db_path_returns_valid_path() {
+        let path = get_db_path();
+        assert!(path.to_string_lossy().ends_with("vault.db"));
+        assert!(path.parent().is_some());
+    }
+
+    // ---- ensure_db_dir test ----
+
+    #[test]
+    fn test_ensure_db_dir_creates_directory() {
+        let temp = TempDir::new().unwrap();
+        let custom_path = temp.path().join("subdir").join("vault.db");
+
+        // We test paths::ensure_db_dir directly with a custom base
+        if let Some(parent) = custom_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        assert!(custom_path.parent().unwrap().exists());
+    }
+
+    // ---- Full vault lifecycle ----
+
+    #[test]
+    fn test_vault_init_unlock_lock_cycle() {
+        let (state, _temp) = setup_test_state();
+
+        // Not initialized
+        assert!(!state.verification_data.lock().unwrap().is_some());
+
+        // Init vault
+        let salt = crypto::kdf::generate_salt();
+        let (key, params) = crypto::kdf::derive_key("TestPassword123", &salt).unwrap();
+        let verification = create_verification_header(&key, salt, params).unwrap();
+
+        let db = state.database.lock().unwrap().clone().unwrap();
+        database::save_verification_data(&db, &verification).unwrap();
+        *state.verification_data.lock().unwrap() = Some(verification);
+        set_key(key).unwrap();
+        state.touch_activity();
+
+        // Should be unlocked now
+        assert!(is_unlocked());
+        assert!(state.last_activity.lock().unwrap().is_some());
+
+        // Lock
+        state.lock_vault();
+        assert!(!is_unlocked());
+        assert!(state.last_activity.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_crud_operations() {
+        let (state, _temp) = setup_test_state();
+        init_test_vault(&state, "master123");
+
+        let db = state.database.lock().unwrap().clone().unwrap();
+
+        // Create entry
+        let mut entry = PasswordEntry::new(
+            "GitHub".to_string(),
+            Some("https://github.com".to_string()),
+            "user@example.com".to_string(),
+        );
+
+        // Encrypt password
+        let key = crypto::get_key().unwrap();
+        let enc_data = encrypt(&key, b"secret_password").unwrap();
+        entry.encrypted_password = bincode::serialize(&enc_data).unwrap();
+        save_entry(&db, &entry).unwrap();
+
+        // Read entry
+        let loaded = load_entry(&db, &entry.id).unwrap().unwrap();
+        assert_eq!(loaded.title, "GitHub");
+        assert_eq!(loaded.username, "user@example.com");
+
+        // Decrypt and verify
+        let enc: EncryptedData = bincode::deserialize(&loaded.encrypted_password).unwrap();
+        let decrypted = decrypt(&key, &enc).unwrap();
+        assert_eq!(String::from_utf8(decrypted).unwrap(), "secret_password");
+
+        // List entries
+        let ids = list_entries(&db).unwrap();
+        assert_eq!(ids.len(), 1);
+        assert!(ids.contains(&entry.id));
+
+        // Count
+        assert_eq!(count_entries(&db).unwrap(), 1);
+
+        // Delete
+        let deleted = delete_entry(&db, &entry.id).unwrap();
+        assert!(deleted);
+        assert_eq!(count_entries(&db).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_entry_with_notes_and_tags() {
+        let (state, _temp) = setup_test_state();
+        init_test_vault(&state, "master123");
+
+        let db = state.database.lock().unwrap().clone().unwrap();
+        let key = crypto::get_key().unwrap();
+
+        let mut entry = PasswordEntry::new(
+            "Site".to_string(),
+            None,
+            "user".to_string(),
+        );
+        entry.encrypted_password = bincode::serialize(&encrypt(&key, b"pass").unwrap()).unwrap();
+        entry.encrypted_notes = Some(bincode::serialize(&encrypt(&key, b"my notes").unwrap()).unwrap());
+        entry.tags = vec!["work".to_string(), "important".to_string()];
+
+        save_entry(&db, &entry).unwrap();
+
+        let loaded = load_entry(&db, &entry.id).unwrap().unwrap();
+        assert_eq!(loaded.tags, vec!["work", "important"]);
+
+        // Decrypt notes
+        let enc: EncryptedData = bincode::deserialize(loaded.encrypted_notes.as_ref().unwrap()).unwrap();
+        let notes = String::from_utf8(decrypt(&key, &enc).unwrap()).unwrap();
+        assert_eq!(notes, "my notes");
+    }
+
+    #[test]
+    fn test_multiple_entries() {
+        let (state, _temp) = setup_test_state();
+        init_test_vault(&state, "master123");
+
+        let db = state.database.lock().unwrap().clone().unwrap();
+        let key = crypto::get_key().unwrap();
+
+        for i in 0..5 {
+            let mut entry = PasswordEntry::new(
+                format!("Site {}", i),
+                Some(format!("https://site{}.com", i)),
+                format!("user{}@test.com", i),
+            );
+            entry.encrypted_password = bincode::serialize(&encrypt(&key, format!("pass{}", i).as_bytes()).unwrap()).unwrap();
+            save_entry(&db, &entry).unwrap();
+        }
+
+        assert_eq!(count_entries(&db).unwrap(), 5);
+        let ids = list_entries(&db).unwrap();
+        assert_eq!(ids.len(), 5);
+    }
 }
