@@ -2,9 +2,10 @@
 
 A secure, local-first password manager built with Tauri + React.
 
-**Last Updated**: 2026-03-27
+**Last Updated**: 2026-04-01
 **Repository**: https://github.com/chaojimaimi/PwdVault (Private)
 **Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v0.1.0
+**Current Version**: `v0.1.3` (local)
 **Current Branch**: `main`
 
 ---
@@ -49,6 +50,7 @@ PwdVault/
 │   │   ├── main.rs               # Binary entry point
 │   │   ├── lib.rs                # Tauri commands + state + system tray
 │   │   ├── native_messaging.rs   # HTTP server (port 17429) for browser extension
+│   │   ├── paths.rs              # Shared path utilities (db path resolution)
 │   │   ├── crypto/               # Encryption module
 │   │   │   ├── mod.rs
 │   │   │   ├── cipher.rs         # AES-256-GCM encryption
@@ -111,74 +113,79 @@ PwdVault/
 
 ## 2. Current Status
 
+### v0.1.3 (local, 2026-04-01)
+
+**Completed: Phase A (v0.1.2) — Bug Fixes**
+- Auto-lock race condition fix: `clear_key()` + activity reset now atomic under same mutex
+- Removed debug `eprintln!` from production code
+
+**Completed: Phase B (v0.1.3) — Rust Test Coverage**
+- Extracted `paths.rs` shared module (eliminated duplicate `get_db_path`/`ensure_db_dir`)
+- 48 Rust tests passing: crypto (10), database (5), lib.rs (13), native_messaging (20)
+- All `.unwrap()` on mutex locks replaced with `.expect("descriptive message")`
+- Unified `lock_vault` to use `state.lock_vault()` atomic method
+
+**Completed: Phase C (v0.1.3) — Frontend Tests**
+- Vitest + Testing Library + jsdom configured
+- 17 frontend tests passing: passwordStrength (10), vault API client (7)
+
+### v0.1.1 (2026-03-31)
+- Auto-lock (10 min timeout), tray menu state sync, browser extension create entry
+
 ### v0.1.0 Release (2026-03-27)
+- Initial release: Tauri v2 + React 5 screens, AES-256-GCM + Argon2id, redb, HTTP API, Chrome extension, CI/CD
 
-**Completed Features:**
+**Test Suite Summary:**
 
-| Module | Feature | Status |
-|--------|---------|--------|
-| Desktop App | Tauri v2 + React with 5 screens | Done |
-| Desktop App | System tray (close-to-tray, show/lock/quit) | Done |
-| Desktop App | Password strength indicator | Done |
-| Desktop App | Clipboard auto-clear (30s) + toast notifications | Done |
-| Desktop App | Vault list copy buttons (username/password) | Done |
-| Crypto | AES-256-GCM + Argon2id | Done |
-| Crypto | In-memory key management + zeroization | Done |
-| Database | redb with CRUD operations | Done |
-| HTTP API | 11 endpoints (all verified) | Done |
-| Extension | Popup UI (search, show/hide, copy, URL open) | Done |
-| Extension | Content script auto-fill (form detection, prompt bar, floating button) | Done |
-| Extension | Keyboard shortcuts (Ctrl+Shift+L) | Done |
-| Extension | Clipboard auto-clear in overlay | Done |
-| CI/CD | GitHub Actions (macOS + Windows) | Done |
-| Distribution | GitHub Release v0.1.0 | Done |
+| Module | Tests | Command |
+|--------|-------|---------|
+| Rust (total) | 48 | `cd src-tauri && cargo test -- --test-threads=1` |
+| crypto | 10 | cipher (4), kdf (3), keystore (2), verification (2) |
+| database | 5 | init, CRUD, list, count, delete |
+| lib.rs | 13 | AppState, generate_password, VaultError, vault lifecycle, CRUD |
+| native_messaging | 20 | 13 API endpoints + locked state checks |
+| Frontend (total) | 17 | `pnpm test` |
+| passwordStrength | 10 | scoring, penalties, edge cases |
+| vault API client | 7 | HTTP fallback, error handling, request structure |
 
-**API Endpoints:**
-`setup_vault`, `init_vault`, `unlock_vault`, `lock_vault`, `is_vault_initialized`, `is_vault_unlocked`, `create_entry`, `get_entry`, `list_all_entries`, `update_entry`, `remove_entry`, `get_entry_count`, `generate_password`
-
-**Release Artifacts:**
-- `PwdVault_0.0.1_x64-setup.exe` (2.3 MB) — Windows installer
-- `PwdVault.app` (9.8 MB) — macOS application
-- `PwdVault-Extension-v0.1.0.zip` (20 KB) — Chrome extension
-- `USAGE.md` — Usage instructions
+> **Note**: Rust tests require `-- --test-threads=1` due to global in-memory keystore shared across tests.
 
 ---
 
-## 3. TODO / Roadmap
+## 3. Roadmap (v0.1.3 → v1.0)
 
-### Phase 3 — Quality & Polish
+### Phase D — Project Identity (v0.2.0, ~1 day)
+- [ ] **D1** Rewrite README.md with actual project info
+- [ ] **D2** Design PwdVault brand icon (SVG lock+shield, generate all sizes)
+- [ ] **D3** CI DMG packaging for macOS
+- [ ] **D4** Version sync script (`scripts/bump-version.sh`)
 
-- [ ] **Unit tests** — Crypto module, database operations, API layer
-- [ ] **E2E tests** — Desktop app critical flows (setup, unlock, CRUD, lock)
-- [ ] **App icon design** — Replace default Tauri icon with PwdVault branding
-- [ ] **DMG packaging** — Fix DMG build script for macOS distribution
-- [ ] **Version sync** — Align VERSION file with tauri.conf.json/Cargo.toml
-- [ ] **Update README.md** — Replace generic Tauri template with actual project info
+### Phase E — User Features (v0.3.0, ~3 days)
+- [ ] **E1** Encrypted import/export (JSON backup/restore)
+- [ ] **E2** Fuzzy search (`fuse.js`, threshold=0.3)
+- [ ] **E3** Categories/folders (`category` field on PasswordEntry, client-side filtering)
+- [ ] **E4** Settings screen (auto-lock timeout, default generator options, redb `settings` table)
 
-### Phase 4 — Features
+### Phase F — Distribution & Security (v0.4.0, ~3 days)
+- [ ] **F1** macOS signing + notarization (requires Apple Developer account)
+- [ ] **F2** Tauri auto-update plugin (depends on F1)
+- [ ] **F3** Linux build (.deb + .AppImage)
+- [ ] **F4** HTTP API rate limiting (5 failed unlocks → 60s lockout)
 
-- [ ] **Import/export** — Encrypted JSON backup/restore
-- [ ] **Fuzzy search** — Replace exact match with fuzzy scoring
-- [ ] **Categories/folders** — Organize entries into groups
-- [ ] **Password history** — Track previous passwords per entry
-- [ ] **Firefox extension** — Test and adapt Chrome extension for Firefox
-- [ ] **Settings screen** — Configurable timeout, port, encryption params
+### Phase G — v1.0 Release (~1 day)
+- [ ] **G1** Firefox extension adaptation
+- [ ] **G2** Clean up test credentials from docs
+- [ ] **G3** Update CHANGELOG + CLAUDE.md for v1.0
+- [ ] **G4** Security checklist (`cargo audit`, review dependencies)
+- [ ] **G5** Tighten CSP in tauri.conf.json (replace `null` with proper policy)
 
-### Phase 5 — Security & Distribution
-
-- [ ] **macOS signing & notarization** — Apple Developer account ($99/yr)
-- [ ] **Windows code signing** — OV/EV certificate for SmartScreen
-- [ ] **Auto-update** — Tauri updater plugin with signature verification
-- [ ] **Biometric unlock** — Touch ID / Face ID / Windows Hello
-- [ ] **Security audit** — External review before public release
-
-### Phase 6 — Growth
-
-- [ ] **Secure notes** — Encrypted free-text storage
-- [ ] **Breach monitoring** — Have I Been Pwned API integration
-- [ ] **TOTP/2FA** — One-time password generator
-- [ ] **Multi-device sync** — Optional self-hosted sync server
-- [ ] **Mobile apps** — iOS/Android via Tauri Mobile
+### Future (post-v1.0)
+- [ ] Biometric unlock (Touch ID / Windows Hello)
+- [ ] Secure notes
+- [ ] Breach monitoring (HIBP API)
+- [ ] TOTP/2FA generator
+- [ ] Multi-device sync (self-hosted)
+- [ ] Mobile apps (Tauri Mobile)
 
 ---
 
@@ -209,8 +216,14 @@ pnpm tauri build
 # Type check
 pnpm tsc --noEmit
 
-# Rust tests
-cd src-tauri && cargo test
+# Rust tests (must run single-threaded due to global keystore)
+cd src-tauri && cargo test -- --test-threads=1
+
+# Frontend tests
+pnpm test
+
+# Frontend tests (watch mode)
+pnpm test:watch
 
 # Trigger CI build
 git tag vX.Y.Z && git push origin main --tags
@@ -231,6 +244,27 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-04-01 (Phase A/B/C — Quality & Tests)
+**Commits**: `d748292`
+
+**Phase A (v0.1.2) — Bug Fixes:**
+- Fixed auto-lock race condition: `clear_key()` + activity reset now atomic under same mutex
+- Removed all `eprintln!("[DEBUG]...")` from production code
+
+**Phase B (v0.1.3) — Rust Test Coverage:**
+- Extracted `paths.rs` shared module (eliminated ~40 lines duplicate code)
+- Added 48 Rust tests covering crypto, database, lib.rs commands, and all 13 HTTP API endpoints
+- Replaced all `.unwrap()` with `.expect("descriptive message")` in lib.rs and native_messaging.rs
+- Unified `lock_vault` HTTP command to use `state.lock_vault()` atomic method
+
+**Phase C (v0.1.3) — Frontend Tests:**
+- Configured Vitest + Testing Library + jsdom
+- 17 frontend tests: passwordStrength calculator and vault API client
+
+**Technical Notes:**
+- Rust tests require `-- --test-threads=1` due to global in-memory keystore
+- Tauri v2 `MenuItem<R: Runtime>` generic prevents direct storage; solved with closure type erasure (`Box<dyn Fn(&str) + Send + Sync>`)
 
 ### 2026-03-26 (Phase 1 — Crypto & Core)
 **Duration**: Full day
