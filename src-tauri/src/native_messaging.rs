@@ -393,34 +393,54 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                 include_symbols: true,
             });
 
-            use rand::Rng;
+            use rand::{rngs::OsRng, Rng};
+
             let mut charset = String::new();
+            let mut required_chars = Vec::new();
+
+            // Collect all available character classes and their representatives
             if options.include_uppercase {
                 charset.push_str("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+                required_chars.push('A');
             }
             if options.include_lowercase {
                 charset.push_str("abcdefghijklmnopqrstuvwxyz");
+                required_chars.push('a');
             }
             if options.include_numbers {
                 charset.push_str("0123456789");
+                required_chars.push('0');
             }
             if options.include_symbols {
                 charset.push_str("!@#$%^&*()_+-=[]{}|;:,.<>?");
+                required_chars.push('!');
             }
 
             if charset.is_empty() {
                 charset = "abcdefghijklmnopqrstuvwxyz".to_string();
+                required_chars = vec!['a'];
             }
 
+            let mut rng = OsRng; // Use OS entropy source for better security
             let bytes: Vec<u8> = charset.bytes().collect();
-            let mut rng = rand::thread_rng();
 
-            let password: String = (0..options.length)
-                .map(|_| {
-                    let idx = rng.gen_range(0..bytes.len());
-                    bytes[idx] as char
-                })
-                .collect();
+            let num_required = required_chars.len();
+            let mut password_chars: Vec<char> = required_chars;
+
+            // Fill remaining positions with random characters from full charset
+            for _ in 0..(options.length.saturating_sub(num_required)) {
+                let idx = rng.gen_range(0..bytes.len());
+                password_chars.push(bytes[idx] as char);
+            }
+
+            // Fisher-Yates shuffle to avoid predictable patterns (e.g., always starting with uppercase)
+            let len = password_chars.len();
+            for i in 0..len {
+                let j = rng.gen_range(i..len);
+                password_chars.swap(i, j);
+            }
+
+            let password: String = password_chars.into_iter().collect();
 
             Ok(serde_json::json!(password))
         }
@@ -910,6 +930,83 @@ mod tests {
         let result = execute_command(req, state).unwrap();
         let password = result.as_str().unwrap();
         assert_eq!(password.len(), 32);
+    }
+
+    #[test]
+    fn test_generate_password_guarantees_all_types() {
+        let (state, _temp) = setup_test_state();
+        let req = NativeRequest {
+            id: 1,
+            command: "generate_password".to_string(),
+            password: None,
+            url: None,
+            id_param: None,
+            title: None,
+            username: None,
+            notes: None,
+            tags: None,
+            request: None,
+            options: Some(GeneratorOptions {
+                length: 16,
+                include_uppercase: true,
+                include_lowercase: true,
+                include_numbers: true,
+                include_symbols: true,
+            }),
+        };
+        let result = execute_command(req, state).unwrap();
+        let password = result.as_str().unwrap();
+
+        let has_upper = password.chars().any(|c| c.is_ascii_uppercase());
+        let has_lower = password.chars().any(|c| c.is_ascii_lowercase());
+        let has_digit = password.chars().any(|c| c.is_ascii_digit());
+        let has_symbol = password.chars().any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c));
+
+        assert!(has_upper, "Password missing uppercase letters");
+        assert!(has_lower, "Password missing lowercase letters");
+        assert!(has_digit, "Password missing digits");
+        assert!(has_symbol, "Password missing symbols");
+    }
+
+    #[test]
+    fn test_generate_password_short_guarantees_all_types() {
+        let (state, _temp) = setup_test_state();
+        // Even very short passwords should contain all requested types
+        for _ in 0..50 {
+            let req = NativeRequest {
+                id: 1,
+                command: "generate_password".to_string(),
+                password: None,
+                url: None,
+                id_param: None,
+                title: None,
+                username: None,
+                notes: None,
+                tags: None,
+                request: None,
+                options: Some(GeneratorOptions {
+                    length: 4,
+                    include_uppercase: true,
+                    include_lowercase: true,
+                    include_numbers: true,
+                    include_symbols: true,
+                }),
+            };
+            let result = execute_command(req, state.clone()).unwrap();
+            let password = result.as_str().unwrap();
+            assert_eq!(password.len(), 4);
+
+            let has_upper = password.chars().any(|c| c.is_ascii_uppercase());
+            let has_lower = password.chars().any(|c| c.is_ascii_lowercase());
+            let has_digit = password.chars().any(|c| c.is_ascii_digit());
+            let has_symbol = password.chars().any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c));
+
+            assert!(
+                has_upper && has_lower && has_digit && has_symbol,
+                "Short password missing required character type: {}",
+                password
+            );
+        }
     }
 
     // ---- unknown command ----

@@ -50,7 +50,7 @@ describe('vault API client', () => {
     });
 
     it('should pass nested args for createEntry', async () => {
-      const mockEntry = { title: 'Test', username: 'user', password: 'pass', url: 'https://example.com' };
+      const mockEntry = { title: 'Test', username: 'user', password: 'pass', url: 'https://example.com', tags: [] };
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         json: () => Promise.resolve({ success: true, data: { id: '123', ...mockEntry } }),

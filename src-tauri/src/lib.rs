@@ -264,35 +264,54 @@ fn generate_password(
     include_numbers: bool,
     include_symbols: bool,
 ) -> String {
-    use rand::Rng;
+    use rand::{rngs::OsRng, Rng};
 
     let mut charset = String::new();
+    let mut required_chars = Vec::new();
+
+    // Collect all available character classes and their representatives
     if include_uppercase {
         charset.push_str("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        required_chars.push('A');
     }
     if include_lowercase {
         charset.push_str("abcdefghijklmnopqrstuvwxyz");
+        required_chars.push('a');
     }
     if include_numbers {
         charset.push_str("0123456789");
+        required_chars.push('0');
     }
     if include_symbols {
         charset.push_str("!@#$%^&*()_+-=[]{}|;:,.<>?");
+        required_chars.push('!');
     }
 
     if charset.is_empty() {
         charset = "abcdefghijklmnopqrstuvwxyz".to_string();
+        required_chars = vec!['a'];
     }
 
+    let mut rng = OsRng; // Use OS entropy source for better security
     let bytes: Vec<u8> = charset.bytes().collect();
-    let mut rng = rand::thread_rng();
 
-    (0..length)
-        .map(|_| {
-            let idx = rng.gen_range(0..bytes.len());
-            bytes[idx] as char
-        })
-        .collect()
+    let num_required = required_chars.len();
+    let mut password_chars: Vec<char> = required_chars;
+
+    // Fill remaining positions with random characters from full charset
+    for _ in 0..(length.saturating_sub(num_required)) {
+        let idx = rng.gen_range(0..bytes.len());
+        password_chars.push(bytes[idx] as char);
+    }
+
+    // Fisher-Yates shuffle to avoid predictable patterns (e.g., always starting with uppercase)
+    let len = password_chars.len();
+    for i in 0..len {
+        let j = rng.gen_range(i..len);
+        password_chars.swap(i, j);
+    }
+
+    password_chars.into_iter().collect()
 }
 
 // ============================================================================
@@ -804,6 +823,52 @@ mod tests {
     fn test_generate_password_only_symbols() {
         let pw = generate_password(20, false, false, false, true);
         assert_eq!(pw.len(), 20);
+    }
+
+    #[test]
+    fn test_generate_password_guarantees_all_types() {
+        // Verify that all requested character types are included
+        let pw = generate_password(16, true, true, true, true);
+
+        let has_upper = pw.chars().any(|c| c.is_ascii_uppercase());
+        let has_lower = pw.chars().any(|c| c.is_ascii_lowercase());
+        let has_digit = pw.chars().any(|c| c.is_ascii_digit());
+        let has_symbol = pw.chars().any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c));
+
+        assert!(has_upper, "Password missing uppercase letters");
+        assert!(has_lower, "Password missing lowercase letters");
+        assert!(has_digit, "Password missing digits");
+        assert!(has_symbol, "Password missing symbols");
+    }
+
+    #[test]
+    fn test_generate_password_short_guarantees_all_types() {
+        // Even very short passwords should contain all requested types
+        // With 4 requested types and length 4, each position gets exactly one type
+        for _ in 0..100 {
+            let pw = generate_password(4, true, true, true, true);
+            assert_eq!(pw.len(), 4);
+
+            let has_upper = pw.chars().any(|c| c.is_ascii_uppercase());
+            let has_lower = pw.chars().any(|c| c.is_ascii_lowercase());
+            let has_digit = pw.chars().any(|c| c.is_ascii_digit());
+            let has_symbol = pw.chars().any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c));
+
+            assert!(
+                has_upper && has_lower && has_digit && has_symbol,
+                "Short password missing required character type"
+            );
+        }
+    }
+
+    #[test]
+    fn test_generate_password_partial_types() {
+        // Test with only some character types enabled
+        let pw = generate_password(12, true, false, true, false);
+        assert!(pw.chars().any(|c| c.is_ascii_uppercase()));
+        assert!(pw.chars().any(|c| c.is_ascii_digit()));
+        assert!(!pw.chars().any(|c| c.is_ascii_lowercase()));
+        assert!(!pw.chars().any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c)));
     }
 
     // ---- VaultError Display ----

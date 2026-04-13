@@ -2,9 +2,9 @@
 
 A secure, local-first password manager built with Tauri + React.
 
-**Last Updated**: 2026-04-01
+**Last Updated**: 2026-04-13
 **Repository**: https://github.com/chaojimaimi/PwdVault (Private)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v0.1.0
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v0.1.3
 **Current Version**: `v0.1.3` (local)
 **Current Branch**: `main`
 
@@ -76,11 +76,12 @@ PwdVault/
 ├── .github/workflows/
 │   └── release.yml               # CI: macOS + Windows builds
 ├── releases/                     # Local release artifacts
-│   ├── PwdVault-macOS-v0.1.0.zip
-│   ├── PwdVault-Extension-v0.1.0.zip
+│   ├── PwdVault-macOS-v0.1.3.zip    # macOS app (3.5MB)
+│   ├── PwdVault-Extension-v0.1.3.zip # Chrome extension (21KB)
 │   └── USAGE.md
 ├── VERSION                       # 4-digit version: 0.0.1.0
 ├── CHANGELOG.md
+├── password_generator_analysis.md # Password generator security analysis & fixes
 └── CLAUDE.md                     # This file
 ```
 
@@ -129,6 +130,13 @@ PwdVault/
 - Vitest + Testing Library + jsdom configured
 - 17 frontend tests passing: passwordStrength (10), vault API client (7)
 
+**Completed: Phase D (v0.1.3) — Password Generator Security Fix**
+- Fixed character type guarantee issue: implemented shuffle-guarantee algorithm ensuring all selected character types are included
+- Upgraded random number generation from thread_rng to OsRng for stronger entropy
+- Added 11 comprehensive password generator tests covering all scenarios
+- Updated both lib.rs and native_messaging.rs with consistent implementation
+- See `password_generator_analysis.md` for detailed technical analysis
+
 ### v0.1.1 (2026-03-31)
 - Auto-lock (10 min timeout), tray menu state sync, browser extension create entry
 
@@ -139,10 +147,10 @@ PwdVault/
 
 | Module | Tests | Command |
 |--------|-------|---------|
-| Rust (total) | 48 | `cd src-tauri && cargo test -- --test-threads=1` |
+| Rust (total) | 53 | `cd src-tauri && cargo test -- --test-threads=1` |
 | crypto | 10 | cipher (4), kdf (3), keystore (2), verification (2) |
 | database | 5 | init, CRUD, list, count, delete |
-| lib.rs | 13 | AppState, generate_password, VaultError, vault lifecycle, CRUD |
+| lib.rs | 18 | AppState, generate_password (11), VaultError, vault lifecycle, CRUD |
 | native_messaging | 20 | 13 API endpoints + locked state checks |
 | Frontend (total) | 17 | `pnpm test` |
 | passwordStrength | 10 | scoring, penalties, edge cases |
@@ -262,9 +270,24 @@ git tag vX.Y.Z && git push origin main --tags
 - Configured Vitest + Testing Library + jsdom
 - 17 frontend tests: passwordStrength calculator and vault API client
 
+**Phase D (v0.1.3) — Password Generator Security Fix:**
+- Fixed character type guarantee issue: implemented shuffle-guarantee algorithm ensuring all selected character types are included
+- Upgraded random number generation from thread_rng to OsRng for stronger entropy
+- Added 11 comprehensive password generator tests covering all scenarios
+- Updated both lib.rs and native_messaging.rs with consistent implementation
+- Created detailed technical analysis document (`password_generator_analysis.md`)
+
+**Phase E (v0.1.3) — Release Packaging:**
+- Fixed TypeScript test compilation error (added missing `tags` property)
+- Rebuilt macOS application bundle (3.5MB)
+- Rebuilt Chrome extension package (21KB)
+- Updated release artifacts in `/releases/` directory
+- Updated CLAUDE.md with v0.1.3 release information
+
 **Technical Notes:**
 - Rust tests require `-- --test-threads=1` due to global in-memory keystore
 - Tauri v2 `MenuItem<R: Runtime>` generic prevents direct storage; solved with closure type erasure (`Box<dyn Fn(&str) + Send + Sync>`)
+- Password generator now guarantees 100% coverage of selected character types using shuffle-guarantee algorithm
 
 ### 2026-03-26 (Phase 1 — Crypto & Core)
 **Duration**: Full day
