@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.3.0] - 2026-04-14 (Published)
+
+### Release
+- Built release artifacts (macOS): `releases/PwdVault_0.1.3_aarch64.dmg`, `releases/PwdVault-macOS-v0.1.3.zip`.
+- Frontend and Rust backend tests pass; production build verified (`pnpm build`, `pnpm tauri build`).
+- See `releases/RELEASE_NOTES_v0.1.3.0.md` for full details and installation instructions.
+
+
 ## [0.1.3.0] - 2026-03-31
 
 ### Added
