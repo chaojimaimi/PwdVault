@@ -94,3 +94,21 @@ export async function removeEntry(id: string): Promise<boolean> {
 export async function getEntryCount(): Promise<number> {
   return invoke('get_entry_count');
 }
+
+// Group Management
+
+export async function createGroup(name: string): Promise<any> {
+  return invoke('create_group', { name });
+}
+
+export async function listAllGroups(): Promise<any[]> {
+  return invoke('list_all_groups');
+}
+
+export async function removeGroup(id: string): Promise<boolean> {
+  return invoke('remove_group', { id });
+}
+
+export async function updateGroup(id: string, name: string): Promise<any> {
+  return invoke('update_group', { id, name });
+}

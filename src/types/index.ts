@@ -12,6 +12,7 @@ export interface CreateEntryRequest {
   password: string;
   notes?: string;
   tags: string[];
+  group_id?: string | null;
 }
 
 export interface EntryResponse {
@@ -22,6 +23,7 @@ export interface EntryResponse {
   password: string;
   notes?: string;
   tags: string[];
+  group_id?: string | null;
   created_at: number;
   updated_at: number;
   last_used_at?: number;
@@ -33,6 +35,14 @@ export interface EntrySummary {
   url?: string;
   username: string;
   tags: string[];
+  group_id?: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface Group {
+  id: string;
+  name: string;
   created_at: number;
   updated_at: number;
 }
@@ -49,7 +59,7 @@ export type VaultError =
 
 // App State Types
 
-export type AppScreen = 'setup' | 'unlock' | 'vault' | 'entry' | 'generator';
+export type AppScreen = 'setup' | 'unlock' | 'vault' | 'entry' | 'generator' | 'groupManager';
 
 export interface VaultState {
   isInitialized: boolean;
@@ -57,6 +67,8 @@ export interface VaultState {
   entries: EntrySummary[];
   selectedEntry: EntryResponse | null;
   searchQuery: string;
+  groups: Group[];
+  selectedGroupId?: string | null;
 }
 
 export interface PasswordGeneratorOptions {

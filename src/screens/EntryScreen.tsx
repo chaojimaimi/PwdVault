@@ -5,6 +5,9 @@ import { getPasswordStrength } from '../utils/passwordStrength';
 import { copyWithTimeout } from '../utils/clipboard';
 import { showToast } from '../utils/toast';
 import type { CreateEntryRequest } from '../types';
+import ConfirmationModal, { ChangeItem } from '../components/ConfirmationModal';
+import DeleteConfirmModal from '../components/DeleteConfirmModal';
+import GroupSelector from '../components/GroupSelector';
 
 export function EntryScreen() {
   const { state, actions } = useApp();
@@ -18,6 +21,7 @@ export function EntryScreen() {
     password: '',
     notes: '',
     tags: [],
+    group_id: null,
   });
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -26,6 +30,11 @@ export function EntryScreen() {
   const [showGenerator, setShowGenerator] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState('');
   const strength = getPasswordStrength(formData.password);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [pendingChanges, setPendingChanges] = useState<CreateEntryRequest | null>(null);
+  const [changesList, setChangesList] = useState<ChangeItem[]>([]);
+  const [isSavingConfirmed, setIsSavingConfirmed] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (state.selectedEntry) {
@@ -36,6 +45,7 @@ export function EntryScreen() {
         password: state.selectedEntry.password,
         notes: state.selectedEntry.notes || '',
         tags: state.selectedEntry.tags,
+        group_id: state.selectedEntry.group_id || null,
       });
     }
   }, [state.selectedEntry]);
@@ -50,37 +60,85 @@ export function EntryScreen() {
       setError('Title, username, and password are required');
       return;
     }
-
-    setIsLoading(true);
+    // Detect changes and show confirmation if editing an existing entry
     setError(null);
 
-    try {
-      if (isNew) {
+    if (isNew) {
+      setIsLoading(true);
+      try {
         await actions.createEntry(formData);
-      } else if (state.selectedEntry) {
-        await actions.updateEntry(state.selectedEntry.id, formData);
+        handleBack();
+      } catch {
+        setError('Failed to create entry');
+      } finally {
+        setIsLoading(false);
       }
-      handleBack();
-    } catch {
-      setError('Failed to save entry');
-    } finally {
-      setIsLoading(false);
+      return;
     }
-  };
 
-  const handleDelete = async () => {
     if (!state.selectedEntry) return;
 
-    if (!confirm('Are you sure you want to delete this entry?')) return;
+    const changes = detectChanges(state.selectedEntry, formData);
+    if (changes.length === 0) {
+      // no changes
+      handleBack();
+      return;
+    }
 
+    setPendingChanges(formData);
+    setChangesList(changes);
+    setShowConfirmation(true);
+  };
+
+  const handleDelete = () => {
+    if (!state.selectedEntry) return;
+    setShowDeleteConfirm(true);
+  };
+
+  const onConfirmDelete = async () => {
+    if (!state.selectedEntry) return;
     setIsLoading(true);
     try {
       await actions.deleteEntry(state.selectedEntry.id);
+      setShowDeleteConfirm(false);
       handleBack();
     } catch {
       setError('Failed to delete entry');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Detect changes between original and current form
+  function detectChanges(original: any, current: CreateEntryRequest): ChangeItem[] {
+    const changes: ChangeItem[] = [];
+    if (original.title !== current.title) changes.push({ fieldId: 'title', label: '标题', oldValue: original.title, newValue: current.title, valueType: 'text' });
+    if ((original.url || '') !== (current.url || '')) changes.push({ fieldId: 'url', label: 'URL', oldValue: original.url || '', newValue: current.url || '', valueType: 'text' });
+    if (original.username !== current.username) changes.push({ fieldId: 'username', label: '用户名', oldValue: original.username, newValue: current.username, valueType: 'text' });
+    if (original.password !== current.password) changes.push({ fieldId: 'password', label: '密码', valueType: 'password' });
+    if ((original.notes || '') !== (current.notes || '')) changes.push({ fieldId: 'notes', label: '备注', oldValue: (original.notes || '').slice(0,200), newValue: (current.notes || '').slice(0,200), valueType: 'notes' });
+    const added = current.tags.filter((t) => !original.tags.includes(t));
+    const removed = (original.tags || []).filter((t: string) => !current.tags.includes(t));
+    if (added.length || removed.length) {
+      changes.push({ fieldId: 'tags', label: '标签', oldValue: removed.join(', '), newValue: added.join(', '), valueType: 'tags' });
+    }
+    if ((original.group_id || null) !== (current.group_id || null)) {
+      changes.push({ fieldId: 'group_id', label: '分组', oldValue: original.group_id || '', newValue: current.group_id || '', valueType: 'text' });
+    }
+    return changes;
+  }
+
+  const onConfirmSave = async () => {
+    if (!pendingChanges || !state.selectedEntry) return;
+    setIsSavingConfirmed(true);
+    try {
+      await actions.updateEntry(state.selectedEntry.id, pendingChanges);
+      setShowConfirmation(false);
+      handleBack();
+    } catch (e: any) {
+      setError('Failed to save entry: ' + (e?.message ?? ''));
+    } finally {
+      setIsSavingConfirmed(false);
     }
   };
 
@@ -260,6 +318,11 @@ export function EntryScreen() {
         </div>
 
         <div className="form-group">
+          <label>Group</label>
+          <div style={{ marginBottom: '0.5rem' }}>
+            <GroupSelector value={formData.group_id || null} onChange={(id) => setFormData({ ...formData, group_id: id })} />
+          </div>
+
           <label>Tags</label>
           <div className="entry-tags" style={{ marginBottom: '0.5rem' }}>
             {formData.tags.map((tag) => (
@@ -294,6 +357,26 @@ export function EntryScreen() {
           {isLoading ? 'Saving...' : 'Save'}
         </button>
       </div>
+
+      {/* Confirmation modal */}
+      <ConfirmationModal
+        isOpen={showConfirmation}
+        changes={changesList}
+        onCancel={() => setShowConfirmation(false)}
+        onConfirm={onConfirmSave}
+        isSaving={isSavingConfirmed}
+      />
+
+      {/* Delete confirmation modal */}
+      <DeleteConfirmModal
+        isOpen={showDeleteConfirm}
+        message={`Are you sure you want to delete "${state.selectedEntry?.title || 'this entry'}"? This cannot be undone.`}
+        onConfirm={onConfirmDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+        isDeleting={isLoading}
+      />
     </div>
   );
 }
+
+export default EntryScreen;

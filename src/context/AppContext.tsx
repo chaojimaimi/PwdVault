@@ -1,4 +1,16 @@
 import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
+// debug: log module URL when loaded under test to help diagnose hook/duplicate-React issues
+// eslint-disable-next-line no-console
+console.log('LOADED AppContext module:', typeof import.meta !== 'undefined' ? String(import.meta.url) : 'no import.meta');
+// debug react identity
+// eslint-disable-next-line no-console
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // @ts-ignore
+  console.log('AppContext react.resolve ->', require.resolve('react'));
+} catch (e) {
+  // ignore
+}
 import type { EntrySummary, EntryResponse, VaultState, AppScreen } from '../types';
 import * as api from '../api/vault';
 
@@ -26,6 +38,8 @@ type Action =
   | { type: 'SET_INITIALIZED'; payload: boolean }
   | { type: 'SET_UNLOCKED'; payload: boolean }
   | { type: 'SET_ENTRIES'; payload: EntrySummary[] }
+  | { type: 'SET_GROUPS'; payload: import('../types').Group[] }
+  | { type: 'SET_SELECTED_GROUP'; payload: string | null }
   | { type: 'SET_SELECTED_ENTRY'; payload: EntryResponse | null }
   | { type: 'SET_SEARCH_QUERY'; payload: string }
   | { type: 'SET_SCREEN'; payload: AppScreen }
@@ -38,6 +52,8 @@ const initialState: AppState = {
   isInitialized: false,
   isUnlocked: false,
   entries: [],
+  groups: [],
+  selectedGroupId: null,
   selectedEntry: null,
   searchQuery: '',
   isLoading: true,
@@ -52,6 +68,10 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, isUnlocked: action.payload };
     case 'SET_ENTRIES':
       return { ...state, entries: action.payload };
+    case 'SET_GROUPS':
+      return { ...state, groups: action.payload };
+    case 'SET_SELECTED_GROUP':
+      return { ...state, selectedGroupId: action.payload };
     case 'SET_SELECTED_ENTRY':
       return { ...state, selectedEntry: action.payload };
     case 'SET_SEARCH_QUERY':
@@ -77,6 +97,11 @@ interface AppContextValue {
     unlock: (password: string) => Promise<boolean>;
     lock: () => void;
     loadEntries: () => Promise<void>;
+    loadGroups: () => Promise<void>;
+    createGroup: (name: string) => Promise<void>;
+    updateGroup: (id: string, name: string) => Promise<void>;
+    deleteGroup: (id: string) => Promise<void>;
+    selectGroup: (id: string | null) => void;
     selectEntry: (id: string | null) => Promise<void>;
     getEntry: (id: string) => Promise<EntryResponse | null>;
     createEntry: (data: Parameters<typeof api.createEntry>[0]) => Promise<EntrySummary>;
@@ -87,7 +112,7 @@ interface AppContextValue {
   };
 }
 
-const AppContext = createContext<AppContextValue | null>(null);
+export const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -156,6 +181,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         dispatch({ type: 'SET_ERROR', payload: formatError(error) });
       }
+    },
+    
+
+    loadGroups: async () => {
+      try {
+        const groups = await api.listAllGroups();
+        dispatch({ type: 'SET_GROUPS', payload: groups || [] });
+      } catch (error) {
+        dispatch({ type: 'SET_ERROR', payload: formatError(error) });
+      }
+    },
+
+    createGroup: async (name: string) => {
+      try {
+        await api.createGroup(name);
+        await actions.loadGroups();
+      } catch (error) {
+        dispatch({ type: 'SET_ERROR', payload: formatError(error) });
+        throw error;
+      }
+    },
+
+    updateGroup: async (id: string, name: string) => {
+      try {
+        await api.updateGroup(id, name);
+        await actions.loadGroups();
+      } catch (error) {
+        dispatch({ type: 'SET_ERROR', payload: formatError(error) });
+        throw error;
+      }
+    },
+
+    deleteGroup: async (id: string) => {
+      try {
+        await api.removeGroup(id);
+        await actions.loadGroups();
+      } catch (error) {
+        dispatch({ type: 'SET_ERROR', payload: formatError(error) });
+        throw error;
+      }
+    },
+
+    selectGroup: (id: string | null) => {
+      dispatch({ type: 'SET_SELECTED_GROUP', payload: id });
     },
 
     selectEntry: async (id: string | null) => {

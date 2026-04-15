@@ -4,6 +4,9 @@ import { UnlockScreen } from './screens/UnlockScreen';
 import { VaultScreen } from './screens/VaultScreen';
 import { EntryScreen } from './screens/EntryScreen';
 import { GeneratorScreen } from './screens/GeneratorScreen';
+import GroupManager from './screens/GroupManager';
+import { ThemeProvider } from './components/ThemeProvider';
+import './styles/themes.css';
 import './styles/App.css';
 
 function AppContent() {
@@ -31,6 +34,8 @@ function AppContent() {
       return <EntryScreen />;
     case 'generator':
       return <GeneratorScreen />;
+    case 'groupManager':
+      return <GroupManager />;
     default:
       return <UnlockScreen />;
   }
@@ -38,9 +43,11 @@ function AppContent() {
 
 function App() {
   return (
-    <AppProvider>
-      <AppContent />
-    </AppProvider>
+    <ThemeProvider>
+      <AppProvider>
+        <AppContent />
+      </AppProvider>
+    </ThemeProvider>
   );
 }
 

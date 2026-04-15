@@ -27,7 +27,11 @@ static KEYSTORE: Lazy<Mutex<Option<EncryptionKey>>> = Lazy::new(|| Mutex::new(No
 pub fn set_key(key: [u8; KEY_SIZE]) -> Result<(), KeyStoreError> {
     let mut keystore = KEYSTORE.lock().unwrap();
 
-    if keystore.is_some() {
+    // Idempotent: if already unlocked with the same key, succeed silently
+    if let Some(existing) = keystore.as_ref() {
+        if existing == &key {
+            return Ok(());
+        }
         return Err(KeyStoreError::AlreadyUnlocked);
     }
 
@@ -86,6 +90,18 @@ mod tests {
 
         set_key([1u8; KEY_SIZE]).unwrap();
         assert!(set_key([2u8; KEY_SIZE]).is_err());
+
+        clear_keystore();
+    }
+
+    #[test]
+    fn test_idempotent_set_same_key() {
+        clear_keystore();
+
+        let key = [42u8; KEY_SIZE];
+        set_key(key).unwrap();
+        // Setting the same key again should succeed (idempotent)
+        assert!(set_key(key).is_ok());
 
         clear_keystore();
     }

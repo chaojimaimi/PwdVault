@@ -30,3 +30,4 @@ extensions/native-host/target/
 # Database files (user data)
 *.db
 vault.db
+.gstack/

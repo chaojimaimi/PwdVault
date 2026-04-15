@@ -23,13 +23,13 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
       - run: pnpm install
-      - run: pnpm tauri build --bundles app
+      - run: pnpm tauri build --bundles dmg
         env:
           APPLE_SIGNING_IDENTITY: '-'
       - uses: actions/upload-artifact@v4
         with:
           name: PwdVault-macOS
-          path: src-tauri/target/release/bundle/macos/PwdVault.app
+          path: src-tauri/target/release/bundle/dmg/*.dmg
 
   build-windows:
     runs-on: windows-latest

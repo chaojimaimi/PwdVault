@@ -15,6 +15,7 @@ use super::VerificationData;
 
 const VAULT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vault");
 const ENTRIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("entries");
+const GROUPS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("groups");
 
 // ============================================================================
 // Error Types
@@ -74,6 +75,54 @@ pub struct PasswordEntry {
     pub updated_at: i64,
     /// Last used timestamp
     pub last_used_at: Option<i64>,
+    /// Optional group id this entry belongs to
+    #[serde(default)]
+    pub group_id: Option<String>,
+}
+
+/// Legacy entry format (before group_id was added) for migration
+#[derive(Debug, Deserialize)]
+struct LegacyPasswordEntry {
+    id: String,
+    title: String,
+    url: Option<String>,
+    username: String,
+    encrypted_password: Vec<u8>,
+    encrypted_notes: Option<Vec<u8>>,
+    tags: Vec<String>,
+    created_at: i64,
+    updated_at: i64,
+    last_used_at: Option<i64>,
+}
+
+impl From<LegacyPasswordEntry> for PasswordEntry {
+    fn from(old: LegacyPasswordEntry) -> Self {
+        Self {
+            id: old.id,
+            title: old.title,
+            url: old.url,
+            username: old.username,
+            encrypted_password: old.encrypted_password,
+            encrypted_notes: old.encrypted_notes,
+            tags: old.tags,
+            created_at: old.created_at,
+            updated_at: old.updated_at,
+            last_used_at: old.last_used_at,
+            group_id: None,
+        }
+    }
+}
+
+/// Deserialize a PasswordEntry, falling back to legacy format if group_id is missing
+fn deserialize_entry(data: &[u8]) -> Result<PasswordEntry, DatabaseError> {
+    // Try current format first
+    if let Ok(entry) = bincode::deserialize::<PasswordEntry>(data) {
+        return Ok(entry);
+    }
+    // Fall back to legacy format (without group_id)
+    bincode::deserialize::<LegacyPasswordEntry>(data)
+        .map(|old| old.into())
+        .map_err(|e| DatabaseError::SerializationError(e.to_string()))
 }
 
 impl PasswordEntry {
@@ -91,6 +140,28 @@ impl PasswordEntry {
             created_at: now,
             updated_at: now,
             last_used_at: None,
+            group_id: None,
+        }
+    }
+}
+
+/// A logical group (folder) for entries
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Group {
+    pub id: String,
+    pub name: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl Group {
+    pub fn new(name: String) -> Self {
+        let now = chrono::Utc::now().timestamp();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            created_at: now,
+            updated_at: now,
         }
     }
 }
@@ -107,6 +178,7 @@ pub fn init_database<P: AsRef<Path>>(path: P) -> Result<Database, DatabaseError>
     let write_txn = db.begin_write()?;
     write_txn.open_table(VAULT_TABLE)?;
     write_txn.open_table(ENTRIES_TABLE)?;
+    write_txn.open_table(GROUPS_TABLE)?;
     write_txn.commit()?;
 
     Ok(db)
@@ -167,8 +239,7 @@ pub fn load_entry(db: &Database, id: &str) -> Result<Option<PasswordEntry>, Data
 
     match table.get(id)? {
         Some(value) => {
-            let entry: PasswordEntry = bincode::deserialize(value.value())
-                .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
+            let entry = deserialize_entry(value.value())?;
             Ok(Some(entry))
         }
         None => Ok(None),
@@ -205,6 +276,69 @@ pub fn list_entries(db: &Database) -> Result<Vec<String>, DatabaseError> {
 pub fn count_entries(db: &Database) -> Result<usize, DatabaseError> {
     let read_txn = db.begin_read()?;
     let table = read_txn.open_table(ENTRIES_TABLE)?;
+    Ok(table.len()? as usize)
+}
+
+/// Save a group to the database
+pub fn save_group(db: &Database, group: &Group) -> Result<(), DatabaseError> {
+    let encoded = bincode::serialize(group)
+        .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
+
+    let write_txn = db.begin_write()?;
+    {
+        let mut table = write_txn.open_table(GROUPS_TABLE)?;
+        table.insert(group.id.as_str(), encoded.as_slice())?;
+    }
+    write_txn.commit()?;
+
+    Ok(())
+}
+
+/// Load a group from the database
+pub fn load_group(db: &Database, id: &str) -> Result<Option<Group>, DatabaseError> {
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(GROUPS_TABLE)?;
+
+    match table.get(id)? {
+        Some(value) => {
+            let g: Group = bincode::deserialize(value.value())
+                .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
+            Ok(Some(g))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Delete a group
+pub fn delete_group(db: &Database, id: &str) -> Result<bool, DatabaseError> {
+    let write_txn = db.begin_write()?;
+    let existed = {
+        let mut table = write_txn.open_table(GROUPS_TABLE)?;
+        let result = table.remove(id)?;
+        result.is_some()
+    };
+    write_txn.commit()?;
+    Ok(existed)
+}
+
+/// List all groups' IDs
+pub fn list_groups(db: &Database) -> Result<Vec<String>, DatabaseError> {
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(GROUPS_TABLE)?;
+
+    let mut ids = Vec::new();
+    for result in table.iter()? {
+        let (key, _) = result?;
+        ids.push(key.value().to_string());
+    }
+
+    Ok(ids)
+}
+
+/// Count groups
+pub fn count_groups(db: &Database) -> Result<usize, DatabaseError> {
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(GROUPS_TABLE)?;
     Ok(table.len()? as usize)
 }
 
@@ -291,5 +425,60 @@ mod tests {
         save_entry(&db, &entry).unwrap();
 
         assert_eq!(count_entries(&db).unwrap(), 1);
+    }
+
+    #[test]
+    fn test_save_and_load_group() {
+        let (db, _temp) = get_test_db();
+
+        let group = Group::new("Personal".to_string());
+        save_group(&db, &group).unwrap();
+
+        let loaded = load_group(&db, &group.id).unwrap();
+        assert!(loaded.is_some());
+        let loaded = loaded.unwrap();
+        assert_eq!(group.id, loaded.id);
+        assert_eq!(group.name, loaded.name);
+    }
+
+    #[test]
+    fn test_delete_group() {
+        let (db, _temp) = get_test_db();
+
+        let group = Group::new("Work".to_string());
+        save_group(&db, &group).unwrap();
+        assert!(load_group(&db, &group.id).unwrap().is_some());
+
+        let deleted = delete_group(&db, &group.id).unwrap();
+        assert!(deleted);
+        assert!(load_group(&db, &group.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_list_groups() {
+        let (db, _temp) = get_test_db();
+
+        let g1 = Group::new("A".to_string());
+        let g2 = Group::new("B".to_string());
+
+        save_group(&db, &g1).unwrap();
+        save_group(&db, &g2).unwrap();
+
+        let ids = list_groups(&db).unwrap();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&g1.id));
+        assert!(ids.contains(&g2.id));
+    }
+
+    #[test]
+    fn test_count_groups() {
+        let (db, _temp) = get_test_db();
+
+        assert_eq!(count_groups(&db).unwrap(), 0);
+
+        let g = Group::new("X".to_string());
+        save_group(&db, &g).unwrap();
+
+        assert_eq!(count_groups(&db).unwrap(), 1);
     }
 }

@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+
+## [0.2.0.0] - 2026-04-15
+
+### Added
+- **Design system implementation**: Three visual themes (Classic, Cyber, Hybrid) fully applied to all screens
+  - Type scale variables (`--text-h1` through `--text-micro`) per DESIGN.md
+  - Spacing tokens (`--space-xs` through `--space-2xl`, 4px base unit)
+  - Icon style tokens (`--icon-style`: solid / hollow / glow per theme)
+- **Group tabs UI**: Replaced `<select>` dropdown with horizontal scrollable group filter tabs
+  - Active tab highlighted with primary color
+  - Manage groups gear icon in tabs bar
+  - "Create group" prompt when no groups exist
+  - Search input with magnifying glass icon
+- **Theme-specific effects**:
+  - Cyber: hollow entry icons (border + glow outline)
+  - Hybrid: password fields in primary color, subtle hover glow
+- **DMG packaging**: macOS DMG installer now built alongside .app bundle
+
+### Changed
+- All hardcoded `px`/`rem` values in App.css replaced with CSS custom properties
+- VaultScreen layout: search bar → group tabs → entry list (cleaner hierarchy)
+- Removed inline styles from VaultScreen (proper CSS classes)
+- Font sizes, padding, gaps all driven by design tokens from themes.css
+
+### Release Artifacts
+- `releases/PwdVault_0.2.0_aarch64.dmg` (3.6MB)
+- `releases/PwdVault-macOS-v0.2.0.zip` (3.5MB)
+- `releases/PwdVault-Extension-v0.2.0.zip` (20.8KB)
+
+
 ## [0.1.3.0] - 2026-04-14 (Published)
 
 ### Release

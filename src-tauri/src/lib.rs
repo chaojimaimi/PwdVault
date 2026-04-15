@@ -23,7 +23,19 @@ use crypto::{
     unlock_with_password, EncryptedData, EncryptionError, KeyStoreError, KdfError,
     VerificationData,
 };
-use database::{count_entries, delete_entry, list_entries, load_entry, save_entry, PasswordEntry};
+    use database::{
+    count_entries,
+    delete_entry,
+    list_entries,
+    load_entry,
+    save_entry,
+    PasswordEntry,
+    Group,
+    save_group,
+    load_group,
+    delete_group,
+    list_groups,
+};
 
 // ============================================================================
 // Constants
@@ -327,6 +339,7 @@ pub struct CreateEntryRequest {
     pub password: String,
     pub notes: Option<String>,
     pub tags: Vec<String>,
+    pub group_id: Option<String>,
 }
 
 /// Response for password entry (password decrypted)
@@ -339,6 +352,7 @@ pub struct EntryResponse {
     pub password: String,
     pub notes: Option<String>,
     pub tags: Vec<String>,
+    pub group_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     pub last_used_at: Option<i64>,
@@ -352,6 +366,7 @@ pub struct EntrySummary {
     pub url: Option<String>,
     pub username: String,
     pub tags: Vec<String>,
+    pub group_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -364,6 +379,7 @@ impl From<PasswordEntry> for EntrySummary {
             url: entry.url,
             username: entry.username,
             tags: entry.tags,
+            group_id: entry.group_id,
             created_at: entry.created_at,
             updated_at: entry.updated_at,
         }
@@ -398,6 +414,7 @@ fn create_entry(request: CreateEntryRequest, state: State<'_, Arc<AppState>>) ->
     entry.encrypted_password = encrypted_password_bytes;
     entry.encrypted_notes = encrypted_notes;
     entry.tags = request.tags;
+    entry.group_id = request.group_id;
 
     save_entry(&db, &entry)?;
 
@@ -444,6 +461,7 @@ fn get_entry(id: String, state: State<'_, Arc<AppState>>) -> Result<EntryRespons
         password,
         notes,
         tags: entry.tags,
+        group_id: entry.group_id,
         created_at: entry.created_at,
         updated_at: entry.updated_at,
         last_used_at: entry.last_used_at,
@@ -491,6 +509,7 @@ fn update_entry(
     entry.url = request.url;
     entry.username = request.username;
     entry.tags = request.tags;
+    entry.group_id = request.group_id;
     entry.updated_at = chrono::Utc::now().timestamp();
 
     // Encrypt and update password
@@ -511,6 +530,72 @@ fn update_entry(
     state.touch_activity();
 
     Ok(entry.into())
+}
+
+// ============================================================================
+// Group Management Commands
+// ============================================================================
+
+#[tauri::command]
+fn create_group(name: String, state: State<'_, Arc<AppState>>) -> Result<Group, VaultError> {
+    if !is_unlocked() {
+        return Err(VaultError::VaultLocked);
+    }
+
+    let db = get_db(&state)?;
+    let group = Group::new(name);
+    save_group(&db, &group)?;
+
+    state.touch_activity();
+    Ok(group)
+}
+
+#[tauri::command]
+fn list_all_groups(state: State<'_, Arc<AppState>>) -> Result<Vec<Group>, VaultError> {
+    if !is_unlocked() {
+        return Err(VaultError::VaultLocked);
+    }
+
+    let db = get_db(&state)?;
+    let ids = list_groups(&db)?;
+    let mut groups = Vec::new();
+    for id in ids {
+        if let Some(g) = load_group(&db, &id)? {
+            groups.push(g);
+        }
+    }
+
+    state.touch_activity();
+    Ok(groups)
+}
+
+#[tauri::command]
+fn remove_group(id: String, state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
+    if !is_unlocked() {
+        return Err(VaultError::VaultLocked);
+    }
+
+    let db = get_db(&state)?;
+    let existed = delete_group(&db, &id)?;
+
+    state.touch_activity();
+    Ok(existed)
+}
+
+#[tauri::command]
+fn update_group(id: String, name: String, state: State<'_, Arc<AppState>>) -> Result<Group, VaultError> {
+    if !is_unlocked() {
+        return Err(VaultError::VaultLocked);
+    }
+
+    let db = get_db(&state)?;
+    let mut group = load_group(&db, &id)?.ok_or(VaultError::InternalError("Group not found".to_string()))?;
+    group.name = name;
+    group.updated_at = chrono::Utc::now().timestamp();
+    save_group(&db, &group)?;
+
+    state.touch_activity();
+    Ok(group)
 }
 
 #[tauri::command]
@@ -729,6 +814,11 @@ pub fn run() {
             update_entry,
             remove_entry,
             get_entry_count,
+            // Group management
+            create_group,
+            list_all_groups,
+            remove_group,
+            update_group,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
