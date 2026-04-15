@@ -388,6 +388,20 @@ Next steps:
 - "Create group" prompt shown when no groups exist
 - Removed all inline styles from VaultScreen component
 
+**ConfirmationModal & DeleteConfirmModal Redesign:**
+- Replaced all inline styles with CSS classes
+- Edit confirmation: icon header (pen icon in primary-dim circle), diff-style change list (~~old~~ → **new**), checkbox + Save/Cancel buttons
+- Delete confirmation: danger icon header (trash in danger-dim circle), message body, Cancel/Delete buttons
+- Consistent modal layout: header → content → footer
+
+**GroupManager Redesign:**
+- Card-based layout: each group as a card with folder icon, name, and entry count
+- Action buttons always visible with `background: var(--color-input)` + `border: 1px solid var(--color-border)`
+- Rename: 32px icon button, hover → primary color highlight
+- Delete: 32px icon button, hover → danger color highlight
+- New group: inline input bar with primary border accent, Enter/Escape key support
+- Header + button in top-right for creating groups (consistent with vault page pattern)
+
 **Release Artifacts:**
 - `PwdVault_0.2.0_aarch64.dmg` (3.6MB) — macOS DMG installer
 - `PwdVault-macOS-v0.2.0.zip` (3.5MB) — macOS .app bundle

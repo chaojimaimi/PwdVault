@@ -27,6 +27,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - VaultScreen layout: search bar → group tabs → entry list (cleaner hierarchy)
 - Removed inline styles from VaultScreen (proper CSS classes)
 - Font sizes, padding, gaps all driven by design tokens from themes.css
+- **ConfirmationModal**: Redesigned edit-confirmation dialog with diff-style change display, icon header, proper CSS classes (removed all inline styles)
+- **DeleteConfirmModal**: Redesigned with danger icon header, consistent modal layout
+- **GroupManager**: Redesigned with card-based layout, folder icons with entry counts, visible action buttons (border + background)
+  - Rename button: input bg + border, hover → primary color highlight
+  - Delete button: input bg + border, hover → danger color highlight
+  - New group: inline input bar with primary border accent
 
 ### Release Artifacts
 - `releases/PwdVault_0.2.0_aarch64.dmg` (3.6MB)

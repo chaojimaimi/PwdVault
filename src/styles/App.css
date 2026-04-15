@@ -803,3 +803,358 @@
 .theme-dot-hybrid {
   background: linear-gradient(135deg, #06B6D4, #F472B6);
 }
+
+/* ===== Confirmation Modal (Edit Changes) ===== */
+
+.confirm-modal {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 420px;
+  max-height: 90vh;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+}
+
+.confirm-modal-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.confirm-modal-icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--color-primary-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.confirm-modal-icon svg {
+  width: 18px;
+  height: 18px;
+  color: var(--color-primary);
+}
+
+.confirm-modal-title {
+  font-size: var(--text-h2);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.confirm-modal-subtitle {
+  font-size: var(--text-label);
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+.confirm-changes-list {
+  padding: var(--space-sm) var(--space-lg);
+}
+
+.confirm-change-item {
+  padding: var(--space-md) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.confirm-change-item:last-child {
+  border-bottom: none;
+}
+
+.confirm-change-label {
+  display: block;
+  font-size: var(--text-label);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: var(--space-xs);
+}
+
+.confirm-change-diff {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--text-body);
+}
+
+.confirm-change-old {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.confirm-change-arrow {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--color-primary);
+}
+
+.confirm-change-new {
+  color: var(--color-primary);
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.confirm-modal-footer {
+  padding: var(--space-md) var(--space-lg) var(--space-lg);
+}
+
+.confirm-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+  font-size: var(--text-label);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.confirm-checkbox input[type="checkbox"] {
+  accent-color: var(--color-primary);
+  width: 16px;
+  height: 16px;
+}
+
+.confirm-modal-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.confirm-modal-actions .btn {
+  flex: 1;
+}
+
+.confirm-save-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ===== Group Manager ===== */
+
+.group-manager {
+  height: 100vh;
+  background: var(--color-bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.group-manager-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+}
+
+.group-create-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  background: var(--color-surface);
+  border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-sm) var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.group-create-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--color-primary);
+}
+
+.group-create-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 0.5rem 0;
+}
+
+.group-create-input:focus {
+  outline: none;
+  box-shadow: none;
+  border: none;
+}
+
+.group-create-save {
+  width: auto;
+  padding: 0.375rem var(--space-md);
+  font-size: var(--text-label);
+  flex-shrink: 0;
+}
+
+.group-create-cancel {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.group-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.group-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: border-color 0.15s ease;
+}
+
+.group-card:hover {
+  border-color: var(--color-border-light);
+}
+
+.group-card-edit {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+  width: 100%;
+}
+
+.group-edit-input {
+  flex: 1;
+}
+
+.group-edit-save {
+  width: auto;
+  padding: 0.375rem var(--space-md);
+  font-size: var(--text-label);
+  flex-shrink: 0;
+}
+
+.group-edit-cancel {
+  width: auto;
+  padding: 0.375rem var(--space-md);
+  font-size: var(--text-label);
+  flex-shrink: 0;
+}
+
+.group-card-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex: 1;
+  min-width: 0;
+}
+
+.group-card-icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--color-primary-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.group-card-icon svg {
+  width: 18px;
+  height: 18px;
+  color: var(--color-primary);
+}
+
+.group-card-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.group-card-name {
+  font-size: var(--text-body);
+  font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-card-count {
+  font-size: var(--text-micro);
+  color: var(--color-text-muted);
+}
+
+.group-card-actions {
+  display: flex;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+
+.group-action-rename,
+.group-action-delete {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  padding: 0;
+  border: 1px solid var(--color-border);
+  background: var(--color-input);
+}
+
+.group-action-rename svg,
+.group-action-delete svg {
+  width: 16px;
+  height: 16px;
+}
+
+.group-action-rename {
+  color: var(--color-text);
+}
+
+.group-action-rename:hover {
+  color: var(--color-primary);
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-dim);
+}
+
+.group-action-delete {
+  color: var(--color-text);
+}
+
+.group-action-delete:hover {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+  background: var(--color-danger-dim);
+}
+
+/* ===== Delete Confirm specifics ===== */
+
+.confirm-modal-icon-danger {
+  background: var(--color-danger-dim);
+}
+
+.confirm-modal-icon-danger svg {
+  color: var(--color-danger);
+}
+
+.confirm-modal-body {
+  padding: var(--space-lg);
+}
+
+.confirm-delete-message {
+  font-size: var(--text-body);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}

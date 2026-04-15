@@ -46,6 +46,11 @@ export default function GroupManager() {
     }
   };
 
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditingName('');
+  };
+
   const onConfirmDelete = async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
@@ -64,6 +69,9 @@ export default function GroupManager() {
     actions.navigate('vault');
   };
 
+  const groupCount = (groupId: string) =>
+    state.entries.filter((e) => (e as any).group_id === groupId).length;
+
   return (
     <div className="group-manager">
       <header className="entry-header">
@@ -73,58 +81,103 @@ export default function GroupManager() {
           </svg>
         </button>
         <h2>Groups</h2>
-        <div style={{ width: '40px' }} />
+        <button
+          className="btn btn-icon"
+          onClick={() => { setIsCreating(true); setNewGroupName(''); }}
+          title="New group"
+        >
+          <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
       </header>
 
-      <div className="entry-content">
+      <div className="group-manager-content">
         {error && <div className="error-message">{error}</div>}
 
-        <div style={{ marginBottom: '1rem' }}>
-          {isCreating ? (
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <input
-                type="text"
-                className="form-input"
-                value={newGroupName}
-                onChange={(e) => setNewGroupName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-                placeholder="Group name"
-                autoFocus
-              />
-              <button className="btn btn-primary" onClick={handleCreate}>Save</button>
-              <button className="btn btn-secondary" onClick={() => { setIsCreating(false); setNewGroupName(''); }}>Cancel</button>
-            </div>
-          ) : (
-            <button className="btn btn-primary" onClick={() => setIsCreating(true)}>New Group</button>
-          )}
-        </div>
+        {isCreating && (
+          <div className="group-create-bar">
+            <svg className="group-create-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+            </svg>
+            <input
+              type="text"
+              className="form-input group-create-input"
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCreate();
+                if (e.key === 'Escape') { setIsCreating(false); setNewGroupName(''); }
+              }}
+              placeholder="New group name..."
+              autoFocus
+            />
+            <button className="btn btn-primary group-create-save" onClick={handleCreate} disabled={!newGroupName.trim()}>
+              Create
+            </button>
+            <button className="btn btn-icon group-create-cancel" onClick={() => { setIsCreating(false); setNewGroupName(''); }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {state.groups.length === 0 && !isCreating && (
+          <div className="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+            </svg>
+            <p>No groups yet</p>
+            <p style={{ fontSize: 'var(--text-micro)', marginTop: 'var(--space-xs)' }}>
+              Tap + to create your first group
+            </p>
+          </div>
+        )}
 
         <div className="group-list">
-          {state.groups.length === 0 && !isCreating && (
-            <div className="empty-state">
-              <p>No groups yet</p>
-            </div>
-          )}
           {state.groups.map((g) => (
-            <div key={g.id} className="group-item">
+            <div key={g.id} className="group-card">
               {editingId === g.id ? (
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', width: '100%' }}>
+                <div className="group-card-edit">
                   <input
                     value={editingName}
                     onChange={(e) => setEditingName(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && saveEdit()}
-                    className="form-input"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') saveEdit();
+                      if (e.key === 'Escape') cancelEdit();
+                    }}
+                    className="form-input group-edit-input"
                     autoFocus
                   />
-                  <button className="btn" onClick={saveEdit}>Save</button>
-                  <button className="btn btn-secondary" onClick={() => setEditingId(null)}>Cancel</button>
+                  <button className="btn btn-primary group-edit-save" onClick={saveEdit}>Save</button>
+                  <button className="btn btn-secondary group-edit-cancel" onClick={cancelEdit}>Cancel</button>
                 </div>
               ) : (
                 <>
-                  <span>{g.name}</span>
-                  <div>
-                    <button className="btn" onClick={() => startEdit(g.id, g.name)}>Rename</button>
-                    <button className="btn btn-danger" onClick={() => setDeleteTarget({ id: g.id, name: g.name })}>Delete</button>
+                  <div className="group-card-info">
+                    <div className="group-card-icon">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                      </svg>
+                    </div>
+                    <div className="group-card-text">
+                      <span className="group-card-name">{g.name}</span>
+                      <span className="group-card-count">{groupCount(g.id)} {groupCount(g.id) === 1 ? 'entry' : 'entries'}</span>
+                    </div>
+                  </div>
+                  <div className="group-card-actions">
+                    <button className="btn btn-icon group-action-rename" onClick={() => startEdit(g.id, g.name)} title="Rename">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+                      </svg>
+                    </button>
+                    <button className="btn btn-icon group-action-delete" onClick={() => setDeleteTarget({ id: g.id, name: g.name })} title="Delete">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="3,6 5,6 21,6" />
+                        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                      </svg>
+                    </button>
                   </div>
                 </>
               )}
