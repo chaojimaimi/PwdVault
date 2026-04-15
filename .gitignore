@@ -31,3 +31,9 @@ extensions/native-host/target/
 *.db
 vault.db
 .gstack/
+
+# Release artifacts (use GitHub Releases instead)
+/releases/*.zip
+/releases/*.dmg
+/releases/*.exe
+/releases/*.db.bak
