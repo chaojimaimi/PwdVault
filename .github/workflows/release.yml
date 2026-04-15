@@ -2,6 +2,11 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v0.2.0)'
+        required: true
+        type: string
   push:
     tags:
       - 'v*'
@@ -11,44 +16,168 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
         with:
           version: latest
+
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*
           cache: 'pnpm'
+
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
-      - run: pnpm install
-      - run: pnpm tauri build --bundles dmg
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build macOS app (DMG + app bundle)
+        run: pnpm tauri build --bundles dmg,app
         env:
           APPLE_SIGNING_IDENTITY: '-'
+
+      - name: Package macOS release
+        run: |
+          mkdir -p releases/macos
+          # Copy DMG
+          cp src-tauri/target/release/bundle/dmg/*.dmg releases/macos/ || true
+          # Create zip of app bundle
+          cd src-tauri/target/release/bundle/macos
+          if [ -d "PwdVault.app" ]; then
+            zip -r "../../../../../../releases/macos/PwdVault-macOS-app.zip" PwdVault.app
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: PwdVault-macOS
-          path: src-tauri/target/release/bundle/dmg/*.dmg
+          path: releases/macos/*
 
   build-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
         with:
           version: latest
+
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*
           cache: 'pnpm'
+
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
-      - run: pnpm install
-      - run: pnpm tauri build
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build Windows installer
+        run: pnpm tauri build --bundles nsis
+
+      - name: Package Windows release
+        run: |
+          mkdir releases/windows
+          copy src-tauri\target\release\bundle\nsis\*.exe releases\windows\
+
       - uses: actions/upload-artifact@v4
         with:
           name: PwdVault-Windows
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          path: releases/windows/*
+
+  build-extension:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package Chrome extension
+        run: |
+          mkdir -p releases/extension
+          cd extensions/chrome
+          zip -r ../../releases/extension/PwdVault-Extension.zip . -x "*.DS_Store" "test-page.html" "TEST_RESULTS.md"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PwdVault-Extension
+          path: releases/extension/*
+
+  create-release:
+    needs: [build-macos, build-windows, build-extension]
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          if [[ "${{ github.ref }}" == "refs/tags/"* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          else
+            VERSION=${{ github.event.inputs.version }}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Selected version: $VERSION"
+
+      - name: Read CHANGELOG
+        id: changelog
+        run: |
+          # Extract changelog for this version
+          VERSION=${{ steps.get_version.outputs.version }}
+          # Remove 'v' prefix for CHANGELOG matching
+          VERSION_CLEAN=${VERSION#v}
+
+          if [ -f CHANGELOG.md ]; then
+            # Try different version formats
+            if grep -q "\[$VERSION_CLEAN\]" CHANGELOG.md; then
+              # Format: [0.2.0.0]
+              awk "/\[$VERSION_CLEAN\]/,/^## / {print}" CHANGELOG.md | head -n -1 > release_notes.txt
+            elif grep -q "## $VERSION" CHANGELOG.md; then
+              # Format: ## v0.2.0
+              awk "/## $VERSION/,/^## / {print}" CHANGELOG.md | head -n -1 > release_notes.txt
+            else
+              # Fallback: get first 50 lines
+              head -50 CHANGELOG.md > release_notes.txt
+            fi
+          else
+            echo "See CHANGELOG.md for details" > release_notes.txt
+          fi
+
+          echo "Release notes preview:"
+          head -20 release_notes.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          name: PwdVault ${{ steps.get_version.outputs.version }}
+          body_path: release_notes.txt
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/PwdVault-macOS/*.*
+            artifacts/PwdVault-Windows/*.*
+            artifacts/PwdVault-Extension/*.*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
