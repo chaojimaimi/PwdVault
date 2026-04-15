@@ -48,9 +48,9 @@ jobs:
           # Copy DMG
           cp src-tauri/target/release/bundle/dmg/*.dmg releases/macos/ || true
           # Create zip of app bundle
-          cd src-tauri/target/release/bundle/macos
-          if [ -d "PwdVault.app" ]; then
-            zip -r "../../../../../../releases/macos/PwdVault-macOS-app.zip" PwdVault.app
+          if [ -d "src-tauri/target/release/bundle/macos/PwdVault.app" ]; then
+            cd src-tauri/target/release/bundle/macos
+            zip -r "${GITHUB_WORKSPACE}/releases/macos/PwdVault-macOS-app.zip" PwdVault.app
           fi
 
       - uses: actions/upload-artifact@v4
