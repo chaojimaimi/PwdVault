@@ -79,7 +79,25 @@ async function createEntry(entry) {
     password: entry.password,
     notes: entry.notes,
     tags: entry.tags || [],
+    group_id: entry.group_id || null,
   });
+}
+
+// Group API wrappers
+async function getGroups() {
+  return sendToApp('list_all_groups');
+}
+
+async function createGroup(name) {
+  return sendToApp('create_group', { name });
+}
+
+async function updateGroup(id, name) {
+  return sendToApp('update_group', { id_param: id, name });
+}
+
+async function deleteGroup(id) {
+  return sendToApp('remove_group', { id_param: id });
 }
 
 async function getEntries() {
@@ -201,6 +219,18 @@ async function handleMessage(message, sender) {
 
     case 'GENERATE_PASSWORD':
       return generatePassword(message.options);
+
+    case 'GET_GROUPS':
+      return getGroups();
+
+    case 'CREATE_GROUP':
+      return createGroup(message.name);
+
+    case 'UPDATE_GROUP':
+      return updateGroup(message.id, message.name);
+
+    case 'DELETE_GROUP':
+      return deleteGroup(message.id);
 
     case 'AUTOFILL':
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

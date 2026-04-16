@@ -35,6 +35,10 @@ pub struct NativeRequest {
     pub request: Option<database::PasswordEntry>,
     #[serde(default)]
     pub options: Option<GeneratorOptions>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub group_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -301,6 +305,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             entry.encrypted_password = encrypted_password_bytes;
             entry.encrypted_notes = encrypted_notes;
             entry.tags = req.tags.unwrap_or_default();
+            entry.group_id = req.group_id;
 
             database::save_entry(db, &entry).map_err(|e| e.to_string())?;
 
@@ -312,6 +317,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                 "url": entry.url,
                 "username": entry.username,
                 "tags": entry.tags,
+                "group_id": entry.group_id,
                 "created_at": entry.created_at,
                 "updated_at": entry.updated_at,
             }))
@@ -379,6 +385,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                 "password": password,
                 "notes": notes,
                 "tags": entry.tags,
+                "group_id": entry.group_id,
                 "created_at": entry.created_at,
                 "updated_at": entry.updated_at,
             }))
@@ -528,6 +535,97 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             Ok(serde_json::json!(count))
         }
 
+        "create_group" => {
+            if !crypto::is_unlocked() {
+                return Err("Vault locked".to_string());
+            }
+
+            let name = req.name.ok_or("Group name required")?;
+            let db_guard = state.database.lock().expect("db lock poisoned");
+            let db = db_guard.as_ref().ok_or("Database not initialized")?;
+
+            let group = database::Group::new(name);
+            database::save_group(db, &group).map_err(|e| e.to_string())?;
+
+            state.touch_activity();
+
+            Ok(serde_json::json!({
+                "id": group.id,
+                "name": group.name,
+                "created_at": group.created_at,
+                "updated_at": group.updated_at,
+            }))
+        }
+
+        "list_all_groups" => {
+            if !crypto::is_unlocked() {
+                return Err("Vault locked".to_string());
+            }
+
+            let db_guard = state.database.lock().expect("db lock poisoned");
+            let db = db_guard.as_ref().ok_or("Database not initialized")?;
+
+            let ids = database::list_groups(db).map_err(|e| e.to_string())?;
+            let mut groups = Vec::new();
+            for id in ids {
+                if let Some(g) = database::load_group(db, &id).map_err(|e| e.to_string())? {
+                    groups.push(serde_json::json!({
+                        "id": g.id,
+                        "name": g.name,
+                        "created_at": g.created_at,
+                        "updated_at": g.updated_at,
+                    }));
+                }
+            }
+
+            state.touch_activity();
+
+            Ok(serde_json::json!(groups))
+        }
+
+        "update_group" => {
+            if !crypto::is_unlocked() {
+                return Err("Vault locked".to_string());
+            }
+
+            let id = req.id_param.ok_or("Group ID required")?;
+            let name = req.name.ok_or("Group name required")?;
+            let db_guard = state.database.lock().expect("db lock poisoned");
+            let db = db_guard.as_ref().ok_or("Database not initialized")?;
+
+            let mut group = database::load_group(db, &id)
+                .map_err(|e| e.to_string())?
+                .ok_or("Group not found")?;
+            group.name = name;
+            group.updated_at = chrono::Utc::now().timestamp();
+            database::save_group(db, &group).map_err(|e| e.to_string())?;
+
+            state.touch_activity();
+
+            Ok(serde_json::json!({
+                "id": group.id,
+                "name": group.name,
+                "created_at": group.created_at,
+                "updated_at": group.updated_at,
+            }))
+        }
+
+        "remove_group" => {
+            if !crypto::is_unlocked() {
+                return Err("Vault locked".to_string());
+            }
+
+            let id = req.id_param.ok_or("Group ID required")?;
+            let db_guard = state.database.lock().expect("db lock poisoned");
+            let db = db_guard.as_ref().ok_or("Database not initialized")?;
+
+            let existed = database::delete_group(db, &id).map_err(|e| e.to_string())?;
+
+            state.touch_activity();
+
+            Ok(serde_json::json!(existed))
+        }
+
         _ => Err(format!("Unknown command: {}", req.command))
     }
 }
@@ -585,6 +683,8 @@ mod tests {
             tags: None,
             request: None,
             options: None,
+            name: None,
+            group_id: None,
         }
     }
 
@@ -654,6 +754,8 @@ mod tests {
             tags: Some(vec!["dev".to_string()]),
             request: None,
             options: None,
+            name: None,
+            group_id: None,
         };
 
         let result = execute_command(req, state.clone()).unwrap();
@@ -681,6 +783,8 @@ mod tests {
             tags: None,
             request: None,
             options: None,
+            name: None,
+            group_id: None,
         };
 
         let result = execute_command(req, state);
@@ -708,6 +812,8 @@ mod tests {
             tags: None,
             request: None,
             options: None,
+            name: None,
+            group_id: None,
         };
         let created = execute_command(create_req, state.clone()).unwrap();
         let entry_id = created["id"].as_str().unwrap().to_string();
@@ -725,6 +831,8 @@ mod tests {
             tags: None,
             request: None,
             options: None,
+            name: None,
+            group_id: None,
         };
         let result = execute_command(get_req, state).unwrap();
         assert_eq!(result["password"], "my_password");
@@ -753,6 +861,8 @@ mod tests {
                 tags: None,
                 request: None,
                 options: None,
+                name: None,
+                group_id: None,
             };
             execute_command(req, state.clone()).unwrap();
         }
@@ -783,6 +893,8 @@ mod tests {
             tags: None,
             request: None,
             options: None,
+            name: None,
+            group_id: None,
         };
         let created = execute_command(create_req, state.clone()).unwrap();
         let entry_id = created["id"].as_str().unwrap().to_string();
@@ -800,6 +912,8 @@ mod tests {
             tags: Some(vec!["updated".to_string()]),
             request: None,
             options: None,
+            name: None,
+            group_id: None,
         };
         let result = execute_command(update_req, state.clone()).unwrap();
         assert_eq!(result["title"], "New Title");
@@ -835,6 +949,8 @@ mod tests {
             tags: None,
             request: None,
             options: None,
+            name: None,
+            group_id: None,
         };
         let created = execute_command(create_req, state.clone()).unwrap();
         let entry_id = created["id"].as_str().unwrap().to_string();
@@ -852,6 +968,8 @@ mod tests {
             tags: None,
             request: None,
             options: None,
+            name: None,
+            group_id: None,
         };
         let result = execute_command(remove_req, state.clone()).unwrap();
         assert_eq!(result, serde_json::json!(true));
@@ -886,6 +1004,8 @@ mod tests {
             tags: None,
             request: None,
             options: None,
+            name: None,
+            group_id: None,
         };
         execute_command(create_req, state.clone()).unwrap();
 
@@ -926,6 +1046,8 @@ mod tests {
                 include_numbers: true,
                 include_symbols: false,
             }),
+            name: None,
+            group_id: None,
         };
         let result = execute_command(req, state).unwrap();
         let password = result.as_str().unwrap();
@@ -953,6 +1075,8 @@ mod tests {
                 include_numbers: true,
                 include_symbols: true,
             }),
+            name: None,
+            group_id: None,
         };
         let result = execute_command(req, state).unwrap();
         let password = result.as_str().unwrap();
@@ -991,6 +1115,8 @@ mod tests {
                     include_numbers: true,
                     include_symbols: true,
                 }),
+                name: None,
+                group_id: None,
             };
             let result = execute_command(req, state.clone()).unwrap();
             let password = result.as_str().unwrap();
