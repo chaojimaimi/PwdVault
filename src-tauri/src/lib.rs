@@ -23,6 +23,7 @@ use crypto::{
     unlock_with_password, EncryptedData, EncryptionError, KeyStoreError, KdfError,
     VerificationData,
 };
+use crypto::kdf::AdaptiveParams;
     use database::{
     count_entries,
     delete_entry,
@@ -35,6 +36,9 @@ use crypto::{
     load_group,
     delete_group,
     list_groups,
+    Settings,
+    save_settings,
+    load_settings,
 };
 
 // ============================================================================
@@ -59,6 +63,8 @@ pub struct AppState {
     pub update_lock_menu_fn: Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>>,
     /// Closure to reload the main window (for auto-lock)
     pub reload_window_fn: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+    /// Dynamic auto-lock timeout in seconds (loaded from settings)
+    pub auto_lock_secs: Mutex<u64>,
 }
 
 impl AppState {
@@ -83,11 +89,14 @@ impl AppState {
         }
     }
 
-    /// Atomic lock: clear key and activity under the same mutex
+    /// Atomic lock: clear key, reset activity, and update tray menu text
     pub fn lock_vault(&self) {
-        let mut activity = self.last_activity.lock().expect("activity lock poisoned");
-        clear_key();
-        *activity = None;
+        {
+            let mut activity = self.last_activity.lock().expect("activity lock poisoned");
+            clear_key();
+            *activity = None;
+        }
+        self.update_lock_menu("Unlock Vault");
     }
 }
 
@@ -99,6 +108,7 @@ impl Default for AppState {
             last_activity: Mutex::new(None),
             update_lock_menu_fn: Mutex::new(None),
             reload_window_fn: Mutex::new(None),
+            auto_lock_secs: Mutex::new(AUTO_LOCK_SECS),
         }
     }
 }
@@ -117,6 +127,7 @@ pub enum VaultError {
     DecryptionFailed(String),
     DatabaseError(String),
     InternalError(String),
+    InvalidBackup(String),
 }
 
 impl From<EncryptionError> for VaultError {
@@ -163,6 +174,7 @@ impl std::fmt::Display for VaultError {
             VaultError::DecryptionFailed(e) => write!(f, "Decryption failed: {}", e),
             VaultError::DatabaseError(e) => write!(f, "Database error: {}", e),
             VaultError::InternalError(e) => write!(f, "Internal error: {}", e),
+            VaultError::InvalidBackup(e) => write!(f, "Invalid backup: {}", e),
         }
     }
 }
@@ -231,6 +243,10 @@ fn init_vault(
     *state.verification_data.lock().expect("verification lock poisoned") = Some(verification_data);
     set_key(key)?;
 
+    // Save default settings
+    let default_settings = Settings::default();
+    save_settings(&db, &default_settings)?;
+
     // Start auto-lock timer and update tray menu
     state.touch_activity();
     state.update_lock_menu("Lock Vault");
@@ -255,6 +271,12 @@ fn unlock_vault(password: String, state: State<'_, Arc<AppState>>) -> Result<boo
     password.zeroize();
 
     if success {
+        // Load settings (e.g. auto-lock timeout) from database
+        if let Ok(db) = get_db(&state) {
+            if let Ok(settings) = load_settings(&db) {
+                *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
+            }
+        }
         state.touch_activity();
         state.update_lock_menu("Lock Vault");
     }
@@ -265,7 +287,6 @@ fn unlock_vault(password: String, state: State<'_, Arc<AppState>>) -> Result<boo
 #[tauri::command]
 fn lock_vault(state: State<'_, Arc<AppState>>) {
     state.lock_vault();
-    state.update_lock_menu("Unlock Vault");
 }
 
 #[tauri::command]
@@ -598,6 +619,44 @@ fn update_group(id: String, name: String, state: State<'_, Arc<AppState>>) -> Re
     Ok(group)
 }
 
+// ============================================================================
+// Settings Commands
+// ============================================================================
+
+#[tauri::command]
+fn get_settings(state: State<'_, Arc<AppState>>) -> Result<Settings, VaultError> {
+    if !is_unlocked() {
+        return Err(VaultError::VaultLocked);
+    }
+    let db = get_db(&state)?;
+    let settings = load_settings(&db)?;
+    state.touch_activity();
+    Ok(settings)
+}
+
+#[tauri::command]
+fn update_settings(settings: Settings, state: State<'_, Arc<AppState>>) -> Result<Settings, VaultError> {
+    if !is_unlocked() {
+        return Err(VaultError::VaultLocked);
+    }
+    if settings.auto_lock_secs < 30 || settings.auto_lock_secs > 3600 {
+        return Err(VaultError::InternalError(
+            "Auto-lock timeout must be between 30 and 3600 seconds".to_string(),
+        ));
+    }
+    if settings.default_length < 4 || settings.default_length > 128 {
+        return Err(VaultError::InternalError(
+            "Password length must be between 4 and 128".to_string(),
+        ));
+    }
+    let db = get_db(&state)?;
+    save_settings(&db, &settings)?;
+    // Apply auto-lock timeout immediately
+    *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
+    state.touch_activity();
+    Ok(settings)
+}
+
 #[tauri::command]
 fn remove_entry(id: String, state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
     if !is_unlocked() {
@@ -624,6 +683,282 @@ fn get_entry_count(state: State<'_, Arc<AppState>>) -> Result<usize, VaultError>
     state.touch_activity();
 
     Ok(count)
+}
+
+// ============================================================================
+// Import/Export Commands
+// ============================================================================
+
+/// Plaintext entry for export (password/notes as strings, not encrypted bytes)
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExportEntry {
+    pub id: String,
+    pub title: String,
+    pub url: Option<String>,
+    pub username: String,
+    pub password: String,
+    pub notes: Option<String>,
+    pub tags: Vec<String>,
+    pub group_id: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Plaintext backup payload
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BackupPayload {
+    pub entries: Vec<ExportEntry>,
+    pub groups: Vec<Group>,
+    pub settings: Settings,
+}
+
+/// Encrypted backup file format
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VaultBackup {
+    pub version: u32,
+    pub created_at: i64,
+    pub salt: String,          // base64
+    pub kdf_memory: u32,
+    pub kdf_iterations: u32,
+    pub kdf_parallelism: u32,
+    pub nonce: String,          // base64
+    pub data: String,           // base64 (AES-256-GCM encrypted payload)
+}
+
+/// Result of import operation
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ImportResult {
+    pub entries_imported: usize,
+    pub groups_imported: usize,
+}
+
+#[tauri::command]
+fn export_vault(mut export_password: String, state: State<'_, Arc<AppState>>) -> Result<VaultBackup, VaultError> {
+    if !is_unlocked() {
+        return Err(VaultError::VaultLocked);
+    }
+
+    let db = get_db(&state)?;
+    let key = crypto::get_key()?;
+
+    // Load all entries and decrypt passwords/notes
+    let entry_ids = list_entries(&db)?;
+    let mut export_entries = Vec::new();
+    for id in entry_ids {
+        if let Some(entry) = load_entry(&db, &id)? {
+            // Decrypt password
+            let enc_pwd: EncryptedData = bincode::deserialize(&entry.encrypted_password)
+                .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
+            let pwd_bytes = decrypt(&key, &enc_pwd)?;
+            let password = String::from_utf8(pwd_bytes)
+                .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
+
+            // Decrypt notes
+            let notes = if let Some(ref enc_notes_bytes) = entry.encrypted_notes {
+                let enc: EncryptedData = bincode::deserialize(enc_notes_bytes)
+                    .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
+                let notes_bytes = decrypt(&key, &enc)?;
+                Some(String::from_utf8(notes_bytes)
+                    .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?)
+            } else {
+                None
+            };
+
+            export_entries.push(ExportEntry {
+                id: entry.id,
+                title: entry.title,
+                url: entry.url,
+                username: entry.username,
+                password,
+                notes,
+                tags: entry.tags,
+                group_id: entry.group_id,
+                created_at: entry.created_at,
+                updated_at: entry.updated_at,
+            });
+        }
+    }
+
+    // Load groups
+    let group_ids = list_groups(&db)?;
+    let mut groups = Vec::new();
+    for id in group_ids {
+        if let Some(g) = load_group(&db, &id)? {
+            groups.push(g);
+        }
+    }
+
+    // Load settings
+    let settings = load_settings(&db)?;
+
+    // Build plaintext payload
+    let payload = BackupPayload {
+        entries: export_entries,
+        groups,
+        settings,
+    };
+
+    let mut payload_json = serde_json::to_vec(&payload)
+        .map_err(|e| VaultError::InternalError(e.to_string()))?;
+
+    // Derive export key from export password using Argon2id
+    let salt = crypto::kdf::generate_salt();
+    let (export_key, params) = crypto::kdf::derive_key(&export_password, &salt)?;
+
+    // Zeroize export password immediately after key derivation
+    export_password.zeroize();
+
+    // Encrypt payload with export key
+    let encrypted = encrypt(&export_key, &payload_json)?;
+
+    // Zeroize plaintext payload
+    payload_json.zeroize();
+    for mut entry in payload.entries {
+        unsafe { entry.password.as_bytes_mut() }.zeroize();
+        if let Some(ref mut n) = entry.notes {
+            unsafe { n.as_bytes_mut() }.zeroize();
+        }
+    }
+
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD;
+
+    let backup = VaultBackup {
+        version: 1,
+        created_at: chrono::Utc::now().timestamp(),
+        salt: b64.encode(&salt),
+        kdf_memory: params.m_cost,
+        kdf_iterations: params.t_cost,
+        kdf_parallelism: params.p_cost,
+        nonce: b64.encode(&encrypted.nonce),
+        data: b64.encode(&encrypted.ciphertext),
+    };
+
+    state.touch_activity();
+    Ok(backup)
+}
+
+#[tauri::command]
+fn import_vault(backup: VaultBackup, mut import_password: String, state: State<'_, Arc<AppState>>) -> Result<ImportResult, VaultError> {
+    if !is_unlocked() {
+        return Err(VaultError::VaultLocked);
+    }
+
+    if backup.version != 1 {
+        return Err(VaultError::InvalidBackup("Unsupported backup version".to_string()));
+    }
+
+    // Decode salt and nonce from base64
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD;
+
+    let salt = b64.decode(&backup.salt)
+        .map_err(|e| VaultError::InvalidBackup(format!("Invalid salt: {}", e)))?;
+    let nonce_bytes = b64.decode(&backup.nonce)
+        .map_err(|e| VaultError::InvalidBackup(format!("Invalid nonce: {}", e)))?;
+    let ciphertext = b64.decode(&backup.data)
+        .map_err(|e| VaultError::InvalidBackup(format!("Invalid data: {}", e)))?;
+
+    if salt.len() != 16 {
+        return Err(VaultError::InvalidBackup("Invalid salt length".to_string()));
+    }
+
+    // Derive key from import password with stored KDF params
+    let salt_array: [u8; 16] = salt.try_into()
+        .map_err(|_| VaultError::InvalidBackup("Invalid salt".to_string()))?;
+    let (import_key, _params) = crypto::kdf::derive_key_with_params(
+        &import_password,
+        &salt_array,
+        &AdaptiveParams {
+            m_cost: backup.kdf_memory,
+            t_cost: backup.kdf_iterations,
+            p_cost: backup.kdf_parallelism,
+        },
+    )?;
+
+    // Zeroize import password after key derivation
+    import_password.zeroize();
+
+    // Decrypt payload
+    let encrypted_data = EncryptedData {
+        nonce: nonce_bytes,
+        ciphertext,
+    };
+    let mut payload_bytes = decrypt(&import_key, &encrypted_data)
+        .map_err(|_| VaultError::InvalidPassword)?;
+
+    // Parse payload — validate before any destructive operations
+    let payload: BackupPayload = serde_json::from_slice(&payload_bytes)
+        .map_err(|e| VaultError::InvalidBackup(format!("Invalid payload: {}", e)))?;
+
+    // Zeroize decrypted payload bytes
+    payload_bytes.zeroize();
+
+    let db = get_db(&state)?;
+    let key = crypto::get_key()?;
+
+    // Clear existing entries and groups (propagate errors)
+    let existing_entry_ids = list_entries(&db)?;
+    for id in existing_entry_ids {
+        delete_entry(&db, &id)?;
+    }
+    let existing_group_ids = list_groups(&db)?;
+    for id in existing_group_ids {
+        delete_group(&db, &id)?;
+    }
+
+    // Import groups (generate new IDs to avoid conflicts)
+    let mut group_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for g in &payload.groups {
+        let new_group = Group::new(g.name.clone());
+        group_id_map.insert(g.id.clone(), new_group.id.clone());
+        save_group(&db, &new_group)?;
+    }
+
+    // Import entries
+    for export_entry in &payload.entries {
+        let mut entry = PasswordEntry::new(
+            export_entry.title.clone(),
+            export_entry.url.clone(),
+            export_entry.username.clone(),
+        );
+
+        // Encrypt password with current master key
+        let enc_pwd = encrypt(&key, export_entry.password.as_bytes())?;
+        entry.encrypted_password = bincode::serialize(&enc_pwd)
+            .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
+
+        // Encrypt notes
+        entry.encrypted_notes = if let Some(ref notes) = export_entry.notes {
+            let enc = encrypt(&key, notes.as_bytes())?;
+            Some(bincode::serialize(&enc)
+                .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?)
+        } else {
+            None
+        };
+
+        entry.tags = export_entry.tags.clone();
+        // Map old group_id to new group_id
+        entry.group_id = export_entry.group_id.as_ref()
+            .and_then(|gid| group_id_map.get(gid).cloned());
+        entry.created_at = export_entry.created_at;
+        entry.updated_at = export_entry.updated_at;
+
+        save_entry(&db, &entry)?;
+    }
+
+    // Apply imported settings
+    save_settings(&db, &payload.settings)?;
+    *state.auto_lock_secs.lock().expect("timeout lock poisoned") = payload.settings.auto_lock_secs;
+
+    let entries_count = payload.entries.len();
+    let groups_count = payload.groups.len();
+
+    state.touch_activity();
+    Ok(ImportResult {
+        entries_imported: entries_count,
+        groups_imported: groups_count,
+    })
 }
 
 // ============================================================================
@@ -655,6 +990,10 @@ fn setup_vault(state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
 
     if let Some(data) = verification_data {
         *state.verification_data.lock().expect("verification lock poisoned") = Some(data);
+        // Load auto-lock timeout from settings
+        if let Ok(settings) = load_settings(&db) {
+            *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
+        }
         return Ok(true);
     }
 
@@ -672,8 +1011,9 @@ fn start_auto_lock_thread(state: Arc<AppState>) {
 
             let should_lock = {
                 let activity = state.last_activity.lock().expect("activity lock poisoned");
+                let timeout = *state.auto_lock_secs.lock().expect("timeout lock poisoned");
                 if let Some(instant) = *activity {
-                    is_unlocked() && instant.elapsed().as_secs() >= AUTO_LOCK_SECS
+                    is_unlocked() && instant.elapsed().as_secs() >= timeout
                 } else {
                     false
                 }
@@ -681,7 +1021,6 @@ fn start_auto_lock_thread(state: Arc<AppState>) {
 
             if should_lock {
                 state.lock_vault();
-                state.update_lock_menu("Unlock Vault");
                 state.reload_window();
             }
         }
@@ -700,6 +1039,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(state.clone())
         .setup(move |app| {
             // Start native messaging server in background thread
@@ -748,14 +1089,9 @@ pub fn run() {
                     }
                     "lock" => {
                         if is_unlocked() {
-                            clear_key();
-                            if let Some(item) = app.menu().and_then(|m| m.get("lock")) {
-                                if let tauri::menu::MenuItemKind::MenuItem(mi) = item {
-                                    let _ = mi.set_text("Unlock Vault");
-                                }
-                            }
+                            let state = app.state::<Arc<AppState>>();
+                            state.lock_vault();
                         }
-                        // Always show window (displays unlock screen if locked)
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
@@ -819,6 +1155,12 @@ pub fn run() {
             list_all_groups,
             remove_group,
             update_group,
+            // Settings
+            get_settings,
+            update_settings,
+            // Import/Export
+            export_vault,
+            import_vault,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

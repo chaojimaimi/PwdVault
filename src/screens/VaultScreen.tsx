@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { useTheme } from '../hooks/useTheme';
 import { copyWithTimeout } from '../utils/clipboard';
+import { searchEntries } from '../utils/search';
 import { showToast } from '../utils/toast';
 import type { EntrySummary } from '../types';
 
@@ -21,18 +22,13 @@ export function VaultScreen() {
     }
   }, [state.isUnlocked]);
 
-  const filteredEntries = state.entries.filter((entry) => {
+  const filteredEntries = useMemo(() => {
+    let entries = state.entries;
     if (state.selectedGroupId) {
-      if ((entry as any).group_id !== state.selectedGroupId) return false;
+      entries = entries.filter((entry) => entry.group_id === state.selectedGroupId);
     }
-    if (!state.searchQuery) return true;
-    const query = state.searchQuery.toLowerCase();
-    return (
-      entry.title.toLowerCase().includes(query) ||
-      entry.username.toLowerCase().includes(query) ||
-      (entry.url && entry.url.toLowerCase().includes(query))
-    );
-  });
+    return searchEntries(entries, state.searchQuery);
+  }, [state.entries, state.selectedGroupId, state.searchQuery]);
 
   const handleEntryClick = async (entry: EntrySummary) => {
     await actions.selectEntry(entry.id);
@@ -98,6 +94,12 @@ export function VaultScreen() {
           <button className="btn btn-icon" onClick={handleGeneratorClick} title="Password Generator">
             <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
+            </svg>
+          </button>
+          <button className="btn btn-icon" onClick={() => actions.navigate('settings')} title="Settings">
+            <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
             </svg>
           </button>
           <button className="btn btn-icon" onClick={handleLockClick} title="Lock Vault">

@@ -1,4 +1,5 @@
 // PwdVault Popup Script - Enhanced with Groups, Generator UI, and Theme Switching
+import Fuse from './fuse.min.mjs';
 
 class PopupApp {
   constructor() {
@@ -262,17 +263,21 @@ class PopupApp {
       entries = entries.filter(e => e.group_id === this.state.selectedGroupId);
     }
 
-    if (this.state.searchQuery) {
-      const query = this.state.searchQuery.toLowerCase();
-      entries = entries.filter(entry => {
-        const title = (entry.title || '').toLowerCase();
-        const username = (entry.username || '').toLowerCase();
-        const url = (entry.url || '').toLowerCase();
-        return title.includes(query) || username.includes(query) || url.includes(query);
-      });
-    }
+    if (!this.state.searchQuery || !this.state.searchQuery.trim()) return entries;
 
-    return entries;
+    const fuse = new Fuse(entries, {
+      keys: [
+        { name: 'title', weight: 0.4 },
+        { name: 'username', weight: 0.3 },
+        { name: 'url', weight: 0.2 },
+        { name: 'tags', weight: 0.1 },
+      ],
+      threshold: 0.3,
+      includeScore: true,
+      ignoreLocation: true,
+    });
+
+    return fuse.search(this.state.searchQuery).map(r => r.item);
   }
 
   // === UI State ===

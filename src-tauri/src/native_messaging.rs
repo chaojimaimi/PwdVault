@@ -39,6 +39,14 @@ pub struct NativeRequest {
     pub name: Option<String>,
     #[serde(default)]
     pub group_id: Option<String>,
+    #[serde(default)]
+    pub settings: Option<serde_json::Value>,
+    #[serde(default)]
+    pub export_password: Option<String>,
+    #[serde(default)]
+    pub import_password: Option<String>,
+    #[serde(default)]
+    pub backup: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -268,8 +276,39 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
 
         "lock_vault" => {
             state.lock_vault();
-            state.update_lock_menu("Unlock Vault");
             Ok(serde_json::json!(null))
+        }
+
+        "get_settings" => {
+            if !crypto::is_unlocked() {
+                return Err("Vault locked".to_string());
+            }
+            let db_guard = state.database.lock().expect("db lock poisoned");
+            let db = db_guard.as_ref().ok_or("Database not initialized")?;
+            let settings = database::load_settings(db).map_err(|e| e.to_string())?;
+            state.touch_activity();
+            Ok(serde_json::to_value(settings).expect("settings serializable"))
+        }
+
+        "update_settings" => {
+            if !crypto::is_unlocked() {
+                return Err("Vault locked".to_string());
+            }
+            let settings_json = req.settings.ok_or("Settings required")?;
+            let settings: database::Settings = serde_json::from_value(settings_json)
+                .map_err(|e| format!("Invalid settings: {}", e))?;
+            if settings.auto_lock_secs < 30 || settings.auto_lock_secs > 3600 {
+                return Err("Auto-lock timeout must be between 30 and 3600 seconds".to_string());
+            }
+            if settings.default_length < 4 || settings.default_length > 128 {
+                return Err("Password length must be between 4 and 128".to_string());
+            }
+            let db_guard = state.database.lock().expect("db lock poisoned");
+            let db = db_guard.as_ref().ok_or("Database not initialized")?;
+            database::save_settings(db, &settings).map_err(|e| e.to_string())?;
+            *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
+            state.touch_activity();
+            Ok(serde_json::to_value(settings).expect("settings serializable"))
         }
 
         "create_entry" => {
@@ -626,6 +665,214 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             Ok(serde_json::json!(existed))
         }
 
+        "export_vault" => {
+            if !crypto::is_unlocked() {
+                return Err("Vault locked".to_string());
+            }
+            let export_password = req.export_password.ok_or("Export password required")?;
+            let db_guard = state.database.lock().expect("db lock poisoned");
+            let db = db_guard.as_ref().ok_or("Database not initialized")?;
+            let key = crypto::get_key().map_err(|e| e.to_string())?;
+
+            // Load all entries and decrypt
+            let entry_ids = database::list_entries(db).map_err(|e| e.to_string())?;
+            let mut export_entries = Vec::new();
+            for id in entry_ids {
+                if let Some(entry) = database::load_entry(db, &id).map_err(|e| e.to_string())? {
+                    let enc_pwd: crypto::EncryptedData = bincode::deserialize(&entry.encrypted_password)
+                        .map_err(|e| e.to_string())?;
+                    let pwd_bytes = crypto::decrypt(&key, &enc_pwd).map_err(|e| e.to_string())?;
+                    let password = String::from_utf8(pwd_bytes).map_err(|e| e.to_string())?;
+
+                    let notes = if let Some(ref enc_notes_bytes) = entry.encrypted_notes {
+                        let enc: crypto::EncryptedData = bincode::deserialize(enc_notes_bytes)
+                            .map_err(|e| e.to_string())?;
+                        let notes_bytes = crypto::decrypt(&key, &enc).map_err(|e| e.to_string())?;
+                        Some(String::from_utf8(notes_bytes).map_err(|e| e.to_string())?)
+                    } else {
+                        None
+                    };
+
+                    export_entries.push(serde_json::json!({
+                        "id": entry.id,
+                        "title": entry.title,
+                        "url": entry.url,
+                        "username": entry.username,
+                        "password": password,
+                        "notes": notes,
+                        "tags": entry.tags,
+                        "group_id": entry.group_id,
+                        "created_at": entry.created_at,
+                        "updated_at": entry.updated_at,
+                    }));
+                }
+            }
+
+            // Load groups
+            let group_ids = database::list_groups(db).map_err(|e| e.to_string())?;
+            let mut groups = Vec::new();
+            for id in group_ids {
+                if let Some(g) = database::load_group(db, &id).map_err(|e| e.to_string())? {
+                    groups.push(serde_json::json!({
+                        "id": g.id,
+                        "name": g.name,
+                        "created_at": g.created_at,
+                        "updated_at": g.updated_at,
+                    }));
+                }
+            }
+
+            // Load settings
+            let settings = database::load_settings(db).map_err(|e| e.to_string())?;
+
+            let payload = serde_json::json!({
+                "entries": export_entries,
+                "groups": groups,
+                "settings": settings,
+            });
+            let payload_bytes = serde_json::to_vec(&payload)
+                .map_err(|e| e.to_string())?;
+
+            // Derive export key
+            let salt = crypto::kdf::generate_salt();
+            let (export_key, params) = crypto::kdf::derive_key(&export_password, &salt)
+                .map_err(|e| e.to_string())?;
+
+            let encrypted = crypto::encrypt(&export_key, &payload_bytes)
+                .map_err(|e| e.to_string())?;
+
+            use base64::Engine;
+            let b64 = base64::engine::general_purpose::STANDARD;
+
+            state.touch_activity();
+            Ok(serde_json::json!({
+                "version": 1,
+                "created_at": chrono::Utc::now().timestamp(),
+                "salt": b64.encode(&salt),
+                "kdf_memory": params.m_cost,
+                "kdf_iterations": params.t_cost,
+                "kdf_parallelism": params.p_cost,
+                "nonce": b64.encode(&encrypted.nonce),
+                "data": b64.encode(&encrypted.ciphertext),
+            }))
+        }
+
+        "import_vault" => {
+            if !crypto::is_unlocked() {
+                return Err("Vault locked".to_string());
+            }
+            let backup_json = req.backup.ok_or("Backup data required")?;
+            let import_password = req.import_password.ok_or("Import password required")?;
+
+            let version = backup_json.get("version")
+                .and_then(|v| v.as_u64())
+                .ok_or("Missing version in backup")?;
+            if version != 1 {
+                return Err("Unsupported backup version".to_string());
+            }
+
+            use base64::Engine;
+            let b64 = base64::engine::general_purpose::STANDARD;
+
+            let salt_str = backup_json.get("salt").and_then(|v| v.as_str()).ok_or("Missing salt")?;
+            let nonce_str = backup_json.get("nonce").and_then(|v| v.as_str()).ok_or("Missing nonce")?;
+            let data_str = backup_json.get("data").and_then(|v| v.as_str()).ok_or("Missing data")?;
+            let kdf_memory = backup_json.get("kdf_memory").and_then(|v| v.as_u64()).ok_or("Missing kdf_memory")? as u32;
+            let kdf_iterations = backup_json.get("kdf_iterations").and_then(|v| v.as_u64()).ok_or("Missing kdf_iterations")? as u32;
+            let kdf_parallelism = backup_json.get("kdf_parallelism").and_then(|v| v.as_u64()).unwrap_or(4) as u32;
+
+            let salt = b64.decode(salt_str).map_err(|e| format!("Invalid salt: {}", e))?;
+            let nonce_bytes = b64.decode(nonce_str).map_err(|e| format!("Invalid nonce: {}", e))?;
+            let ciphertext = b64.decode(data_str).map_err(|e| format!("Invalid data: {}", e))?;
+
+            if salt.len() != 16 {
+                return Err("Invalid salt length".to_string());
+            }
+
+            let salt_array: [u8; 16] = salt.try_into().map_err(|_| "Invalid salt")?;
+            let (import_key, _) = crypto::kdf::derive_key_with_params(
+                &import_password,
+                &salt_array,
+                &crypto::kdf::AdaptiveParams {
+                    m_cost: kdf_memory,
+                    t_cost: kdf_iterations,
+                    p_cost: kdf_parallelism,
+                },
+            ).map_err(|e| e.to_string())?;
+
+            let encrypted_data = crypto::EncryptedData {
+                nonce: nonce_bytes,
+                ciphertext,
+            };
+            let payload_bytes = crypto::decrypt(&import_key, &encrypted_data)
+                .map_err(|_| "Invalid password or corrupted backup".to_string())?;
+
+            let payload: serde_json::Value = serde_json::from_slice(&payload_bytes)
+                .map_err(|e| format!("Invalid payload: {}", e))?;
+
+            let db_guard = state.database.lock().expect("db lock poisoned");
+            let db = db_guard.as_ref().ok_or("Database not initialized")?;
+            let key = crypto::get_key().map_err(|e| e.to_string())?;
+
+            // Clear existing data
+            let existing_ids = database::list_entries(db).map_err(|e| e.to_string())?;
+            for id in existing_ids {
+                database::delete_entry(db, &id).map_err(|e| e.to_string())?;
+            }
+            let existing_groups = database::list_groups(db).map_err(|e| e.to_string())?;
+            for id in existing_groups {
+                database::delete_group(db, &id).map_err(|e| e.to_string())?;
+            }
+
+            // Import groups
+            let groups = payload.get("groups").and_then(|v| v.as_array()).ok_or("Missing groups")?;
+            let mut group_id_map = std::collections::HashMap::new();
+            for g in groups {
+                let old_id = g.get("id").and_then(|v| v.as_str()).ok_or("Missing group id")?;
+                let name = g.get("name").and_then(|v| v.as_str()).ok_or("Missing group name")?;
+                let new_group = database::Group::new(name.to_string());
+                group_id_map.insert(old_id.to_string(), new_group.id.clone());
+                database::save_group(db, &new_group).map_err(|e| e.to_string())?;
+            }
+
+            // Import entries
+            let entries = payload.get("entries").and_then(|v| v.as_array()).ok_or("Missing entries")?;
+            for e in entries {
+                let title = e.get("title").and_then(|v| v.as_str()).ok_or("Missing title")?;
+                let username = e.get("username").and_then(|v| v.as_str()).ok_or("Missing username")?;
+                let password = e.get("password").and_then(|v| v.as_str()).ok_or("Missing password")?;
+                let url = e.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let notes = e.get("notes").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let tags = e.get("tags").and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+                let group_id = e.get("group_id").and_then(|v| v.as_str())
+                    .and_then(|gid| group_id_map.get(gid).cloned());
+
+                let mut entry = database::PasswordEntry::new(title.to_string(), url, username.to_string());
+                let enc_pwd = crypto::encrypt(&key, password.as_bytes()).map_err(|e| e.to_string())?;
+                entry.encrypted_password = bincode::serialize(&enc_pwd).map_err(|e| e.to_string())?;
+                entry.encrypted_notes = if let Some(ref n) = notes {
+                    let enc = crypto::encrypt(&key, n.as_bytes()).map_err(|e| e.to_string())?;
+                    Some(bincode::serialize(&enc).map_err(|e| e.to_string())?)
+                } else {
+                    None
+                };
+                entry.tags = tags;
+                entry.group_id = group_id;
+                entry.created_at = e.get("created_at").and_then(|v| v.as_i64()).unwrap_or(entry.created_at);
+                entry.updated_at = e.get("updated_at").and_then(|v| v.as_i64()).unwrap_or(entry.updated_at);
+
+                database::save_entry(db, &entry).map_err(|e| e.to_string())?;
+            }
+
+            state.touch_activity();
+            Ok(serde_json::json!({
+                "entries_imported": entries.len(),
+                "groups_imported": groups.len(),
+            }))
+        }
+
         _ => Err(format!("Unknown command: {}", req.command))
     }
 }
@@ -685,6 +932,10 @@ mod tests {
             options: None,
             name: None,
             group_id: None,
+            settings: None,
+            export_password: None,
+            import_password: None,
+            backup: None,
         }
     }
 
@@ -756,6 +1007,10 @@ mod tests {
             options: None,
             name: None,
             group_id: None,
+            settings: None,
+            export_password: None,
+            import_password: None,
+            backup: None,
         };
 
         let result = execute_command(req, state.clone()).unwrap();
@@ -785,6 +1040,10 @@ mod tests {
             options: None,
             name: None,
             group_id: None,
+            settings: None,
+            export_password: None,
+            import_password: None,
+            backup: None,
         };
 
         let result = execute_command(req, state);
@@ -814,6 +1073,10 @@ mod tests {
             options: None,
             name: None,
             group_id: None,
+            settings: None,
+            export_password: None,
+            import_password: None,
+            backup: None,
         };
         let created = execute_command(create_req, state.clone()).unwrap();
         let entry_id = created["id"].as_str().unwrap().to_string();
@@ -833,6 +1096,10 @@ mod tests {
             options: None,
             name: None,
             group_id: None,
+            settings: None,
+            export_password: None,
+            import_password: None,
+            backup: None,
         };
         let result = execute_command(get_req, state).unwrap();
         assert_eq!(result["password"], "my_password");
@@ -863,6 +1130,10 @@ mod tests {
                 options: None,
                 name: None,
                 group_id: None,
+                settings: None,
+                export_password: None,
+                import_password: None,
+                backup: None,
             };
             execute_command(req, state.clone()).unwrap();
         }
@@ -895,6 +1166,10 @@ mod tests {
             options: None,
             name: None,
             group_id: None,
+            settings: None,
+            export_password: None,
+            import_password: None,
+            backup: None,
         };
         let created = execute_command(create_req, state.clone()).unwrap();
         let entry_id = created["id"].as_str().unwrap().to_string();
@@ -914,6 +1189,10 @@ mod tests {
             options: None,
             name: None,
             group_id: None,
+            settings: None,
+            export_password: None,
+            import_password: None,
+            backup: None,
         };
         let result = execute_command(update_req, state.clone()).unwrap();
         assert_eq!(result["title"], "New Title");
@@ -951,6 +1230,10 @@ mod tests {
             options: None,
             name: None,
             group_id: None,
+            settings: None,
+            export_password: None,
+            import_password: None,
+            backup: None,
         };
         let created = execute_command(create_req, state.clone()).unwrap();
         let entry_id = created["id"].as_str().unwrap().to_string();
@@ -970,6 +1253,10 @@ mod tests {
             options: None,
             name: None,
             group_id: None,
+            settings: None,
+            export_password: None,
+            import_password: None,
+            backup: None,
         };
         let result = execute_command(remove_req, state.clone()).unwrap();
         assert_eq!(result, serde_json::json!(true));
@@ -1006,6 +1293,10 @@ mod tests {
             options: None,
             name: None,
             group_id: None,
+            settings: None,
+            export_password: None,
+            import_password: None,
+            backup: None,
         };
         execute_command(create_req, state.clone()).unwrap();
 
@@ -1048,6 +1339,10 @@ mod tests {
             }),
             name: None,
             group_id: None,
+            settings: None,
+            export_password: None,
+            import_password: None,
+            backup: None,
         };
         let result = execute_command(req, state).unwrap();
         let password = result.as_str().unwrap();
@@ -1077,6 +1372,10 @@ mod tests {
             }),
             name: None,
             group_id: None,
+            settings: None,
+            export_password: None,
+            import_password: None,
+            backup: None,
         };
         let result = execute_command(req, state).unwrap();
         let password = result.as_str().unwrap();
@@ -1117,6 +1416,10 @@ mod tests {
                 }),
                 name: None,
                 group_id: None,
+                settings: None,
+                export_password: None,
+                import_password: None,
+                backup: None,
             };
             let result = execute_command(req, state.clone()).unwrap();
             let password = result.as_str().unwrap();

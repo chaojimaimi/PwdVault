@@ -100,6 +100,22 @@ async function deleteGroup(id) {
   return sendToApp('remove_group', { id_param: id });
 }
 
+async function getSettings() {
+  return sendToApp('get_settings');
+}
+
+async function updateSettings(settings) {
+  return sendToApp('update_settings', { settings });
+}
+
+async function exportVault(exportPassword) {
+  return sendToApp('export_vault', { export_password: exportPassword });
+}
+
+async function importVault(backup, importPassword) {
+  return sendToApp('import_vault', { backup, import_password: importPassword });
+}
+
 async function getEntries() {
   return sendToApp('list_all_entries');
 }
@@ -231,6 +247,18 @@ async function handleMessage(message, sender) {
 
     case 'DELETE_GROUP':
       return deleteGroup(message.id);
+
+    case 'GET_SETTINGS':
+      return getSettings();
+
+    case 'UPDATE_SETTINGS':
+      return updateSettings(message.settings);
+
+    case 'EXPORT_VAULT':
+      return exportVault(message.exportPassword);
+
+    case 'IMPORT_VAULT':
+      return importVault(message.backup, message.importPassword);
 
     case 'AUTOFILL':
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

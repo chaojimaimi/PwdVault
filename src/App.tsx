@@ -5,6 +5,8 @@ import { VaultScreen } from './screens/VaultScreen';
 import { EntryScreen } from './screens/EntryScreen';
 import { GeneratorScreen } from './screens/GeneratorScreen';
 import GroupManager from './screens/GroupManager';
+import { SettingsScreen } from './screens/SettingsScreen';
+import { ImportExportScreen } from './screens/ImportExportScreen';
 import { ThemeProvider } from './components/ThemeProvider';
 import './styles/themes.css';
 import './styles/App.css';
@@ -36,6 +38,10 @@ function AppContent() {
       return <GeneratorScreen />;
     case 'groupManager':
       return <GroupManager />;
+    case 'settings':
+      return <SettingsScreen />;
+    case 'importExport':
+      return <ImportExportScreen />;
     default:
       return <UnlockScreen />;
   }

@@ -59,7 +59,7 @@ export type VaultError =
 
 // App State Types
 
-export type AppScreen = 'setup' | 'unlock' | 'vault' | 'entry' | 'generator' | 'groupManager';
+export type AppScreen = 'setup' | 'unlock' | 'vault' | 'entry' | 'generator' | 'groupManager' | 'settings' | 'importExport';
 
 export interface VaultState {
   isInitialized: boolean;
@@ -77,4 +77,40 @@ export interface PasswordGeneratorOptions {
   includeLowercase: boolean;
   includeNumbers: boolean;
   includeSymbols: boolean;
+}
+
+export interface Settings {
+  auto_lock_secs: number;
+  default_length: number;
+  default_include_uppercase: boolean;
+  default_include_lowercase: boolean;
+  default_include_numbers: boolean;
+  default_include_symbols: boolean;
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  auto_lock_secs: 600,
+  default_length: 16,
+  default_include_uppercase: true,
+  default_include_lowercase: true,
+  default_include_numbers: true,
+  default_include_symbols: true,
+};
+
+// Backup/Restore Types
+
+export interface VaultBackup {
+  version: number;
+  created_at: number;
+  salt: string;
+  kdf_memory: number;
+  kdf_iterations: number;
+  kdf_parallelism: number;
+  nonce: string;
+  data: string;
+}
+
+export interface ImportResult {
+  entries_imported: number;
+  groups_imported: number;
 }

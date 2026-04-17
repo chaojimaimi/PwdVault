@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [0.3.0.0] - 2026-04-17
+
+### Added
+- **E2: Fuzzy search** — fuse.js based search across title, username, URL, tags
+  - Desktop app and browser extension both use consistent Fuse.js config
+  - Weighted search keys: title (0.4), username (0.3), url (0.2), tags (0.1)
+- **E4: Settings screen** — User-configurable vault behavior
+  - Auto-lock timeout (1–60 minutes) persisted to database
+  - Default password generator options (length, character types)
+  - Dynamic auto-lock reads timeout from settings instead of hardcoded constant
+  - Backward compatible: pre-v0.3 vaults fallback to default settings
+- **E1: Encrypted import/export** — Backup and restore vault data
+  - Export creates `.pvault` file encrypted with user-chosen export password
+  - Export password is independent of master password (portable backups)
+  - AES-256-GCM encryption with Argon2id key derivation
+  - Import replaces current vault data with confirmation prompt
+  - Settings, groups, and entry timestamps preserved on import
+  - Tauri file dialog for save/open + browser fallback download
+
 ## [0.2.0.0] - 2026-04-15
 
 ### Added

@@ -7,14 +7,14 @@ import { showToast } from '../utils/toast';
 import type { PasswordGeneratorOptions } from '../types';
 
 export function GeneratorScreen() {
-  const { actions } = useApp();
+  const { state, actions } = useApp();
   const [password, setPassword] = useState('');
   const [options, setOptions] = useState<PasswordGeneratorOptions>({
-    length: 16,
-    includeUppercase: true,
-    includeLowercase: true,
-    includeNumbers: true,
-    includeSymbols: true,
+    length: state.settings.default_length,
+    includeUppercase: state.settings.default_include_uppercase,
+    includeLowercase: state.settings.default_include_lowercase,
+    includeNumbers: state.settings.default_include_numbers,
+    includeSymbols: state.settings.default_include_symbols,
   });
   const [copied, setCopied] = useState(false);
 

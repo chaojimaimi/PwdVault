@@ -2,10 +2,10 @@
 
 A secure, local-first password manager built with Tauri + React.
 
-**Last Updated**: 2026-04-13
+**Last Updated**: 2026-04-17
 **Repository**: https://github.com/chaojimaimi/PwdVault (Private)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v0.1.3
-**Current Version**: `v0.1.3` (local)
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v0.2.0
+**Current Version**: `v0.3.0` (local)
 **Current Branch**: `main`
 
 ---
@@ -406,6 +406,23 @@ Next steps:
 - `PwdVault_0.2.0_aarch64.dmg` (3.6MB) — macOS DMG installer
 - `PwdVault-macOS-v0.2.0.zip` (3.5MB) — macOS .app bundle
 - `PwdVault-Extension-v0.2.0.zip` (20.8KB) — Chrome extension
+
+---
+
+## Plugin Tools (Mandatory)
+
+代码开发任务必须主动根据情况择优调用以下插件工具，不需要用户提醒：
+
+| 阶段 | 推荐工具 |
+|------|----------|
+| 规划 | gstack `/plan-eng-review`、planner agent |
+| 编码 | superpowers 代码生成、ECC TDD 技能 |
+| 审查 | `code-reviewer` agent、gstack `/review` |
+| 安全 | `security-reviewer` agent、ECC 安全技能 |
+| 测试 | gstack `/qa`、`tdd-guide` agent |
+| 构建 | `build-error-resolver` agent |
+
+简单/单文件修改可酌情跳过，复杂多文件功能必须调用。
 
 ---
 

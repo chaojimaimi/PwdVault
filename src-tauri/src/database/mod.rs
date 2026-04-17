@@ -16,6 +16,7 @@ use super::VerificationData;
 const VAULT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vault");
 const ENTRIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("entries");
 const GROUPS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("groups");
+const SETTINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("settings");
 
 // ============================================================================
 // Error Types
@@ -166,6 +167,30 @@ impl Group {
     }
 }
 
+/// Per-vault settings (single row, key "current")
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Settings {
+    pub auto_lock_secs: u64,
+    pub default_length: usize,
+    pub default_include_uppercase: bool,
+    pub default_include_lowercase: bool,
+    pub default_include_numbers: bool,
+    pub default_include_symbols: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            auto_lock_secs: 600,
+            default_length: 16,
+            default_include_uppercase: true,
+            default_include_lowercase: true,
+            default_include_numbers: true,
+            default_include_symbols: true,
+        }
+    }
+}
+
 // ============================================================================
 // Database Operations
 // ============================================================================
@@ -179,6 +204,7 @@ pub fn init_database<P: AsRef<Path>>(path: P) -> Result<Database, DatabaseError>
     write_txn.open_table(VAULT_TABLE)?;
     write_txn.open_table(ENTRIES_TABLE)?;
     write_txn.open_table(GROUPS_TABLE)?;
+    write_txn.open_table(SETTINGS_TABLE)?;
     write_txn.commit()?;
 
     Ok(db)
@@ -340,6 +366,33 @@ pub fn count_groups(db: &Database) -> Result<usize, DatabaseError> {
     let read_txn = db.begin_read()?;
     let table = read_txn.open_table(GROUPS_TABLE)?;
     Ok(table.len()? as usize)
+}
+
+/// Save settings (single row with key "current")
+pub fn save_settings(db: &Database, settings: &Settings) -> Result<(), DatabaseError> {
+    let encoded = bincode::serialize(settings)
+        .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
+    let write_txn = db.begin_write()?;
+    {
+        let mut table = write_txn.open_table(SETTINGS_TABLE)?;
+        table.insert("current", encoded.as_slice())?;
+    }
+    write_txn.commit()?;
+    Ok(())
+}
+
+/// Load settings, falling back to defaults if not found
+pub fn load_settings(db: &Database) -> Result<Settings, DatabaseError> {
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(SETTINGS_TABLE)?;
+    match table.get("current")? {
+        Some(value) => {
+            let settings: Settings = bincode::deserialize(value.value())
+                .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
+            Ok(settings)
+        }
+        None => Ok(Settings::default()),
+    }
 }
 
 #[cfg(test)]

@@ -11,7 +11,8 @@ try {
 } catch (e) {
   // ignore
 }
-import type { EntrySummary, EntryResponse, VaultState, AppScreen } from '../types';
+import type { EntrySummary, EntryResponse, VaultState, AppScreen, Settings, VaultBackup, ImportResult } from '../types';
+import { DEFAULT_SETTINGS } from '../types';
 import * as api from '../api/vault';
 
 function formatError(error: unknown): string {
@@ -32,6 +33,7 @@ interface AppState extends VaultState {
   screen: AppScreen;
   isLoading: boolean;
   error: string | null;
+  settings: Settings;
 }
 
 type Action =
@@ -45,6 +47,7 @@ type Action =
   | { type: 'SET_SCREEN'; payload: AppScreen }
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | null }
+  | { type: 'SET_SETTINGS'; payload: Settings }
   | { type: 'RESET' };
 
 const initialState: AppState = {
@@ -58,6 +61,7 @@ const initialState: AppState = {
   searchQuery: '',
   isLoading: true,
   error: null,
+  settings: DEFAULT_SETTINGS,
 };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -82,6 +86,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, isLoading: action.payload };
     case 'SET_ERROR':
       return { ...state, error: action.payload };
+    case 'SET_SETTINGS':
+      return { ...state, settings: action.payload };
     case 'RESET':
       return { ...initialState, isLoading: false };
     default:
@@ -109,6 +115,10 @@ interface AppContextValue {
     deleteEntry: (id: string) => Promise<void>;
     navigate: (screen: AppScreen) => void;
     setSearchQuery: (query: string) => void;
+    loadSettings: () => Promise<void>;
+    updateSettings: (settings: Settings) => Promise<void>;
+    exportVault: (password: string) => Promise<VaultBackup>;
+    importVault: (backup: VaultBackup, password: string) => Promise<ImportResult>;
   };
 }
 
@@ -272,6 +282,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     setSearchQuery: (query: string) => {
       dispatch({ type: 'SET_SEARCH_QUERY', payload: query });
+    },
+
+    loadSettings: async () => {
+      try {
+        const settings = await api.getSettings();
+        dispatch({ type: 'SET_SETTINGS', payload: settings });
+      } catch (error) {
+        dispatch({ type: 'SET_ERROR', payload: formatError(error) });
+      }
+    },
+
+    updateSettings: async (settings: Settings) => {
+      try {
+        const updated = await api.updateSettings(settings);
+        dispatch({ type: 'SET_SETTINGS', payload: updated });
+      } catch (error) {
+        dispatch({ type: 'SET_ERROR', payload: formatError(error) });
+        throw error;
+      }
+    },
+
+    exportVault: async (password: string) => {
+      return api.exportVault(password);
+    },
+
+    importVault: async (backup: VaultBackup, password: string) => {
+      const result = await api.importVault(backup, password);
+      await actions.loadEntries();
+      await actions.loadGroups();
+      return result;
     },
   };
 
