@@ -60,17 +60,17 @@ describe('GroupManager', () => {
     await screen.findByText('Work');
     await screen.findByText('Personal');
 
-    // click "New Group" to reveal inline input
-    const newBtn = screen.getByText('New Group');
+    // click "+" (New group) icon button to reveal inline input
+    const newBtn = screen.getByTitle('New group');
     fireEvent.click(newBtn);
 
     // type group name in the inline input
-    const input = await screen.findByPlaceholderText('Group name');
+    const input = await screen.findByPlaceholderText('New group name...');
     fireEvent.change(input, { target: { value: 'NewGroup' } });
 
-    // click Save
-    const saveBtn = screen.getByText('Save');
-    fireEvent.click(saveBtn);
+    // click Create
+    const createBtn = screen.getByText('Create');
+    fireEvent.click(createBtn);
 
     await waitFor(() => expect(createGroup).toHaveBeenCalledWith('NewGroup'));
   });
@@ -106,8 +106,8 @@ describe('GroupManager', () => {
       </AppCtx2.AppContext.Provider>
     );
 
-    // click first Rename
-    const renameButtons = await screen.findAllByText('Rename');
+    // click first Rename (icon button with title)
+    const renameButtons = await screen.findAllByTitle('Rename');
     fireEvent.click(renameButtons[0]);
 
     // input should appear with current name
@@ -148,15 +148,14 @@ describe('GroupManager', () => {
         <GroupManager3 />
       </AppCtx3.AppContext.Provider>
     );
-    const deleteButtons = await screen.findAllByText('Delete');
+    const deleteButtons = await screen.findAllByTitle('Delete');
     fireEvent.click(deleteButtons[1]);
 
     // Modal appears — confirm delete
     await screen.findByText(/Delete group/);
-    // The modal's Delete button appears after the list item Delete buttons
-    const allDeleteBtns = screen.getAllByText('Delete');
-    // The last one is from the modal
-    fireEvent.click(allDeleteBtns[allDeleteBtns.length - 1]);
+    // The modal's Delete button (text, not icon)
+    const modalDeleteBtn = screen.getAllByText('Delete').pop()!;
+    fireEvent.click(modalDeleteBtn);
 
     await waitFor(() => expect(deleteGroup).toHaveBeenCalledWith('g2'));
   });
