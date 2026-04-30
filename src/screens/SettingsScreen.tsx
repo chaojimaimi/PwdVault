@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { useTheme } from '../hooks/useTheme';
 import { showToast } from '../utils/toast';
 import type { Settings } from '../types';
 
@@ -15,6 +16,7 @@ const AUTO_LOCK_OPTIONS = [
 
 export function SettingsScreen() {
   const { state, actions } = useApp();
+  const { theme, setTheme, themes } = useTheme();
   const [settings, setSettings] = useState<Settings>(state.settings);
   const [saving, setSaving] = useState(false);
 
@@ -48,6 +50,24 @@ export function SettingsScreen() {
       </header>
 
       <div className="generator-content">
+        <div className="settings-section">
+          <h3 className="settings-section-title">Theme</h3>
+          <div className="theme-selector">
+            {themes.map((t) => (
+              <button
+                key={t}
+                className={`theme-option ${theme === t ? 'active' : ''}`}
+                onClick={() => setTheme(t)}
+              >
+                <div className={`theme-option-dot theme-option-dot-${t}`} />
+                <span className="theme-option-name">{t.charAt(0).toUpperCase() + t.slice(1)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="settings-divider" />
+
         <div className="settings-section">
           <h3 className="settings-section-title">Auto-Lock</h3>
           <div className="option-row">

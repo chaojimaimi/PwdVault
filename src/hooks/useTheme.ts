@@ -37,5 +37,11 @@ export function useTheme() {
     window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY }));
   }, []);
 
-  return { theme, setTheme, themes: THEMES };
+  const cycleTheme = useCallback(() => {
+    const currentIndex = THEMES.indexOf(theme);
+    const nextTheme = THEMES[(currentIndex + 1) % THEMES.length];
+    setTheme(nextTheme);
+  }, [theme, setTheme]);
+
+  return { theme, setTheme, cycleTheme, themes: THEMES };
 }

@@ -1,6 +1,6 @@
 /* ============================================
    PwdVault Theme System
-   Three themes: Classic, Cyber, Hybrid
+   Three light themes: Classic, Cyber, Hybrid
    ============================================ */
 
 /* === Classic (Default) — Industrial Refined === */
@@ -8,25 +8,26 @@
 [data-theme="classic"] {
   --color-primary: #0EA5E9;
   --color-primary-hover: #0284C7;
-  --color-primary-dim: rgba(14, 165, 233, 0.15);
-  --color-primary-border: rgba(14, 165, 233, 0.3);
-  --color-accent: #0EA5E9;
-  --color-accent-dim: rgba(14, 165, 233, 0.15);
+  --color-primary-dim: rgba(14, 165, 233, 0.07);
+  --color-primary-border: rgba(14, 165, 233, 0.20);
+  --color-accent: #6366F1;
+  --color-accent-dim: rgba(99, 102, 241, 0.10);
+  --gradient-icon: linear-gradient(135deg, #0EA5E9, #6366F1);
 
-  --color-bg: #0F0F14;
-  --color-surface: #16161E;
-  --color-input: #1C1C26;
-  --color-text: #E8E8ED;
-  --color-text-secondary: #8888A0;
-  --color-text-muted: #555570;
-  --color-border: #2A2A3A;
-  --color-border-light: #333346;
+  --color-bg: #F6F7F9;
+  --color-surface: #FFFFFF;
+  --color-input: #EDEEF2;
+  --color-text: #1A1D26;
+  --color-text-secondary: #6B7080;
+  --color-text-muted: #9CA3AF;
+  --color-border: rgba(0, 0, 0, 0.06);
+  --color-border-light: rgba(0, 0, 0, 0.10);
 
   --color-success: #10B981;
   --color-danger: #EF4444;
   --color-danger-hover: #DC2626;
-  --color-danger-dim: rgba(239, 68, 68, 0.1);
-  --color-danger-text: #F87171;
+  --color-danger-dim: rgba(239, 68, 68, 0.07);
+  --color-danger-text: #EF4444;
   --color-warning: #F59E0B;
 
   --font-body: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
@@ -53,9 +54,9 @@
   --radius-lg: 12px;
   --radius-tag: 9999px;
 
-  --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.3);
-  --shadow-fab: 0 4px 16px rgba(14, 165, 233, 0.3);
-  --shadow-toast: 0 4px 16px rgba(0, 0, 0, 0.3);
+  --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.03);
+  --shadow-fab: none;
+  --shadow-toast: 0 4px 16px rgba(0, 0, 0, 0.08);
   --shadow-glow: none;
 
   --text-transform-btn: none;
@@ -63,35 +64,36 @@
   --icon-style: solid;
 }
 
-/* === Cyber — CyberForge === */
+/* === Cyber — Cool Precision === */
 [data-theme="cyber"] {
-  --color-primary: #00F0FF;
-  --color-primary-hover: #00C8D6;
-  --color-primary-dim: rgba(0, 240, 255, 0.08);
-  --color-primary-border: rgba(0, 240, 255, 0.3);
-  --color-accent: #FF0080;
-  --color-accent-dim: rgba(255, 0, 128, 0.1);
+  --color-primary: #0891B2;
+  --color-primary-hover: #0E7490;
+  --color-primary-dim: rgba(8, 145, 178, 0.07);
+  --color-primary-border: rgba(8, 145, 178, 0.20);
+  --color-accent: #DB2777;
+  --color-accent-dim: rgba(219, 39, 119, 0.10);
+  --gradient-icon: linear-gradient(135deg, #0891B2, #DB2777);
 
-  --color-bg: #050508;
-  --color-surface: #0A0A10;
-  --color-input: #0E0E16;
-  --color-text: #E0E0F0;
-  --color-text-secondary: #6E6E8A;
-  --color-text-muted: #3E3E58;
-  --color-border: rgba(255, 255, 255, 0.06);
-  --color-border-light: rgba(255, 255, 255, 0.1);
+  --color-bg: #F0F4F8;
+  --color-surface: #FFFFFF;
+  --color-input: #E4EAF0;
+  --color-text: #0F172A;
+  --color-text-secondary: #475569;
+  --color-text-muted: #94A3B8;
+  --color-border: rgba(0, 0, 0, 0.06);
+  --color-border-light: rgba(8, 145, 178, 0.12);
 
-  --color-success: #00FF88;
-  --color-danger: #FF3366;
-  --color-danger-hover: #E6294D;
-  --color-danger-dim: rgba(255, 51, 102, 0.1);
-  --color-danger-text: #FF6688;
-  --color-warning: #FFB800;
+  --color-success: #059669;
+  --color-danger: #E11D48;
+  --color-danger-hover: #BE123C;
+  --color-danger-dim: rgba(225, 29, 72, 0.07);
+  --color-danger-text: #E11D48;
+  --color-warning: #D97706;
 
   --font-body: 'Space Grotesk', system-ui, sans-serif;
-  --font-mono: 'Space Mono', ui-monospace, monospace;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
-  /* Type scale (same sizes, different font) */
+  /* Type scale */
   --text-h1: 1.5rem;
   --text-h2: 1.125rem;
   --text-body: 0.875rem;
@@ -107,45 +109,46 @@
   --space-xl: 24px;
   --space-2xl: 32px;
 
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-tag: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-tag: 9999px;
 
-  --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.5);
-  --shadow-fab: 0 4px 20px rgba(0, 240, 255, 0.25);
-  --shadow-toast: 0 4px 16px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 20px rgba(0, 240, 255, 0.15);
+  --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.03);
+  --shadow-fab: none;
+  --shadow-toast: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-glow: none;
 
-  --text-transform-btn: uppercase;
-  --bg-pattern: url("data:image/svg+xml,%3Csvg width='60' height='60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h60v60H0z' fill='none'/%3E%3Cpath d='M0 30h60M30 0v60' stroke='rgba(255,255,255,0.03)' stroke-width='1'/%3E%3C/svg%3E");
-  --icon-style: hollow;
+  --text-transform-btn: none;
+  --bg-pattern: none;
+  --icon-style: solid;
 }
 
 /* === Hybrid — Warm-Tech Fusion === */
 [data-theme="hybrid"] {
-  --color-primary: #06B6D4;
-  --color-primary-hover: #0891B2;
-  --color-primary-dim: rgba(6, 182, 212, 0.10);
-  --color-primary-border: rgba(6, 182, 212, 0.25);
-  --color-accent: #F472B6;
-  --color-accent-dim: rgba(244, 114, 182, 0.10);
+  --color-primary: #0D9488;
+  --color-primary-hover: #0F766E;
+  --color-primary-dim: rgba(13, 148, 136, 0.07);
+  --color-primary-border: rgba(13, 148, 136, 0.20);
+  --color-accent: #E11D48;
+  --color-accent-dim: rgba(225, 29, 72, 0.10);
+  --gradient-icon: linear-gradient(135deg, #0D9488, #E11D48);
 
-  --color-bg: #0B0B12;
-  --color-surface: #111119;
-  --color-input: #18181F;
-  --color-text: #E4E4F0;
-  --color-text-secondary: #7C7C96;
-  --color-text-muted: #4A4A64;
-  --color-border: rgba(255, 255, 255, 0.05);
-  --color-border-light: rgba(255, 255, 255, 0.08);
+  --color-bg: #F8F5F2;
+  --color-surface: #FFFFFF;
+  --color-input: #EDE8E3;
+  --color-text: #1C1917;
+  --color-text-secondary: #57534E;
+  --color-text-muted: #A8A29E;
+  --color-border: rgba(0, 0, 0, 0.06);
+  --color-border-light: rgba(0, 0, 0, 0.10);
 
-  --color-success: #34D399;
-  --color-danger: #F87171;
-  --color-danger-hover: #EF4444;
-  --color-danger-dim: rgba(248, 113, 113, 0.1);
-  --color-danger-text: #FCA5A5;
-  --color-warning: #FBBF24;
+  --color-success: #16A34A;
+  --color-danger: #DC2626;
+  --color-danger-hover: #B91C1C;
+  --color-danger-dim: rgba(220, 38, 38, 0.07);
+  --color-danger-text: #DC2626;
+  --color-warning: #CA8A04;
 
   --font-body: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
@@ -168,84 +171,23 @@
 
   --radius-sm: 6px;
   --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-tag: 6px;
+  --radius-lg: 12px;
+  --radius-tag: 9999px;
 
-  --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
-  --shadow-fab: 0 4px 16px rgba(6, 182, 212, 0.2);
-  --shadow-toast: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.03);
+  --shadow-fab: none;
+  --shadow-toast: 0 4px 16px rgba(0, 0, 0, 0.08);
   --shadow-glow: none;
 
   --text-transform-btn: none;
   --bg-pattern: none;
-  --icon-style: glow;
+  --icon-style: solid;
 }
+
 html.theme-transitioning,
 html.theme-transitioning *,
 html.theme-transitioning *::before,
 html.theme-transitioning *::after {
   transition: background-color 0.3s ease, color 0.3s ease,
     border-color 0.3s ease, box-shadow 0.3s ease !important;
-}
-
-/* === Hybrid background gradient === */
-[data-theme="hybrid"] .vault-container,
-[data-theme="hybrid"] .entry-screen,
-[data-theme="hybrid"] .generator-screen,
-[data-theme="hybrid"] .screen {
-  background:
-    radial-gradient(ellipse at 10% 10%, rgba(6, 182, 212, 0.03) 0%, transparent 50%),
-    radial-gradient(ellipse at 90% 90%, rgba(244, 114, 182, 0.03) 0%, transparent 50%),
-    var(--color-bg);
-}
-
-/* === Cyber glow on interactive elements === */
-[data-theme="cyber"] .btn-primary,
-[data-theme="cyber"] .fab {
-  box-shadow: var(--shadow-glow);
-}
-
-[data-theme="cyber"] .form-input:focus,
-[data-theme="cyber"] .search-input:focus {
-  box-shadow: var(--shadow-glow);
-}
-
-/* === Cyber grid pattern overlay === */
-[data-theme="cyber"] .vault-container,
-[data-theme="cyber"] .entry-screen,
-[data-theme="cyber"] .generator-screen {
-  background:
-    var(--bg-pattern),
-    var(--color-bg);
-}
-
-/* === Cyber uppercase buttons === */
-[data-theme="cyber"] .btn {
-  text-transform: var(--text-transform-btn);
-  letter-spacing: 0.05em;
-}
-
-/* === Cyber hollow icon style === */
-[data-theme="cyber"] .entry-icon {
-  background: transparent;
-  border: 2px solid var(--color-primary);
-  color: var(--color-primary);
-}
-
-/* === Hybrid password field primary color === */
-[data-theme="hybrid"] .password-field input {
-  color: var(--color-primary);
-}
-
-[data-theme="hybrid"] .password-preview {
-  color: var(--color-primary);
-}
-
-/* === Hybrid subtle glow on hover === */
-[data-theme="hybrid"] .btn-primary:hover:not(:disabled) {
-  box-shadow: 0 0 16px rgba(6, 182, 212, 0.12);
-}
-
-[data-theme="hybrid"] .fab:hover {
-  box-shadow: 0 0 16px rgba(6, 182, 212, 0.12);
 }

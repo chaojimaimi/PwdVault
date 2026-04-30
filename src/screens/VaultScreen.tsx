@@ -12,7 +12,7 @@ function getInitials(title: string): string {
 
 export function VaultScreen() {
   const { state, actions } = useApp();
-  const { theme, setTheme } = useTheme();
+  const { cycleTheme } = useTheme();
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -74,23 +74,13 @@ export function VaultScreen() {
       <header className="vault-header">
         <h1>PwdVault</h1>
         <div className="header-actions">
-          <div className="theme-switcher">
-            <button
-              className={`theme-dot theme-dot-classic ${theme === 'classic' ? 'active' : ''}`}
-              onClick={() => setTheme('classic')}
-              title="Classic"
-            />
-            <button
-              className={`theme-dot theme-dot-cyber ${theme === 'cyber' ? 'active' : ''}`}
-              onClick={() => setTheme('cyber')}
-              title="Cyber"
-            />
-            <button
-              className={`theme-dot theme-dot-hybrid ${theme === 'hybrid' ? 'active' : ''}`}
-              onClick={() => setTheme('hybrid')}
-              title="Hybrid"
-            />
-          </div>
+          <button className="btn btn-icon" onClick={handleAddClick} title="Add password">
+            <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+          <button className="theme-dot" onClick={cycleTheme} title="Switch theme" />
+          <div className="header-separator" />
           <button className="btn btn-icon" onClick={handleGeneratorClick} title="Password Generator">
             <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
@@ -216,10 +206,6 @@ export function VaultScreen() {
           ))
         )}
       </div>
-
-      <button className="fab" onClick={handleAddClick}>
-        +
-      </button>
     </div>
   );
 }
