@@ -262,14 +262,19 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
         }
 
         "unlock_vault" => {
+            crate::check_rate_limit(&state).map_err(|e| e.to_string())?;
+
             let password = req.password.ok_or("Password required")?;
             let verification_data = state.verification_data.lock().expect("verification lock poisoned");
             let data = verification_data.as_ref().ok_or("Vault not initialized")?;
             let success = crypto::unlock_with_password(&password, data)
                 .map_err(|e| e.to_string())?;
             if success {
+                crate::reset_rate_limit(&state);
                 state.touch_activity();
                 state.update_lock_menu("Lock Vault");
+            } else {
+                crate::record_failed_attempt(&state);
             }
             Ok(serde_json::json!(success))
         }

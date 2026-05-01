@@ -86,6 +86,7 @@ export interface Settings {
   default_include_lowercase: boolean;
   default_include_numbers: boolean;
   default_include_symbols: boolean;
+  check_updates: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -95,6 +96,7 @@ export const DEFAULT_SETTINGS: Settings = {
   default_include_lowercase: true,
   default_include_numbers: true,
   default_include_symbols: true,
+  check_updates: true,
 };
 
 // Backup/Restore Types
@@ -113,4 +115,11 @@ export interface VaultBackup {
 export interface ImportResult {
   entries_imported: number;
   groups_imported: number;
+}
+
+export interface UpdateInfo {
+  has_update: boolean;
+  latest_version: string;
+  release_notes: string;
+  download_url: string;
 }

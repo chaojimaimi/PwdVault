@@ -176,6 +176,12 @@ pub struct Settings {
     pub default_include_lowercase: bool,
     pub default_include_numbers: bool,
     pub default_include_symbols: bool,
+    #[serde(default = "default_true")]
+    pub check_updates: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -187,6 +193,7 @@ impl Default for Settings {
             default_include_lowercase: true,
             default_include_numbers: true,
             default_include_symbols: true,
+            check_updates: true,
         }
     }
 }
@@ -370,7 +377,7 @@ pub fn count_groups(db: &Database) -> Result<usize, DatabaseError> {
 
 /// Save settings (single row with key "current")
 pub fn save_settings(db: &Database, settings: &Settings) -> Result<(), DatabaseError> {
-    let encoded = bincode::serialize(settings)
+    let encoded = serde_json::to_vec(settings)
         .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
     let write_txn = db.begin_write()?;
     {
@@ -387,9 +394,15 @@ pub fn load_settings(db: &Database) -> Result<Settings, DatabaseError> {
     let table = read_txn.open_table(SETTINGS_TABLE)?;
     match table.get("current")? {
         Some(value) => {
-            let settings: Settings = bincode::deserialize(value.value())
-                .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
-            Ok(settings)
+            let data = value.value();
+            // Try JSON first (current format), then bincode (legacy format)
+            if let Ok(settings) = serde_json::from_slice::<Settings>(data) {
+                Ok(settings)
+            } else if let Ok(settings) = bincode::deserialize::<Settings>(data) {
+                Ok(settings)
+            } else {
+                Ok(Settings::default())
+            }
         }
         None => Ok(Settings::default()),
     }

@@ -1,4 +1,4 @@
-import type { CreateEntryRequest, EntryResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult } from '../types';
+import type { CreateEntryRequest, EntryResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, UpdateInfo } from '../types';
 
 // Unified invoke function that works in both Tauri and browser environments
 async function invoke<T>(cmd: string, args?: Record<string, any>): Promise<T> {
@@ -131,4 +131,10 @@ export async function exportVault(exportPassword: string): Promise<VaultBackup> 
 
 export async function importVault(backup: VaultBackup, importPassword: string): Promise<ImportResult> {
   return invoke('import_vault', { backup, import_password: importPassword });
+}
+
+// Update Check
+
+export async function checkForUpdates(): Promise<UpdateInfo> {
+  return invoke('check_for_updates');
 }

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
 use std::time::Instant;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -51,6 +52,15 @@ const AUTO_LOCK_SECS: u64 = 600;
 /// Auto-lock check interval in seconds
 const AUTO_LOCK_CHECK_INTERVAL_SECS: u64 = 30;
 
+/// Maximum consecutive failed unlock attempts before lockout
+const MAX_FAILED_ATTEMPTS: u32 = 5;
+
+/// Lockout duration in seconds after max failed attempts
+#[cfg(not(test))]
+const LOCKOUT_DURATION_SECS: u64 = 60;
+#[cfg(test)]
+const LOCKOUT_DURATION_SECS: u64 = 1;
+
 // ============================================================================
 // Application State
 // ============================================================================
@@ -65,6 +75,10 @@ pub struct AppState {
     pub reload_window_fn: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
     /// Dynamic auto-lock timeout in seconds (loaded from settings)
     pub auto_lock_secs: Mutex<u64>,
+    /// Number of consecutive failed unlock attempts
+    pub failed_unlock_attempts: Mutex<u32>,
+    /// Timestamp when lockout expires (None = not locked out)
+    pub lockout_until: Mutex<Option<Instant>>,
 }
 
 impl AppState {
@@ -109,6 +123,8 @@ impl Default for AppState {
             update_lock_menu_fn: Mutex::new(None),
             reload_window_fn: Mutex::new(None),
             auto_lock_secs: Mutex::new(AUTO_LOCK_SECS),
+            failed_unlock_attempts: Mutex::new(0),
+            lockout_until: Mutex::new(None),
         }
     }
 }
@@ -128,6 +144,7 @@ pub enum VaultError {
     DatabaseError(String),
     InternalError(String),
     InvalidBackup(String),
+    RateLimited { retry_after_secs: u64 },
 }
 
 impl From<EncryptionError> for VaultError {
@@ -175,6 +192,9 @@ impl std::fmt::Display for VaultError {
             VaultError::DatabaseError(e) => write!(f, "Database error: {}", e),
             VaultError::InternalError(e) => write!(f, "Internal error: {}", e),
             VaultError::InvalidBackup(e) => write!(f, "Invalid backup: {}", e),
+            VaultError::RateLimited { retry_after_secs } => {
+                write!(f, "Too many failed attempts. Try again in {}s", retry_after_secs)
+            }
         }
     }
 }
@@ -186,6 +206,51 @@ impl std::fmt::Display for VaultError {
 /// Get the database file path (delegates to shared paths module)
 fn get_db_path() -> PathBuf {
     paths::get_db_path()
+}
+
+// ============================================================================
+// Rate Limiting
+// ============================================================================
+
+/// Check if the rate limiter is currently blocking unlock attempts.
+pub(crate) fn check_rate_limit(state: &AppState) -> Result<(), VaultError> {
+    let lockout = state.lockout_until.lock().expect("lockout lock poisoned");
+    if let Some(until) = *lockout {
+        let now = Instant::now();
+        if now < until {
+            let remaining = (until - now).as_secs();
+            return Err(VaultError::RateLimited {
+                retry_after_secs: remaining,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Record a failed unlock attempt. After MAX_FAILED_ATTEMPTS, starts lockout.
+pub(crate) fn record_failed_attempt(state: &AppState) {
+    let mut attempts = state
+        .failed_unlock_attempts
+        .lock()
+        .expect("attempts lock poisoned");
+    *attempts += 1;
+    if *attempts >= MAX_FAILED_ATTEMPTS {
+        let mut lockout = state.lockout_until.lock().expect("lockout lock poisoned");
+        *lockout = Some(Instant::now() + Duration::from_secs(LOCKOUT_DURATION_SECS));
+        *attempts = 0;
+    }
+}
+
+/// Reset rate limit state (called on successful unlock).
+pub(crate) fn reset_rate_limit(state: &AppState) {
+    *state
+        .failed_unlock_attempts
+        .lock()
+        .expect("attempts lock poisoned") = 0;
+    *state
+        .lockout_until
+        .lock()
+        .expect("lockout lock poisoned") = None;
 }
 
 /// Get the database directory (ensures it exists)
@@ -256,6 +321,8 @@ fn init_vault(
 
 #[tauri::command]
 fn unlock_vault(password: String, state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
+    check_rate_limit(&state)?;
+
     let mut password = password;
 
     let verification_data = state
@@ -271,6 +338,7 @@ fn unlock_vault(password: String, state: State<'_, Arc<AppState>>) -> Result<boo
     password.zeroize();
 
     if success {
+        reset_rate_limit(&state);
         // Load settings (e.g. auto-lock timeout) from database
         if let Ok(db) = get_db(&state) {
             if let Ok(settings) = load_settings(&db) {
@@ -279,6 +347,8 @@ fn unlock_vault(password: String, state: State<'_, Arc<AppState>>) -> Result<boo
         }
         state.touch_activity();
         state.update_lock_menu("Lock Vault");
+    } else {
+        record_failed_attempt(&state);
     }
 
     Ok(success)
@@ -345,6 +415,62 @@ fn generate_password(
     }
 
     password_chars.into_iter().collect()
+}
+
+// ============================================================================
+// Update Check
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateInfo {
+    pub has_update: bool,
+    pub latest_version: String,
+    pub release_notes: String,
+    pub download_url: String,
+}
+
+#[tauri::command]
+fn check_for_updates() -> Result<UpdateInfo, VaultError> {
+    let current = env!("CARGO_PKG_VERSION");
+
+    let config = ureq::config::Config::builder()
+        .timeout_global(Some(Duration::from_secs(5)))
+        .build();
+    let agent: ureq::Agent = config.into();
+
+    let mut response = agent
+        .get("https://api.github.com/repos/chaojimaimi/PwdVault/releases/latest")
+        .header("User-Agent", "PwdVault-Update-Checker")
+        .call()
+        .map_err(|_| VaultError::InternalError("Update check failed".to_string()))?;
+
+    let body = response
+        .body_mut()
+        .read_to_string()
+        .map_err(|_| VaultError::InternalError("Failed to read response".to_string()))?;
+
+    let json: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|_| VaultError::InternalError("Invalid response".to_string()))?;
+
+    let tag_name = json["tag_name"]
+        .as_str()
+        .unwrap_or("")
+        .trim_start_matches('v');
+
+    let current_ver = semver::Version::parse(current)
+        .map_err(|e| VaultError::InternalError(format!("Invalid current version: {}", e)))?;
+    let latest_ver = semver::Version::parse(tag_name)
+        .map_err(|e| VaultError::InternalError(format!("Invalid remote version: {}", e)))?;
+
+    Ok(UpdateInfo {
+        has_update: latest_ver > current_ver,
+        latest_version: tag_name.to_string(),
+        release_notes: json["body"].as_str().unwrap_or("").to_string(),
+        download_url: json["html_url"]
+            .as_str()
+            .unwrap_or("")
+            .to_string(),
+    })
 }
 
 // ============================================================================
@@ -1161,6 +1287,8 @@ pub fn run() {
             // Import/Export
             export_vault,
             import_vault,
+            // Update check
+            check_for_updates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1310,6 +1438,11 @@ mod tests {
         assert_eq!(VaultError::VaultLocked.to_string(), "Vault is locked");
         assert_eq!(VaultError::VaultAlreadyExists.to_string(), "Vault already exists");
         assert!(VaultError::EncryptionFailed("test".into()).to_string().contains("test"));
+        assert!(matches!(
+            VaultError::RateLimited { retry_after_secs: 60 },
+            VaultError::RateLimited { retry_after_secs: 60 }
+        ));
+        assert!(VaultError::RateLimited { retry_after_secs: 30 }.to_string().contains("30"));
     }
 
     // ---- get_db_path test ----
@@ -1458,5 +1591,58 @@ mod tests {
         assert_eq!(count_entries(&db).unwrap(), 5);
         let ids = list_entries(&db).unwrap();
         assert_eq!(ids.len(), 5);
+    }
+
+    // ---- Rate Limiting ----
+
+    #[test]
+    fn test_rate_limit_allows_initial_attempts() {
+        let state = AppState::default();
+        for _ in 0..4 {
+            record_failed_attempt(&state);
+        }
+        assert!(check_rate_limit(&state).is_ok());
+    }
+
+    #[test]
+    fn test_rate_limit_triggers_after_five_failures() {
+        let state = AppState::default();
+        for _ in 0..5 {
+            record_failed_attempt(&state);
+        }
+        let result = check_rate_limit(&state);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), VaultError::RateLimited { .. }));
+    }
+
+    #[test]
+    fn test_rate_limit_resets_on_success() {
+        let state = AppState::default();
+        for _ in 0..4 {
+            record_failed_attempt(&state);
+        }
+        reset_rate_limit(&state);
+        assert!(check_rate_limit(&state).is_ok());
+        assert_eq!(*state.failed_unlock_attempts.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_rate_limit_blocks_during_lockout() {
+        let state = AppState::default();
+        for _ in 0..5 {
+            record_failed_attempt(&state);
+        }
+        let result = check_rate_limit(&state);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rate_limit_expires_after_duration() {
+        let state = AppState::default();
+        // Manually set a lockout that already expired
+        *state.lockout_until.lock().unwrap() = Some(
+            Instant::now() - Duration::from_secs(1),
+        );
+        assert!(check_rate_limit(&state).is_ok());
     }
 }
