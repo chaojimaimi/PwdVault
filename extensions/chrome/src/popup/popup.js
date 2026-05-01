@@ -14,7 +14,7 @@ class PopupApp {
       error: null,
       expandedEntryId: null,
       visiblePasswords: new Set(),
-      theme: 'classic',
+      theme: 'light',
       // Generator state
       generatedPassword: '',
       generatorOptions: {
@@ -36,8 +36,10 @@ class PopupApp {
   loadTheme() {
     try {
       const saved = localStorage.getItem('pwdvault-theme');
-      if (saved && ['classic', 'cyber', 'hybrid'].includes(saved)) {
+      if (saved && ['light', 'dark'].includes(saved)) {
         this.state.theme = saved;
+      } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        this.state.theme = 'dark';
       }
     } catch {}
     this.applyTheme();
@@ -49,13 +51,6 @@ class PopupApp {
       localStorage.setItem('pwdvault-theme', theme);
     } catch {}
     this.applyTheme();
-    // Re-render only header to update active dot (avoid full re-render)
-    const switcher = document.querySelector('.theme-switcher');
-    if (switcher) {
-      switcher.querySelectorAll('.theme-dot').forEach(dot => {
-        dot.classList.toggle('active', dot.dataset.theme === theme);
-      });
-    }
   }
 
   applyTheme() {
@@ -401,7 +396,6 @@ class PopupApp {
   renderMain() {
     const entries = this.getFilteredEntries();
     const groups = this.state.groups;
-    const theme = this.state.theme;
 
     return `
       <div class="header">
@@ -415,11 +409,7 @@ class PopupApp {
           <h1>PwdVault</h1>
         </div>
         <div class="header-actions">
-          <div class="theme-switcher">
-            <button class="theme-dot theme-dot-classic ${theme === 'classic' ? 'active' : ''}" data-theme="classic" title="Classic"></button>
-            <button class="theme-dot theme-dot-cyber ${theme === 'cyber' ? 'active' : ''}" data-theme="cyber" title="Cyber"></button>
-            <button class="theme-dot theme-dot-hybrid ${theme === 'hybrid' ? 'active' : ''}" data-theme="hybrid" title="Hybrid"></button>
-          </div>
+          <button class="theme-dot" id="theme-toggle" title="Toggle theme"></button>
           <button class="icon-btn" id="add-btn" title="Add Password">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="12" y1="5" x2="12" y2="19"/>
@@ -805,10 +795,13 @@ class PopupApp {
   }
 
   attachMainEvents() {
-    // Theme dots
-    document.querySelectorAll('.theme-dot').forEach(dot => {
-      dot.onclick = () => this.setTheme(dot.dataset.theme);
-    });
+    // Theme toggle
+    const themeDot = document.getElementById('theme-toggle');
+    if (themeDot) {
+      themeDot.onclick = () => {
+        this.setTheme(this.state.theme === 'light' ? 'dark' : 'light');
+      };
+    }
 
     // Search
     const search = document.getElementById('search');
