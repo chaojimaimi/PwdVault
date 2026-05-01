@@ -1,6 +1,6 @@
 [package]
 name = "pwdvault"
-version = "0.3.1"
+version = "1.0.0"
 description = "A secure, local-first password manager"
 authors = ["andylee"]
 edition = "2021"

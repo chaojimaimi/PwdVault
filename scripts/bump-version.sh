@@ -56,7 +56,13 @@ echo "  package.json → $V3"
 sed -i.bak "4s/\"version\": \".*\"/\"version\": \"${V3}\"/" extensions/chrome/manifest.json && rm -f extensions/chrome/manifest.json.bak
 echo "  extensions/chrome/manifest.json → $V3"
 
-# 6. extensions/native-host/Cargo.toml (line 3)
+# 6. extensions/firefox/manifest.json (line 4)
+if [[ -f extensions/firefox/manifest.json ]]; then
+    sed -i.bak "4s/\"version\": \".*\"/\"version\": \"${V3}\"/" extensions/firefox/manifest.json && rm -f extensions/firefox/manifest.json.bak
+    echo "  extensions/firefox/manifest.json → $V3"
+fi
+
+# 7. extensions/native-host/Cargo.toml (line 3)
 sed -i.bak "3s/^version = \".*\"/version = \"${V3}\"/" extensions/native-host/Cargo.toml && rm -f extensions/native-host/Cargo.toml.bak
 echo "  extensions/native-host/Cargo.toml → $V3"
 
@@ -81,6 +87,9 @@ grep -q "version = \"${V3}\"" src-tauri/Cargo.toml || { echo "  FAIL: src-tauri/
 grep -q "\"version\": \"${V3}\"" src-tauri/tauri.conf.json || { echo "  FAIL: tauri.conf.json"; ERRORS=$((ERRORS+1)); }
 grep -q "\"version\": \"${V3}\"" package.json || { echo "  FAIL: package.json"; ERRORS=$((ERRORS+1)); }
 grep -q "\"version\": \"${V3}\"" extensions/chrome/manifest.json || { echo "  FAIL: manifest.json"; ERRORS=$((ERRORS+1)); }
+if [[ -f extensions/firefox/manifest.json ]]; then
+    grep -q "\"version\": \"${V3}\"" extensions/firefox/manifest.json || { echo "  FAIL: firefox/manifest.json"; ERRORS=$((ERRORS+1)); }
+fi
 grep -q "version = \"${V3}\"" extensions/native-host/Cargo.toml || { echo "  FAIL: native-host/Cargo.toml"; ERRORS=$((ERRORS+1)); }
 
 if [[ $ERRORS -eq 0 ]]; then

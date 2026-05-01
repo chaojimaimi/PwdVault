@@ -8,7 +8,7 @@ All data is encrypted with AES-256-GCM and stored locally using an embedded data
 
 - **AES-256-GCM encryption** with Argon2id key derivation (64MB memory, 3 iterations)
 - **Local-first** — all data stays on your device in an encrypted redb database
-- **Browser auto-fill** via Chrome extension (detects login forms, fills credentials)
+- **Browser auto-fill** via Chrome/Firefox extension (detects login forms, fills credentials)
 - **System tray** — close-to-tray keeps the background server running for the extension
 - **Auto-lock** — vault locks after 10 minutes of inactivity
 - **Clipboard security** — copied passwords auto-clear after 30 seconds
@@ -44,9 +44,15 @@ All data is encrypted with AES-256-GCM and stored locally using an embedded data
 
 ### Chrome Extension
 
-1. Download and unzip `PwdVault-Extension-v*.zip`
+1. Download and unzip `PwdVault-Chrome-Extension-v*.zip`
 2. Open `chrome://extensions/` and enable **Developer mode**
 3. Click **Load unpacked** and select the extracted folder
+
+### Firefox Extension
+
+1. Download and unzip `PwdVault-Firefox-Extension-v*.zip`
+2. Open `about:debugging#/runtime/this-firefox`
+3. Click **Load Temporary Add-on** and select `manifest.json` from the extracted folder
 
 The extension communicates with the desktop app via HTTP API on `http://127.0.0.1:17429`. The desktop app must be running (system tray is fine).
 
@@ -98,7 +104,7 @@ cd src-tauri && cargo test -- --test-threads=1
 ### Version Bump
 
 ```bash
-./scripts/bump-version.sh 0.2.0 --changelog
+./scripts/bump-version.sh 1.0.0 --changelog
 ```
 
 ## Tech Stack
@@ -109,23 +115,20 @@ cd src-tauri && cargo test -- --test-threads=1
 | Backend | Tauri v2, Rust |
 | Database | redb (pure Rust, ACID, embedded) |
 | Encryption | AES-256-GCM, Argon2id |
-| Browser extension | Chrome MV3, HTTP API |
+| Browser extension | Chrome/Firefox MV3, HTTP API |
 | CI/CD | GitHub Actions (macOS + Windows) |
 
 ## Project Status
 
-Early development (v0.2.0). See [CHANGELOG.md](CHANGELOG.md) for details.
+v1.0.0. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ### Roadmap
 
-- Encrypted import/export
-- Fuzzy search
-- Settings screen
 - macOS code signing & notarization
-- Auto-update
-- Firefox extension
 - Biometric unlock (Touch ID / Windows Hello)
 - TOTP/2FA generator
+- Secure notes
+- Multi-device sync
 
 ## Data Files
 

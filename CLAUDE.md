@@ -2,10 +2,10 @@
 
 A secure, local-first password manager built with Tauri + React.
 
-**Last Updated**: 2026-04-17
+**Last Updated**: 2026-05-01
 **Repository**: https://github.com/chaojimaimi/PwdVault (Private)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v0.3.0
-**Current Version**: `v0.3.0`
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.0.0
+**Current Version**: `v1.0.0`
 **Current Branch**: `main`
 
 ---
@@ -80,15 +80,19 @@ PwdVault/
 │   │   │   ├── content.css
 │   │   │   └── popup/            # Popup UI (search, copy, show/hide password)
 │   │   └── icons/
+│   ├── firefox/                   # Firefox extension (MV3, symlinks to chrome/)
+│   │   ├── manifest.json          # Firefox MV3 manifest with gecko settings
+│   │   ├── src → ../chrome/src/   # Symlink to shared source
+│   │   └── icons → ../chrome/icons/ # Symlink to shared icons
 │   └── native-host/              # Native messaging host (legacy, unused)
 │
 ├── .github/workflows/
 │   └── release.yml               # CI: macOS + Windows + extension builds
 ├── releases/                     # Local release artifacts
 ├── scripts/
-│   └── bump-version.sh           # Version sync across 6 files
-├── DESIGN.md                     # Design system specification (3 themes)
-├── VERSION                       # 4-digit version: 0.3.0.0
+│   └── bump-version.sh           # Version sync across 7 files
+├── DESIGN.md                     # Design system specification (Light/Dark themes)
+├── VERSION                       # 4-digit version: 1.0.0.0
 ├── CHANGELOG.md
 ├── password_generator_analysis.md # Password generator security analysis & fixes
 └── CLAUDE.md                     # This file
@@ -123,6 +127,25 @@ PwdVault/
 
 ## 2. Current Status
 
+### v1.0.0 (2026-05-01) — Released
+
+**Completed: Phase G — v1.0 Release Preparation**
+- **G1** Firefox extension — MV3 adaptation with gecko-specific manifest, symlink to shared source
+- **G2** Test credential cleanup — verified no leaked credentials
+- **G3** Documentation update — CHANGELOG, CLAUDE.md, README.md all current
+- **G4** Security checklist — CSP hardened, keystore .expect(), cargo audit in CI, .env in .gitignore
+- **G5** CSP policy — replaced `null` with restrictive policy (script-src 'self', connect-src localhost only)
+- **F2** Update notification — checks GitHub Releases for newer versions
+- **F4** Rate limiting — 5 failed unlocks → 60s lockout
+
+### v0.3.1 (2026-04-30)
+
+**Completed: Frontend Redesign + Security Features**
+- Light/Dark dual-theme system replacing Classic/Cyber/Hybrid
+- Modular CSS: `App.css` (1300+ lines) split into 6 files
+- New components: `BackHeader.tsx`, `Icons.tsx`, `StrengthMeter.tsx`, `UpdateNotification.tsx`
+- Browser extension synced with Light/Dark theme system
+
 ### v0.3.0 (2026-04-17) — Released
 
 **Completed: Phase E — User Features**
@@ -130,7 +153,7 @@ PwdVault/
 - **E2** Fuzzy search — fuse.js weighted search across title/username/URL/tags
 - **E4** Settings screen — auto-lock timeout (1–60 min), default generator options, persisted to redb
 - Added `ImportExportScreen`, `SettingsScreen`, `GroupManager` screens
-- Added `themes.css` three-theme design system (Classic/Cyber/Hybrid)
+- Added `themes.css` two-theme design system (Light/Dark)
 - Browser extension updated with export/import API + group support + theme switching
 - Security hardening: zeroization of plaintext passwords/notes, correct adaptive KDF params
 
@@ -174,7 +197,14 @@ PwdVault/
 
 ---
 
-## 3. Roadmap (v0.3.0 → v1.0)
+## 3. Roadmap
+
+### Phase G — v1.0 Release ✅ Completed
+- [x] **G1** Firefox extension (MV3, gecko manifest, shared source via symlink)
+- [x] **G2** Clean up test credentials from docs (verified clean)
+- [x] **G3** Update CHANGELOG + CLAUDE.md
+- [x] **G4** Security checklist (CSP hardened, cargo audit in CI, .env in .gitignore, keystore .expect())
+- [x] **G5** Tighten CSP in tauri.conf.json (null → restrictive policy)
 
 ### Phase D — Project Identity (v0.2.0) ✅ Completed
 - [x] **D1** Rewrite README.md with actual project info
@@ -182,24 +212,17 @@ PwdVault/
 - [x] **D3** CI DMG packaging for macOS
 - [x] **D4** Version sync script (`scripts/bump-version.sh`)
 
-### Phase E — User Features (v0.3.0) — Partially Complete
+### Phase E — User Features (v0.3.0) ✅ Completed
 - [x] **E1** Encrypted import/export (JSON backup/restore)
 - [x] **E2** Fuzzy search (`fuse.js`, threshold=0.3)
-- [ ] **E3** Categories/folders (replaced by groups — implemented as `group_id` field)
+- [x] **E3** Categories/folders (replaced by groups — implemented as `group_id` field)
 - [x] **E4** Settings screen (auto-lock timeout, default generator options, redb `settings` table)
 
-### Phase F — Distribution & Security (v0.4.0, ~3 days)
-- [ ] **F1** macOS signing + notarization (requires Apple Developer account)
-- [ ] **F2** Tauri auto-update plugin (depends on F1)
-- [ ] **F3** Linux build (.deb + .AppImage)
-- [ ] **F4** HTTP API rate limiting (5 failed unlocks → 60s lockout)
-
-### Phase G — v1.0 Release (~1 day)
-- [ ] **G1** Firefox extension adaptation
-- [ ] **G2** Clean up test credentials from docs
-- [ ] **G3** Update CHANGELOG + CLAUDE.md for v1.0
-- [ ] **G4** Security checklist (`cargo audit`, review dependencies)
-- [ ] **G5** Tighten CSP in tauri.conf.json (replace `null` with proper policy)
+### Phase F — Distribution & Security (partial)
+- [ ] **F1** macOS signing + notarization (requires Apple Developer account) — *skipped*
+- [x] **F2** Update notification (checks GitHub Releases on startup)
+- [ ] **F3** Linux build (.deb + .AppImage) — *skipped*
+- [x] **F4** HTTP API rate limiting (5 failed unlocks → 60s lockout)
 
 ### Future (post-v1.0)
 - [ ] Biometric unlock (Touch ID / Windows Hello)
@@ -266,6 +289,39 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-05-01 (Phase G — v1.0.0 Release)
+**Tag**: `v1.0.0`
+
+**G5: CSP Hardening:**
+- Replaced `null` CSP in `tauri.conf.json` with restrictive policy
+- `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:17429`
+
+**G4: Security Checklist:**
+- `keystore.rs`: 4× `.unwrap()` → `.expect("keystore lock poisoned")`
+- `native_messaging.rs`: Added CORS wildcard security justification comment
+- `.gitignore`: Added `.env` and `.env.*`
+- `.github/workflows/release.yml`: Added `security-audit` job with `cargo audit`
+
+**G1: Firefox Extension:**
+- Created `extensions/firefox/manifest.json` with `browser_specific_settings.gecko`
+- Symlinks: `src → ../chrome/src/`, `icons → ../chrome/icons/`
+- Updated `build.sh` to package both Chrome and Firefox extensions
+- Updated `bump-version.sh` for 7th file (Firefox manifest)
+- CI now builds both Chrome and Firefox extension artifacts
+
+**G3: Documentation:**
+- CHANGELOG.md: Added v0.3.1 entry (Light/Dark redesign, F2, F4, modular CSS)
+- CLAUDE.md: Updated version, roadmap, directory structure, session log
+- README.md: Updated status to v1.0.0, added Firefox install section, updated roadmap
+
+### 2026-04-30 (v0.3.1)
+- Frontend redesign: Light/Dark dual-theme system replacing Classic/Cyber/Hybrid
+- Modular CSS: App.css split into 6 files (themes, base, components, screens, vault, groups, settings)
+- F2: Update notification (ureq + semver version comparison)
+- F4: Rate limiting (5 failed unlocks → 60s lockout)
+- New components: BackHeader, Icons, StrengthMeter, UpdateNotification
+- Browser extension synced with Light/Dark theme system
 
 ### 2026-04-17 (Phase E — v0.3.0 Release)
 **Commit**: `a86edc6` · **Tag**: `v0.3.0` · **GitHub Release**: published

@@ -37,3 +37,7 @@ vault.db
 /releases/*.dmg
 /releases/*.exe
 /releases/*.db.bak
+
+# Environment variables
+.env
+.env.*

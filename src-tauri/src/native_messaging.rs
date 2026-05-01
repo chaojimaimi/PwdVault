@@ -93,6 +93,10 @@ pub fn start_server(port: u16, state: Arc<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// CORS allows all origins because the server is bound to 127.0.0.1 only.
+/// External machines cannot reach this endpoint. Browser extensions have
+/// varying origins (chrome-extension://, null for content scripts) that
+/// prevent a static allowlist.
 fn add_cors_headers(response: &mut Response<std::io::Cursor<Vec<u8>>>) {
     response.add_header(
         tiny_http::Header::from_bytes("Access-Control-Allow-Origin".as_bytes(), "*".as_bytes()).expect("valid CORS header")

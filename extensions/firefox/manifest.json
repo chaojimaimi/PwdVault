@@ -3,6 +3,12 @@
   "name": "PwdVault",
   "version": "1.0.0",
   "description": "Secure password manager with auto-fill",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "pwdvault@pwdvault.app",
+      "strict_min_version": "109.0"
+    }
+  },
   "permissions": [
     "activeTab",
     "storage",

@@ -12,7 +12,18 @@ on:
       - 'v*'
 
 jobs:
+  security-audit:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      - name: Run security audit
+        run: cd src-tauri && cargo audit
+
   build-macos:
+    needs: security-audit
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,6 +70,7 @@ jobs:
           path: releases/macos/*
 
   build-windows:
+    needs: security-audit
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -97,20 +109,32 @@ jobs:
           path: releases/windows/*
 
   build-extension:
+    needs: security-audit
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Package Chrome extension
         run: |
-          mkdir -p releases/extension
+          mkdir -p releases/chrome-extension
           cd extensions/chrome
-          zip -r ../../releases/extension/PwdVault-Extension.zip . -x "*.DS_Store" "test-page.html" "TEST_RESULTS.md"
+          zip -r ../../releases/chrome-extension/PwdVault-Chrome-Extension.zip . -x "*.DS_Store" "test-page.html" "TEST_RESULTS.md"
+
+      - name: Package Firefox extension
+        run: |
+          mkdir -p releases/firefox-extension
+          cd extensions/firefox
+          zip --symlinks -r ../../releases/firefox-extension/PwdVault-Firefox-Extension.zip . -x "*.DS_Store"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: PwdVault-Extension
-          path: releases/extension/*
+          name: PwdVault-Chrome-Extension
+          path: releases/chrome-extension/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PwdVault-Firefox-Extension
+          path: releases/firefox-extension/*
 
   create-release:
     needs: [build-macos, build-windows, build-extension]
@@ -177,7 +201,8 @@ jobs:
           files: |
             artifacts/PwdVault-macOS/*.*
             artifacts/PwdVault-Windows/*.*
-            artifacts/PwdVault-Extension/*.*
+            artifacts/PwdVault-Chrome-Extension/*.*
+            artifacts/PwdVault-Firefox-Extension/*.*
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

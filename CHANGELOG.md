@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [0.3.1.0] - 2026-04-30
+
+### Added
+- **F2: Update notification** — Checks GitHub Releases for newer versions on startup
+  - Badge displayed in settings when update is available
+  - Uses `ureq` + `semver` crates for version comparison
+- **F4: Rate limiting** — 5 failed unlock attempts triggers 60-second lockout
+  - Applied to both Tauri unlock command and HTTP API
+  - Rate limit state resets on successful unlock
+
+### Changed
+- **Theme system redesign** — Replaced Classic/Cyber/Hybrid themes with Light/Dark
+  - Two themes: Light (default) and Dark, following OS preference
+  - `:root` defines shared tokens; `[data-theme]` overrides colors only
+  - Updated `themes.css` and `DESIGN.md` to reflect two-theme system
+- **Modular CSS** — Split monolithic `App.css` (1300+ lines) into 6 files:
+  - `themes.css` (design tokens), `base.css` (reset/scrollbar/accessibility)
+  - `components.css` (buttons/inputs/modals/toasts), `screens.css` (entry/generator)
+  - `vault.css` (vault list/search/groups), `groups.css` (group manager)
+  - `settings.css` (settings/theme/import-export)
+- **New components**: `BackHeader.tsx`, `Icons.tsx`, `StrengthMeter.tsx`, `UpdateNotification.tsx`
+- **Browser extension** synced with Light/Dark theme system
+- **Cleanup**: Removed stale v0.2.0 release artifacts
+
+
 ## [0.3.0.0] - 2026-04-17
 
 ### Added

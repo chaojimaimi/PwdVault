@@ -25,7 +25,7 @@ static KEYSTORE: Lazy<Mutex<Option<EncryptionKey>>> = Lazy::new(|| Mutex::new(No
 
 /// Set the encryption key in memory
 pub fn set_key(key: [u8; KEY_SIZE]) -> Result<(), KeyStoreError> {
-    let mut keystore = KEYSTORE.lock().unwrap();
+    let mut keystore = KEYSTORE.lock().expect("keystore lock poisoned");
 
     // Idempotent: if already unlocked with the same key, succeed silently
     if let Some(existing) = keystore.as_ref() {
@@ -41,19 +41,19 @@ pub fn set_key(key: [u8; KEY_SIZE]) -> Result<(), KeyStoreError> {
 
 /// Get the encryption key from memory
 pub fn get_key() -> Result<[u8; KEY_SIZE], KeyStoreError> {
-    let keystore = KEYSTORE.lock().unwrap();
+    let keystore = KEYSTORE.lock().expect("keystore lock poisoned");
     keystore.ok_or(KeyStoreError::VaultLocked)
 }
 
 /// Check if the vault is unlocked
 pub fn is_unlocked() -> bool {
-    let keystore = KEYSTORE.lock().unwrap();
+    let keystore = KEYSTORE.lock().expect("keystore lock poisoned");
     keystore.is_some()
 }
 
 /// Clear the encryption key from memory
 pub fn clear_key() {
-    let mut keystore = KEYSTORE.lock().unwrap();
+    let mut keystore = KEYSTORE.lock().expect("keystore lock poisoned");
 
     if let Some(mut key) = keystore.take() {
         key.zeroize();

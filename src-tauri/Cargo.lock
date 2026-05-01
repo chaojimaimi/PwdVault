@@ -2993,7 +2993,7 @@ dependencies = [
 
 [[package]]
 name = "pwdvault"
-version = "0.3.1"
+version = "1.0.0"
 dependencies = [
  "aes-gcm",
  "argon2",
