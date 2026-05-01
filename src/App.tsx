@@ -9,7 +9,12 @@ import { SettingsScreen } from './screens/SettingsScreen';
 import { ImportExportScreen } from './screens/ImportExportScreen';
 import { ThemeProvider } from './components/ThemeProvider';
 import './styles/themes.css';
-import './styles/App.css';
+import './styles/base.css';
+import './styles/components.css';
+import './styles/screens.css';
+import './styles/vault.css';
+import './styles/groups.css';
+import './styles/settings.css';
 
 function AppContent() {
   const { state } = useApp();

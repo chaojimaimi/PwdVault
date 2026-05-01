@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { generatePassword } from '../api/vault';
-import { getPasswordStrength } from '../utils/passwordStrength';
 import { copyWithTimeout } from '../utils/clipboard';
 import { showToast } from '../utils/toast';
-import type { CreateEntryRequest } from '../types';
+import { BackHeader } from '../components/BackHeader';
+import { StrengthMeter } from '../components/StrengthMeter';
+import { EyeIcon, EyeOffIcon, CopyIcon, GenerateIcon } from '../components/Icons';
 import ConfirmationModal, { ChangeItem } from '../components/ConfirmationModal';
 import DeleteConfirmModal from '../components/DeleteConfirmModal';
 import GroupSelector from '../components/GroupSelector';
+import type { CreateEntryRequest } from '../types';
 
 export function EntryScreen() {
   const { state, actions } = useApp();
@@ -29,7 +31,6 @@ export function EntryScreen() {
   const [tagInput, setTagInput] = useState('');
   const [showGenerator, setShowGenerator] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState('');
-  const strength = getPasswordStrength(formData.password);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [pendingChanges, setPendingChanges] = useState<CreateEntryRequest | null>(null);
   const [changesList, setChangesList] = useState<ChangeItem[]>([]);
@@ -60,7 +61,6 @@ export function EntryScreen() {
       setError('Title, username, and password are required');
       return;
     }
-    // Detect changes and show confirmation if editing an existing entry
     setError(null);
 
     if (isNew) {
@@ -80,7 +80,6 @@ export function EntryScreen() {
 
     const changes = detectChanges(state.selectedEntry, formData);
     if (changes.length === 0) {
-      // no changes
       handleBack();
       return;
     }
@@ -109,21 +108,21 @@ export function EntryScreen() {
     }
   };
 
-  // Detect changes between original and current form
-  function detectChanges(original: any, current: CreateEntryRequest): ChangeItem[] {
+  function detectChanges(original: { title: string; url?: string; username: string; password: string; notes?: string; tags: string[]; group_id?: string | null }, current: CreateEntryRequest): ChangeItem[] {
     const changes: ChangeItem[] = [];
-    if (original.title !== current.title) changes.push({ fieldId: 'title', label: '标题', oldValue: original.title, newValue: current.title, valueType: 'text' });
+    if (original.title !== current.title) changes.push({ fieldId: 'title', label: 'Title', oldValue: original.title, newValue: current.title, valueType: 'text' });
     if ((original.url || '') !== (current.url || '')) changes.push({ fieldId: 'url', label: 'URL', oldValue: original.url || '', newValue: current.url || '', valueType: 'text' });
-    if (original.username !== current.username) changes.push({ fieldId: 'username', label: '用户名', oldValue: original.username, newValue: current.username, valueType: 'text' });
-    if (original.password !== current.password) changes.push({ fieldId: 'password', label: '密码', valueType: 'password' });
-    if ((original.notes || '') !== (current.notes || '')) changes.push({ fieldId: 'notes', label: '备注', oldValue: (original.notes || '').slice(0,200), newValue: (current.notes || '').slice(0,200), valueType: 'notes' });
-    const added = current.tags.filter((t) => !original.tags.includes(t));
-    const removed = (original.tags || []).filter((t: string) => !current.tags.includes(t));
+    if (original.username !== current.username) changes.push({ fieldId: 'username', label: 'Username', oldValue: original.username, newValue: current.username, valueType: 'text' });
+    if (original.password !== current.password) changes.push({ fieldId: 'password', label: 'Password', valueType: 'password' });
+    if ((original.notes || '') !== (current.notes || '')) changes.push({ fieldId: 'notes', label: 'Notes', oldValue: (original.notes || '').slice(0, 200), newValue: (current.notes || '').slice(0, 200), valueType: 'notes' });
+    const origTags = original.tags || [];
+    const added = current.tags.filter((t) => !origTags.includes(t));
+    const removed = origTags.filter((t) => !current.tags.includes(t));
     if (added.length || removed.length) {
-      changes.push({ fieldId: 'tags', label: '标签', oldValue: removed.join(', '), newValue: added.join(', '), valueType: 'tags' });
+      changes.push({ fieldId: 'tags', label: 'Tags', oldValue: removed.join(', '), newValue: added.join(', '), valueType: 'tags' });
     }
     if ((original.group_id || null) !== (current.group_id || null)) {
-      changes.push({ fieldId: 'group_id', label: '分组', oldValue: original.group_id || '', newValue: current.group_id || '', valueType: 'text' });
+      changes.push({ fieldId: 'group_id', label: 'Group', oldValue: original.group_id || '', newValue: current.group_id || '', valueType: 'text' });
     }
     return changes;
   }
@@ -135,8 +134,9 @@ export function EntryScreen() {
       await actions.updateEntry(state.selectedEntry.id, pendingChanges);
       setShowConfirmation(false);
       handleBack();
-    } catch (e: any) {
-      setError('Failed to save entry: ' + (e?.message ?? ''));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '';
+      setError('Failed to save entry' + (msg ? ': ' + msg : ''));
     } finally {
       setIsSavingConfirmed(false);
     }
@@ -181,11 +181,13 @@ export function EntryScreen() {
 
   if (showGenerator) {
     return (
-      <div className="modal-overlay">
+      <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Generate Password">
         <div className="modal">
           <div className="modal-header">
             <h3>Generate Password</h3>
-            <button className="btn btn-icon" onClick={() => setShowGenerator(false)}>×</button>
+            <button className="btn btn-icon" onClick={() => setShowGenerator(false)} aria-label="Close">
+              ×
+            </button>
           </div>
           <div className="modal-body">
             <div className="password-preview">
@@ -214,22 +216,15 @@ export function EntryScreen() {
 
   return (
     <div className="entry-screen">
-      <header className="entry-header">
-        <button className="btn btn-icon" onClick={handleBack}>
-          <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M19 12H5M12 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <h2>{isNew ? 'New Password' : 'Edit Password'}</h2>
-        <div style={{ width: '40px' }} />
-      </header>
+      <BackHeader title={isNew ? 'New Password' : 'Edit Password'} onBack={handleBack} headerClass="entry-header" />
 
       <div className="entry-content">
         {error && <div className="error-message">{error}</div>}
 
         <div className="form-group">
-          <label>Title *</label>
+          <label htmlFor="entry-title">Title *</label>
           <input
+            id="entry-title"
             type="text"
             className="form-input"
             value={formData.title}
@@ -239,8 +234,9 @@ export function EntryScreen() {
         </div>
 
         <div className="form-group">
-          <label>URL</label>
+          <label htmlFor="entry-url">URL</label>
           <input
+            id="entry-url"
             type="url"
             className="form-input"
             value={formData.url}
@@ -250,8 +246,9 @@ export function EntryScreen() {
         </div>
 
         <div className="form-group">
-          <label>Username *</label>
+          <label htmlFor="entry-username">Username *</label>
           <input
+            id="entry-username"
             type="text"
             className="form-input"
             value={formData.username}
@@ -261,54 +258,31 @@ export function EntryScreen() {
         </div>
 
         <div className="form-group">
-          <label>Password *</label>
+          <label htmlFor="entry-password">Password *</label>
           <div className="password-field field-value">
             <input
+              id="entry-password"
               type={showPassword ? 'text' : 'password'}
               value={formData.password}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
             />
-            <button onClick={() => setShowPassword(!showPassword)} type="button">
-              {showPassword ? (
-                <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
-                  <line x1="1" y1="1" x2="23" y2="23" />
-                </svg>
-              ) : (
-                <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
-              )}
+            <button onClick={() => setShowPassword(!showPassword)} type="button" aria-label={showPassword ? 'Hide password' : 'Show password'}>
+              {showPassword ? <EyeOffIcon /> : <EyeIcon />}
             </button>
-            <button onClick={handleCopyPassword} type="button">
-              <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-              </svg>
+            <button onClick={handleCopyPassword} type="button" aria-label="Copy password">
+              <CopyIcon />
             </button>
-            <button onClick={() => setShowGenerator(true)} type="button">
-              <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
-              </svg>
+            <button onClick={() => setShowGenerator(true)} type="button" aria-label="Generate password">
+              <GenerateIcon />
             </button>
           </div>
-          {formData.password && (
-            <div className="strength-meter">
-              <div
-                className="strength-bar"
-                style={{ width: `${strength.score}%`, backgroundColor: strength.color }}
-              />
-              <span className="strength-label" style={{ color: strength.color }}>
-                {strength.label}
-              </span>
-            </div>
-          )}
+          <StrengthMeter password={formData.password} />
         </div>
 
         <div className="form-group">
-          <label>Notes</label>
+          <label htmlFor="entry-notes">Notes</label>
           <textarea
+            id="entry-notes"
             className="form-input"
             value={formData.notes}
             onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
@@ -319,25 +293,24 @@ export function EntryScreen() {
 
         <div className="form-group">
           <label>Group</label>
-          <div style={{ marginBottom: '0.5rem' }}>
-            <GroupSelector value={formData.group_id || null} onChange={(id) => setFormData({ ...formData, group_id: id })} />
-          </div>
+          <GroupSelector value={formData.group_id || null} onChange={(id) => setFormData({ ...formData, group_id: id })} />
 
-          <label>Tags</label>
-          <div className="entry-tags" style={{ marginBottom: '0.5rem' }}>
+          <label htmlFor="tag-input" style={{ marginTop: 'var(--space-md)' }}>Tags</label>
+          <div className="entry-tags">
             {formData.tags.map((tag) => (
               <span key={tag} className="tag" onClick={() => handleRemoveTag(tag)}>
                 {tag} ×
               </span>
             ))}
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div className="tag-input-row">
             <input
+              id="tag-input"
               type="text"
               className="form-input"
               value={tagInput}
               onChange={(e) => setTagInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleAddTag()}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
               placeholder="Add tag..."
             />
             <button className="btn btn-secondary" onClick={handleAddTag} type="button">
@@ -358,7 +331,6 @@ export function EntryScreen() {
         </button>
       </div>
 
-      {/* Confirmation modal */}
       <ConfirmationModal
         isOpen={showConfirmation}
         changes={changesList}
@@ -367,7 +339,6 @@ export function EntryScreen() {
         isSaving={isSavingConfirmed}
       />
 
-      {/* Delete confirmation modal */}
       <DeleteConfirmModal
         isOpen={showDeleteConfirm}
         message={`Are you sure you want to delete "${state.selectedEntry?.title || 'this entry'}"? This cannot be undone.`}

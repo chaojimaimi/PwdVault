@@ -7,219 +7,137 @@
 - **Project type:** Desktop app (compact 400×600 window) with browser extension
 
 ## Aesthetic Direction
-- **Direction:** Industrial Refined (default), with CyberForge and Hybrid alternatives
+- **Direction:** Trust & Security — deep navy + teal accent
 - **Decoration level:** Minimal — typography and color do all the work
 - **Mood:** Precise, trustworthy, purpose-built. Not decorative, not generic.
-- **Reference products:** 1Password (warmth), KeePassXC (utilitarian honesty)
+- **Reference products:** 1Password (warmth), Bitwarden (open trust)
 
 ## Theme System
 
-PwdVault supports three visual themes, switchable via Settings.
+PwdVault supports two themes: **Light** (default) and **Dark**. The system automatically follows the OS preference when no explicit choice is saved.
 
-### Theme 1: Classic (Default) — Industrial Refined
+### Architecture
 
-Warm, reliable precision tool aesthetic.
+- **`:root`** defines all shared tokens (typography, spacing, radius, shadows, animation, fonts)
+- **`[data-theme="light"]`** and **`[data-theme="dark"]`** override only color tokens
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--color-primary` | `#0EA5E9` | Buttons, links, accents |
-| `--color-primary-hover` | `#0284C7` | Hover states |
-| `--color-primary-dim` | `rgba(14, 165, 233, 0.15)` | Light backgrounds, badges |
-| `--color-primary-border` | `rgba(14, 165, 233, 0.3)` | Focused borders |
-| `--color-bg` | `#0F0F14` | Main background (near-black, slight purple) |
-| `--color-surface` | `#16161E` | Cards, panels |
-| `--color-input` | `#1C1C26` | Input fields, interactive areas |
-| `--color-text` | `#E8E8ED` | Primary text |
-| `--color-text-secondary` | `#8888A0` | Labels, descriptions |
-| `--color-text-muted` | `#555570` | Placeholders, timestamps |
-| `--color-border` | `#2A2A3A` | Dividers, card borders |
-| `--color-border-light` | `#333346` | Hover borders |
-| `--color-success` | `#10B981` | Success states |
-| `--color-danger` | `#EF4444` | Error, delete, danger |
-| `--color-danger-hover` | `#DC2626` | Danger hover |
-| `--color-warning` | `#F59E0B` | Warnings |
-| `--color-accent` | `#0EA5E9` | Same as primary (single-accent) |
-| `--color-accent-dim` | `rgba(14, 165, 233, 0.15)` | Accent light bg |
+### Theme: Light (Default)
 
-- **Font body:** Plus Jakarta Sans
-- **Font mono:** JetBrains Mono
-- **Border radius:** sm=6px, md=8px, lg=12px
-- **Glow:** None
-- **Button case:** Normal (Create Entry)
-- **Icon style:** Solid fill on primary color background
-
-### Theme 2: Cyber — CyberForge
-
-Cyberpunk digital arsenal aesthetic. For users who want a tech-forward feel.
+Professional security aesthetic with navy primary and teal accent.
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| `--color-primary` | `#00F0FF` | Neon cyan |
-| `--color-primary-hover` | `#00C8D6` | Hover |
-| `--color-primary-dim` | `rgba(0, 240, 255, 0.08)` | Light bg |
-| `--color-primary-border` | `rgba(0, 240, 255, 0.3)` | Borders |
-| `--color-accent` | `#FF0080` | Hot magenta (secondary accent) |
-| `--color-accent-dim` | `rgba(255, 0, 128, 0.1)` | Accent light bg |
-| `--color-bg` | `#050508` | Void black |
-| `--color-surface` | `#0A0A10` | Surface |
-| `--color-input` | `#0E0E16` | Input fields |
-| `--color-text` | `#E0E0F0` | Primary text |
-| `--color-text-secondary` | `#6E6E8A` | Secondary text |
-| `--color-text-muted` | `#3E3E58` | Muted text |
-| `--color-border` | `rgba(255, 255, 255, 0.06)` | Borders |
-| `--color-border-light` | `rgba(255, 255, 255, 0.1)` | Hover borders |
-| `--color-success` | `#00FF88` | Neon green |
-| `--color-danger` | `#FF3366` | Hot red |
-| `--color-warning` | `#FFB800` | Amber |
+| `--color-primary` | `#1E3A5F` | Buttons, links, accents |
+| `--color-primary-hover` | `#153050` | Hover states |
+| `--color-primary-dim` | `rgba(30, 58, 95, 0.07)` | Light backgrounds, badges |
+| `--color-primary-border` | `rgba(30, 58, 95, 0.20)` | Focused borders |
+| `--color-accent` | `#0D9488` | Secondary accent |
+| `--color-accent-dim` | `rgba(13, 148, 136, 0.10)` | Accent backgrounds |
+| `--gradient-icon` | `linear-gradient(135deg, #1E3A5F, #0D9488)` | Entry icons |
+| `--color-bg` | `#F8FAFC` | Main background |
+| `--color-surface` | `#FFFFFF` | Cards, panels |
+| `--color-input` | `#EDEEF2` | Input backgrounds |
+| `--color-text` | `#0F172A` | Primary text |
+| `--color-text-secondary` | `#475569` | Secondary text |
+| `--color-text-muted` | `#94A3B8` | Muted text, placeholders |
+| `--color-border` | `rgba(0, 0, 0, 0.06)` | Subtle borders |
+| `--color-border-light` | `rgba(0, 0, 0, 0.10)` | Emphasis borders |
+| `--color-success` | `#059669` | Success states |
+| `--color-danger` | `#DC2626` | Danger, delete |
+| `--color-danger-hover` | `#B91C1C` | Danger hover |
+| `--color-danger-dim` | `rgba(220, 38, 38, 0.07)` | Danger backgrounds |
+| `--color-warning` | `#D97706` | Warning states |
 
-- **Font body:** Space Grotesk
-- **Font mono:** Space Mono
-- **Border radius:** sm=4px, md=6px, lg=8px
-- **Glow:** Yes — `box-shadow: 0 0 20px rgba(0, 240, 255, 0.15)` on interactive elements
-- **Background:** Grid pattern overlay at 2% opacity
-- **Button case:** UPPERCASE
-- **Icon style:** Border + glow outline, hollow
+### Theme: Dark
 
-### Theme 3: Hybrid
-
-Warm-tech fusion. Cyan + Rose dual tone with subtle glow.
+Modern deep dark with teal primary and lighter accents.
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| `--color-primary` | `#06B6D4` | Cyan |
-| `--color-primary-hover` | `#0891B2` | Hover |
-| `--color-primary-dim` | `rgba(6, 182, 212, 0.10)` | Light bg |
-| `--color-primary-border` | `rgba(6, 182, 212, 0.25)` | Borders |
-| `--color-accent` | `#F472B6` | Rose (secondary accent) |
-| `--color-accent-dim` | `rgba(244, 114, 182, 0.10)` | Accent light bg |
-| `--color-bg` | `#0B0B12` | Background |
-| `--color-surface` | `#111119` | Surface |
-| `--color-input` | `#18181F` | Input fields |
-| `--color-text` | `#E4E4F0` | Primary text |
-| `--color-text-secondary` | `#7C7C96` | Secondary text |
-| `--color-text-muted` | `#4A4A64` | Muted text |
-| `--color-border` | `rgba(255, 255, 255, 0.05)` | Borders |
-| `--color-border-light` | `rgba(255, 255, 255, 0.08)` | Hover borders |
-| `--color-success` | `#34D399` | Green |
-| `--color-danger` | `#F87171` | Red |
-| `--color-warning` | `#FBBF24` | Amber |
+| `--color-primary` | `#14B8A6` | Buttons, links, accents |
+| `--color-primary-hover` | `#0D9488` | Hover states |
+| `--color-primary-dim` | `rgba(20, 184, 166, 0.10)` | Light backgrounds |
+| `--color-primary-border` | `rgba(20, 184, 166, 0.25)` | Focused borders |
+| `--color-accent` | `#5EEAD4` | Secondary accent |
+| `--color-accent-dim` | `rgba(94, 234, 212, 0.10)` | Accent backgrounds |
+| `--gradient-icon` | `linear-gradient(135deg, #14B8A6, #5EEAD4)` | Entry icons |
+| `--color-bg` | `#020203` | Main background |
+| `--color-surface` | `#0A0A0C` | Cards, panels |
+| `--color-input` | `#16161E` | Input backgrounds |
+| `--color-text` | `#EDEDEF` | Primary text |
+| `--color-text-secondary` | `#8A8F98` | Secondary text |
+| `--color-text-muted` | `#5C6370` | Muted text |
+| `--color-border` | `rgba(255, 255, 255, 0.08)` | Subtle borders |
+| `--color-border-light` | `rgba(255, 255, 255, 0.12)` | Emphasis borders |
+| `--color-success` | `#34D399` | Success states |
+| `--color-danger` | `#F87171` | Danger, delete |
+| `--color-danger-hover` | `#EF4444` | Danger hover |
+| `--color-danger-dim` | `rgba(248, 113, 113, 0.10)` | Danger backgrounds |
+| `--color-warning` | `#FBBF24` | Warning states |
 
-- **Font body:** Plus Jakarta Sans
-- **Font mono:** JetBrains Mono (password fields display in primary color)
-- **Border radius:** sm=6px, md=8px, lg=10px
-- **Glow:** Subtle — `box-shadow: 0 0 16px rgba(6, 182, 212, 0.12)` on hover only
-- **Background:** Radial gradient — cyan glow top-left + rose glow bottom-right at 2-3% opacity
-- **Button case:** Normal
-- **Icon style:** Border + subtle glow, semi-transparent
+## Shared Tokens
 
-## Typography
+### Typography
 
-### Classic & Hybrid
-| Role | Font | Fallback |
-|------|------|----------|
-| Body | Plus Jakarta Sans | system-ui, sans-serif |
-| Data/Passwords | JetBrains Mono | ui-monospace, monospace |
+| Token | Value | Usage |
+|-------|-------|-------|
+| `--font-body` | `'Inter', system-ui, -apple-system, sans-serif` | Body text |
+| `--font-mono` | `'JetBrains Mono', ui-monospace, monospace` | Passwords, codes |
+| `--text-h1` | `1.5rem` | Page titles |
+| `--text-h2` | `1.125rem` | Section titles |
+| `--text-body` | `0.875rem` | Body text |
+| `--text-label` | `0.75rem` | Labels, hints |
+| `--text-micro` | `0.6875rem` | Tiny text |
+| `--text-mono` | `0.8125rem` | Monospace text |
 
-### Cyber
-| Role | Font | Fallback |
-|------|------|----------|
-| Body | Space Grotesk | system-ui, sans-serif |
-| Data/Passwords | Space Mono | ui-monospace, monospace |
+### Spacing (4px base unit)
 
-### Type Scale (all themes)
-| Level | Size | Usage |
-|-------|------|-------|
-| H1 | 1.5rem (24px) | Page titles |
-| H2 | 1.125rem (18px) | Card titles |
-| Body | 0.875rem (14px) | Body text, inputs |
-| Label | 0.75rem (12px) | Labels, tags |
-| Micro | 0.6875rem (11px) | Timestamps, metadata |
-| Mono | 0.8125rem (13px) | Passwords, URLs |
+| Token | Value |
+|-------|-------|
+| `--space-xs` | `4px` |
+| `--space-sm` | `8px` |
+| `--space-md` | `12px` |
+| `--space-lg` | `16px` |
+| `--space-xl` | `24px` |
+| `--space-2xl` | `32px` |
 
-### Loading
-- Plus Jakarta Sans: Google Fonts CDN
-- JetBrains Mono: Google Fonts CDN
-- Space Grotesk: Google Fonts CDN
-- Space Mono: Google Fonts CDN
-- Only load fonts needed by the active theme
+### Border Radius
 
-## Spacing
-- **Base unit:** 4px
-- **Density:** Compact (optimized for 400×600 window)
+| Token | Value | Usage |
+|-------|-------|-------|
+| `--radius-sm` | `6px` | Buttons, inputs |
+| `--radius-md` | `8px` | Cards |
+| `--radius-lg` | `12px` | Modals |
+| `--radius-tag` | `9999px` | Tags, pills |
 
-| Name | Value | Usage |
-|------|-------|-------|
-| xs | 4px | Icon-text gap |
-| sm | 8px | Button padding |
-| md | 12px | Form group spacing |
-| lg | 16px | Card padding |
-| xl | 24px | Section spacing |
-| 2xl | 32px | Page margin |
+### Animation
 
-## Layout
-- **Approach:** Stacked (single-column) — constrained by 400×600 window
-- **Pattern:** Fixed header → scrollable content → sticky action bar
-- **Max content width:** 100% (window is already constrained)
+| Token | Value |
+|-------|-------|
+| `--duration-fast` | `150ms` |
+| `--duration-normal` | `200ms` |
+| `--duration-slow` | `300ms` |
+| `--easing-out` | `cubic-bezier(0.16, 1, 0.3, 1)` |
 
-## Border Radius
-| Element | Classic | Cyber | Hybrid |
-|---------|---------|-------|--------|
-| Buttons/Inputs | 8px | 6px | 8px |
-| Cards/Modals | 12px | 8px | 10px |
-| Tags/Badges | 9999px | 4px | 6px |
-| Icons/Avatars | 8px | 6px | 8px |
+## Accessibility
 
-## Motion
-- **Approach:** Minimal-functional
-- **Duration:** 150ms (hover), 200ms (state change)
-- **Easing:** ease-out (cubic-bezier(0.16, 1, 0.3, 1))
-- **Only functional animations:** button feedback, state transitions, fade in/out
-- **No decorative motion**
+- All interactive elements have `:focus-visible` outlines (`2px solid var(--color-primary)`)
+- `prefers-reduced-motion` disables all animations
+- Touch devices show entry actions without hover
+- Form inputs use `<label>` with `htmlFor`/`id` associations
+- Icon buttons use `aria-label`
+- Entry items use `role="list"`/`role="listitem"` with `tabIndex` and `aria-label`
+- Modals use `role="dialog"` and `aria-modal="true"`
 
-## Theme Implementation
+## CSS File Structure
 
-### CSS Architecture
-```css
-/* Root defaults (Classic) */
-:root {
-  --color-primary: #0EA5E9;
-  /* ... */
-}
-
-/* Theme overrides via data attribute */
-[data-theme="cyber"] {
-  --color-primary: #00F0FF;
-  /* ... */
-}
-
-[data-theme="hybrid"] {
-  --color-primary: #06B6D4;
-  /* ... */
-}
 ```
-
-### Theme Switching
-- Store in `localStorage` key `pwdvault-theme`
-- Read on app start, apply `data-theme` attribute to `<html>`
-- Settings screen provides dropdown: Classic / Cyber / Hybrid
-- CSS transitions on theme change (0.3s ease on background/color)
-
-### Font Loading
-```html
-<!-- Classic + Hybrid -->
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-
-<!-- Cyber -->
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+src/styles/
+├── themes.css        ← Design tokens (shared + Light/Dark color overrides)
+├── base.css          ← Global reset, scrollbar, selection, accessibility, .screen, .loading
+├── components.css    ← Buttons, inputs, modals, toasts, strength meter, icons, tags
+├── screens.css       ← Entry/generator screen layouts, field groups, option rows
+├── vault.css         ← Vault container, search, group tabs, entry list
+├── groups.css        ← Group manager cards and actions
+└── settings.css      ← Settings sections, theme selector, import/export fields
 ```
-
-Optimization: dynamically load font based on active theme to avoid unused font downloads.
-
-## Decisions Log
-| Date | Decision | Rationale |
-|------|----------|-----------|
-| 2026-04-14 | Initial design system created | Created by /design-consultation based on competitive research (1Password, Bitwarden, KeePassXC) and three-direction exploration |
-| 2026-04-14 | Three-theme system adopted | User requested all three directions (Classic, Cyber, Hybrid) as switchable options |
-| 2026-04-14 | Cyan primary chosen over purple | Purple is overused in AI era; cyan is distinctive in password manager category |
-| 2026-04-14 | Plus Jakarta Sans chosen as default body font | Geometric clarity similar to Inter but with more character; not on the overused list |
-| 2026-04-14 | Compact spacing (4px base) | Optimized for 400×600 window constraint |

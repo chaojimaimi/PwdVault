@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { BackHeader } from '../components/BackHeader';
+import { PlusIcon, CloseIcon, FolderIcon, EditIcon, TrashIcon } from '../components/Icons';
 import DeleteConfirmModal from '../components/DeleteConfirmModal';
 
 export default function GroupManager() {
@@ -27,11 +29,6 @@ export default function GroupManager() {
     } catch {
       setError('Failed to create group');
     }
-  };
-
-  const startEdit = (id: string, name: string) => {
-    setEditingId(id);
-    setEditingName(name);
   };
 
   const saveEdit = async () => {
@@ -70,36 +67,32 @@ export default function GroupManager() {
   };
 
   const groupCount = (groupId: string) =>
-    state.entries.filter((e) => (e as any).group_id === groupId).length;
+    state.entries.filter((e) => e.group_id === groupId).length;
 
   return (
     <div className="group-manager">
-      <header className="entry-header">
-        <button className="btn btn-icon" onClick={handleBack}>
-          <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M19 12H5M12 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <h2>Groups</h2>
-        <button
-          className="btn btn-icon"
-          onClick={() => { setIsCreating(true); setNewGroupName(''); }}
-          title="New group"
-        >
-          <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
-      </header>
+      <BackHeader
+        title="Groups"
+        onBack={handleBack}
+        headerClass="entry-header"
+        right={
+          <button
+            className="btn btn-icon"
+            onClick={() => { setIsCreating(true); setNewGroupName(''); }}
+            title="New group"
+            aria-label="New group"
+          >
+            <PlusIcon />
+          </button>
+        }
+      />
 
       <div className="group-manager-content">
         {error && <div className="error-message">{error}</div>}
 
         {isCreating && (
           <div className="group-create-bar">
-            <svg className="group-create-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-            </svg>
+            <FolderIcon className="group-create-icon" size={18} />
             <input
               type="text"
               className="form-input group-create-input"
@@ -115,23 +108,17 @@ export default function GroupManager() {
             <button className="btn btn-primary group-create-save" onClick={handleCreate} disabled={!newGroupName.trim()}>
               Create
             </button>
-            <button className="btn btn-icon group-create-cancel" onClick={() => { setIsCreating(false); setNewGroupName(''); }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
+            <button className="btn btn-icon group-create-cancel" onClick={() => { setIsCreating(false); setNewGroupName(''); }} aria-label="Cancel">
+              <CloseIcon size={16} />
             </button>
           </div>
         )}
 
         {state.groups.length === 0 && !isCreating && (
           <div className="empty-state">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-            </svg>
+            <FolderIcon size={64} />
             <p>No groups yet</p>
-            <p style={{ fontSize: 'var(--text-micro)', marginTop: 'var(--space-xs)' }}>
-              Tap + to create your first group
-            </p>
+            <p className="text-muted-hint">Tap + to create your first group</p>
           </div>
         )}
 
@@ -157,9 +144,7 @@ export default function GroupManager() {
                 <>
                   <div className="group-card-info">
                     <div className="group-card-icon">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                      </svg>
+                      <FolderIcon size={18} />
                     </div>
                     <div className="group-card-text">
                       <span className="group-card-name">{g.name}</span>
@@ -167,16 +152,11 @@ export default function GroupManager() {
                     </div>
                   </div>
                   <div className="group-card-actions">
-                    <button className="btn btn-icon group-action-rename" onClick={() => startEdit(g.id, g.name)} title="Rename">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
-                      </svg>
+                    <button className="btn btn-icon group-action-rename" onClick={() => { setEditingId(g.id); setEditingName(g.name); }} title="Rename" aria-label={`Rename ${g.name}`}>
+                      <EditIcon size={16} />
                     </button>
-                    <button className="btn btn-icon group-action-delete" onClick={() => setDeleteTarget({ id: g.id, name: g.name })} title="Delete">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polyline points="3,6 5,6 21,6" />
-                        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                      </svg>
+                    <button className="btn btn-icon group-action-delete" onClick={() => setDeleteTarget({ id: g.id, name: g.name })} title="Delete" aria-label={`Delete ${g.name}`}>
+                      <TrashIcon size={16} />
                     </button>
                   </div>
                 </>

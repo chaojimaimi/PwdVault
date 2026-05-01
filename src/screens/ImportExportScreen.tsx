@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { showToast } from '../utils/toast';
+import { BackHeader } from '../components/BackHeader';
+import { TrashIcon } from '../components/Icons';
 import type { VaultBackup } from '../types';
+
+function isTauriEnvironment(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
 
 export function ImportExportScreen() {
   const { actions } = useApp();
@@ -37,8 +43,7 @@ export function ImportExportScreen() {
       const backup = await actions.exportVault(exportPassword);
       const json = JSON.stringify(backup, null, 2);
 
-      // Try Tauri dialog first
-      if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+      if (isTauriEnvironment()) {
         const { save } = await import('@tauri-apps/plugin-dialog');
         const filePath = await save({
           defaultPath: `pwdvault-backup-${new Date().toISOString().slice(0, 10)}.pvault`,
@@ -51,7 +56,6 @@ export function ImportExportScreen() {
           showToast('Backup exported successfully');
         }
       } else {
-        // Fallback: download as file in browser
         const blob = new Blob([json], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -73,7 +77,7 @@ export function ImportExportScreen() {
 
   const handleSelectFile = async () => {
     try {
-      if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+      if (isTauriEnvironment()) {
         const { open } = await import('@tauri-apps/plugin-dialog');
         const filePath = await open({
           filters: [{ name: 'PwdVault Backup', extensions: ['pvault'] }],
@@ -92,7 +96,6 @@ export function ImportExportScreen() {
           setSelectedFileName((filePath as string).split(/[\\/]/).pop() || 'backup.pvault');
         }
       } else {
-        // Fallback: file input
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = '.pvault';
@@ -154,21 +157,13 @@ export function ImportExportScreen() {
 
   return (
     <div className="generator-screen">
-      <header className="generator-header">
-        <button className="btn btn-icon" onClick={handleBack}>
-          <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M19 12H5M12 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <h2>Backup & Restore</h2>
-        <div style={{ width: '40px' }} />
-      </header>
+      <BackHeader title="Backup & Restore" onBack={handleBack} />
 
       <div className="generator-content">
         <div className="settings-section">
           <h3 className="settings-section-title">Export Backup</h3>
           <p className="settings-hint">Create an encrypted backup of your vault data</p>
-          <div className="option-row" style={{ flexDirection: 'column', gap: 'var(--space-xs)' }}>
+          <div className="import-export-fields">
             <input
               type="password"
               className="input-field"
@@ -185,10 +180,9 @@ export function ImportExportScreen() {
             />
           </div>
           <button
-            className="btn btn-secondary"
+            className="btn btn-secondary btn-full"
             onClick={handleExport}
             disabled={exporting || !exportPassword || !exportConfirm}
-            style={{ marginTop: 'var(--space-sm)', width: '100%' }}
           >
             {exporting ? 'Exporting...' : 'Export Backup'}
           </button>
@@ -199,15 +193,11 @@ export function ImportExportScreen() {
         <div className="settings-section">
           <h3 className="settings-section-title">Restore Backup</h3>
           <p className="settings-hint">Restore from a previously exported backup file</p>
-          <button
-            className="btn btn-secondary"
-            onClick={handleSelectFile}
-            style={{ width: '100%' }}
-          >
+          <button className="btn btn-secondary btn-full" onClick={handleSelectFile}>
             {selectedFileName ? selectedFileName : 'Select Backup File'}
           </button>
           {selectedBackup && (
-            <div className="option-row" style={{ flexDirection: 'column', gap: 'var(--space-xs)', marginTop: 'var(--space-sm)' }}>
+            <div className="import-export-fields">
               <input
                 type="password"
                 className="input-field"
@@ -216,10 +206,9 @@ export function ImportExportScreen() {
                 onChange={(e) => setImportPassword(e.target.value)}
               />
               <button
-                className="btn btn-primary"
+                className="btn btn-primary btn-full"
                 onClick={handleImport}
                 disabled={importing || !importPassword}
-                style={{ width: '100%' }}
               >
                 {importing ? 'Restoring...' : 'Restore Backup'}
               </button>
@@ -230,23 +219,25 @@ export function ImportExportScreen() {
 
       {showImportConfirm && (
         <div className="modal-overlay" onClick={() => setShowImportConfirm(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-icon danger-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                  <line x1="12" y1="9" x2="12" y2="13" />
-                  <line x1="12" y1="17" x2="12.01" y2="17" />
-                </svg>
+          <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="confirm-modal-header">
+              <div className="confirm-modal-icon confirm-modal-icon-danger">
+                <TrashIcon size={18} />
               </div>
-              <h3>Restore Backup?</h3>
+              <div>
+                <h3 className="confirm-modal-title">Restore Backup?</h3>
+              </div>
             </div>
-            <p className="modal-message">
-              This will replace all current vault data with the backup contents. This action cannot be undone.
-            </p>
-            <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => setShowImportConfirm(false)}>Cancel</button>
-              <button className="btn btn-danger" onClick={confirmImport}>Restore</button>
+            <div className="confirm-modal-body">
+              <p className="confirm-delete-message">
+                This will replace all current vault data with the backup contents. This action cannot be undone.
+              </p>
+            </div>
+            <div className="confirm-modal-footer">
+              <div className="confirm-modal-actions">
+                <button className="btn btn-secondary" onClick={() => setShowImportConfirm(false)}>Cancel</button>
+                <button className="btn btn-danger" onClick={confirmImport}>Restore</button>
+              </div>
             </div>
           </div>
         </div>

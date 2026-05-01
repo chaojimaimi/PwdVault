@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { useTheme } from '../hooks/useTheme';
 import { showToast } from '../utils/toast';
+import { BackHeader } from '../components/BackHeader';
 import type { Settings } from '../types';
 
 const AUTO_LOCK_OPTIONS = [
@@ -39,15 +40,7 @@ export function SettingsScreen() {
 
   return (
     <div className="generator-screen">
-      <header className="generator-header">
-        <button className="btn btn-icon" onClick={handleBack}>
-          <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M19 12H5M12 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <h2>Settings</h2>
-        <div style={{ width: '40px' }} />
-      </header>
+      <BackHeader title="Settings" onBack={handleBack} />
 
       <div className="generator-content">
         <div className="settings-section">
@@ -71,8 +64,9 @@ export function SettingsScreen() {
         <div className="settings-section">
           <h3 className="settings-section-title">Auto-Lock</h3>
           <div className="option-row">
-            <label>Lock after inactivity</label>
+            <label htmlFor="auto-lock">Lock after inactivity</label>
             <select
+              id="auto-lock"
               className="settings-select"
               value={settings.auto_lock_secs}
               onChange={(e) => setSettings({ ...settings, auto_lock_secs: parseInt(e.target.value) })}
@@ -88,23 +82,45 @@ export function SettingsScreen() {
         <div className="settings-divider" />
 
         <div className="settings-section">
+          <h3 className="settings-section-title">Updates</h3>
+          <div className="option-row">
+            <label htmlFor="check-updates">Check for updates on startup</label>
+            <input
+              id="check-updates"
+              type="checkbox"
+              className="checkbox"
+              checked={settings.check_updates}
+              onChange={(e) => setSettings({ ...settings, check_updates: e.target.checked })}
+            />
+          </div>
+        </div>
+
+        <div className="settings-divider" />
+
+        <div className="settings-section">
           <h3 className="settings-section-title">Default Generator Options</h3>
           <div className="option-row">
-            <label>Length: {settings.default_length}</label>
+            <label htmlFor="def-length">Length: {settings.default_length}</label>
           </div>
           <div className="length-control">
             <input
+              id="def-length"
               type="range"
               min="8"
               max="64"
               value={settings.default_length}
+              aria-label="Default password length"
+              aria-valuemin={8}
+              aria-valuemax={64}
+              aria-valuenow={settings.default_length}
               onChange={(e) => setSettings({ ...settings, default_length: parseInt(e.target.value) })}
             />
           </div>
 
           <div className="option-row">
-            <label>Uppercase (A-Z)</label>
+            <label htmlFor="def-upper">Uppercase (A-Z)</label>
             <input
+              id="def-upper"
               type="checkbox"
               className="checkbox"
               checked={settings.default_include_uppercase}
@@ -113,8 +129,9 @@ export function SettingsScreen() {
           </div>
 
           <div className="option-row">
-            <label>Lowercase (a-z)</label>
+            <label htmlFor="def-lower">Lowercase (a-z)</label>
             <input
+              id="def-lower"
               type="checkbox"
               className="checkbox"
               checked={settings.default_include_lowercase}
@@ -123,8 +140,9 @@ export function SettingsScreen() {
           </div>
 
           <div className="option-row">
-            <label>Numbers (0-9)</label>
+            <label htmlFor="def-numbers">Numbers (0-9)</label>
             <input
+              id="def-numbers"
               type="checkbox"
               className="checkbox"
               checked={settings.default_include_numbers}
@@ -133,8 +151,9 @@ export function SettingsScreen() {
           </div>
 
           <div className="option-row">
-            <label>Symbols (!@#$...)</label>
+            <label htmlFor="def-symbols">Symbols (!@#$...)</label>
             <input
+              id="def-symbols"
               type="checkbox"
               className="checkbox"
               checked={settings.default_include_symbols}

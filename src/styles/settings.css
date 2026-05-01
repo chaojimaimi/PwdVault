@@ -1,0 +1,113 @@
+/* ============================================
+   PwdVault Settings Styles
+   Settings, theme selector, import/export
+   ============================================ */
+
+.settings-section {
+  margin-bottom: var(--space-lg);
+}
+
+.settings-section-title {
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-md);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.settings-select {
+  background: var(--color-input);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--text-body);
+  cursor: pointer;
+}
+
+.settings-select:focus {
+  border-color: var(--color-primary);
+}
+
+.settings-hint {
+  font-size: var(--text-micro);
+  color: var(--color-text-secondary);
+  margin-top: var(--space-xs);
+  opacity: 0.7;
+}
+
+.settings-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: var(--space-lg) 0;
+}
+
+/* Import/export field columns */
+
+.import-export-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+}
+
+/* Full-width button utility */
+
+.btn-full {
+  width: 100%;
+  margin-top: var(--space-sm);
+}
+
+.text-muted-hint {
+  font-size: var(--text-micro);
+  margin-top: var(--space-xs);
+}
+
+/* --- Theme selector --- */
+
+.theme-selector {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.theme-option {
+  flex: 1;
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.theme-option:hover {
+  border-color: var(--color-border-light);
+}
+
+.theme-option.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-dim);
+}
+
+.theme-option-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  margin: 0 auto var(--space-xs);
+}
+
+.theme-option-dot-light {
+  background: linear-gradient(135deg, #1E3A5F, #0D9488);
+}
+
+.theme-option-dot-dark {
+  background: linear-gradient(135deg, #14B8A6, #5EEAD4);
+}
+
+.theme-option-name {
+  font-size: var(--text-label);
+  font-weight: 600;
+  color: var(--color-text);
+}

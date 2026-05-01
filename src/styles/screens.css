@@ -1,0 +1,145 @@
+/* ============================================
+   PwdVault Screen Layouts
+   Shared screen containers and headers
+   ============================================ */
+
+/* --- Entry screen layout --- */
+
+.entry-screen {
+  height: 100vh;
+  background: var(--color-bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.entry-header {
+  display: flex;
+  align-items: center;
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.entry-header h2 {
+  flex: 1;
+  text-align: center;
+  font-size: var(--text-h2);
+}
+
+.entry-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+}
+
+.entry-actions {
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.entry-actions button {
+  flex: 1;
+}
+
+/* --- Generator/Settings screen layout (shared) --- */
+
+.generator-screen {
+  height: 100vh;
+  background: var(--color-bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.generator-header {
+  display: flex;
+  align-items: center;
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.generator-header h2 {
+  flex: 1;
+  text-align: center;
+  font-size: var(--text-h2);
+}
+
+.generator-content {
+  flex: 1;
+  padding: var(--space-lg);
+}
+
+.generator-actions {
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+}
+
+/* --- Field groups --- */
+
+.field-group {
+  margin-bottom: var(--space-lg);
+}
+
+.field-label {
+  font-size: var(--text-label);
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-sm);
+}
+
+.field-value {
+  background: var(--color-input);
+  padding: 0.75rem var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: var(--text-body);
+  word-break: break-all;
+}
+
+/* --- Generator options --- */
+
+.password-preview {
+  background: var(--color-input);
+  padding: var(--space-lg);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-lg);
+  word-break: break-all;
+  font-family: var(--font-mono);
+  font-size: var(--text-h2);
+  text-align: center;
+}
+
+.option-group {
+  margin-bottom: var(--space-md);
+}
+
+.option-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 0;
+}
+
+.option-row label {
+  font-size: var(--text-body);
+}
+
+.length-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.length-control input[type="range"] {
+  flex: 1;
+  accent-color: var(--color-primary);
+}
+
+.length-value {
+  min-width: 3rem;
+  text-align: center;
+  font-family: var(--font-mono);
+}

@@ -1,17 +1,22 @@
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
-export type ThemeName = 'classic' | 'cyber' | 'hybrid';
+export type ThemeName = 'light' | 'dark';
 
 const STORAGE_KEY = 'pwdvault-theme';
-const THEMES: ThemeName[] = ['classic', 'cyber', 'hybrid'];
+const THEMES: ThemeName[] = ['light', 'dark'];
+
+function getSystemPreference(): ThemeName {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
 
 function getSnapshot(): ThemeName {
   const stored = localStorage.getItem(STORAGE_KEY);
-  return (THEMES.includes(stored as ThemeName) ? stored : 'classic') as ThemeName;
+  if (THEMES.includes(stored as ThemeName)) return stored as ThemeName;
+  return getSystemPreference();
 }
 
 function getServerSnapshot(): ThemeName {
-  return 'classic';
+  return 'light';
 }
 
 function subscribe(callback: () => void): () => void {
@@ -23,25 +28,25 @@ function applyTheme(theme: ThemeName): void {
   const root = document.documentElement;
   root.classList.add('theme-transitioning');
   root.setAttribute('data-theme', theme);
-  // Remove transition class after animation completes
   setTimeout(() => root.classList.remove('theme-transitioning'), 300);
 }
 
 export function useTheme() {
   const theme = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
   const setTheme = useCallback((newTheme: ThemeName) => {
     localStorage.setItem(STORAGE_KEY, newTheme);
     applyTheme(newTheme);
-    // Trigger re-render via storage event for other tabs
     window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY }));
   }, []);
 
-  const cycleTheme = useCallback(() => {
-    const currentIndex = THEMES.indexOf(theme);
-    const nextTheme = THEMES[(currentIndex + 1) % THEMES.length];
-    setTheme(nextTheme);
+  const toggleTheme = useCallback(() => {
+    setTheme(theme === 'light' ? 'dark' : 'light');
   }, [theme, setTheme]);
 
-  return { theme, setTheme, cycleTheme, themes: THEMES };
+  return { theme, setTheme, toggleTheme, themes: THEMES };
 }

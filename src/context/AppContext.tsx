@@ -1,17 +1,5 @@
-import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
-// debug: log module URL when loaded under test to help diagnose hook/duplicate-React issues
-// eslint-disable-next-line no-console
-console.log('LOADED AppContext module:', typeof import.meta !== 'undefined' ? String(import.meta.url) : 'no import.meta');
-// debug react identity
-// eslint-disable-next-line no-console
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  // @ts-ignore
-  console.log('AppContext react.resolve ->', require.resolve('react'));
-} catch (e) {
-  // ignore
-}
-import type { EntrySummary, EntryResponse, VaultState, AppScreen, Settings, VaultBackup, ImportResult } from '../types';
+import { createContext, useContext, useReducer, useEffect, useMemo, type ReactNode } from 'react';
+import type { EntrySummary, EntryResponse, VaultState, AppScreen, Settings, VaultBackup, ImportResult, UpdateInfo } from '../types';
 import { DEFAULT_SETTINGS } from '../types';
 import * as api from '../api/vault';
 
@@ -34,6 +22,7 @@ interface AppState extends VaultState {
   isLoading: boolean;
   error: string | null;
   settings: Settings;
+  updateInfo: UpdateInfo | null;
 }
 
 type Action =
@@ -48,6 +37,7 @@ type Action =
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'SET_SETTINGS'; payload: Settings }
+  | { type: 'SET_UPDATE_INFO'; payload: UpdateInfo | null }
   | { type: 'RESET' };
 
 const initialState: AppState = {
@@ -62,6 +52,7 @@ const initialState: AppState = {
   isLoading: true,
   error: null,
   settings: DEFAULT_SETTINGS,
+  updateInfo: null,
 };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -88,6 +79,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, error: action.payload };
     case 'SET_SETTINGS':
       return { ...state, settings: action.payload };
+    case 'SET_UPDATE_INFO':
+      return { ...state, updateInfo: action.payload };
     case 'RESET':
       return { ...initialState, isLoading: false };
     default:
@@ -134,6 +127,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const initialized = await api.setupVault();
         dispatch({ type: 'SET_INITIALIZED', payload: initialized });
         dispatch({ type: 'SET_SCREEN', payload: initialized ? 'unlock' : 'setup' });
+
+        // Check for updates (non-blocking, silent on failure)
+        api.checkForUpdates().then((info) => {
+          if (info.has_update) {
+            const dismissed = localStorage.getItem('pwdvault_dismissed_update');
+            if (dismissed !== info.latest_version) {
+              dispatch({ type: 'SET_UPDATE_INFO', payload: info });
+            }
+          }
+        }).catch(() => { /* silently ignore */ });
       } catch (error) {
         dispatch({ type: 'SET_ERROR', payload: formatError(error) });
       } finally {
@@ -143,7 +146,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     init();
   }, []);
 
-  const actions = {
+  const actions = useMemo(() => ({
     initialize: async (password: string) => {
       dispatch({ type: 'SET_LOADING', payload: true });
       dispatch({ type: 'SET_ERROR', payload: null });
@@ -313,10 +316,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await actions.loadGroups();
       return result;
     },
-  };
+  }), [dispatch]);
+
+  const contextValue = useMemo(() => ({ state, dispatch, actions }), [state, dispatch, actions]);
 
   return (
-    <AppContext.Provider value={{ state, dispatch, actions }}>
+    <AppContext.Provider value={contextValue}>
       {children}
     </AppContext.Provider>
   );

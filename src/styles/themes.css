@@ -1,39 +1,13 @@
 /* ============================================
    PwdVault Theme System
-   Three light themes: Classic, Cyber, Hybrid
+   Two themes: Light, Dark
    ============================================ */
 
-/* === Classic (Default) — Industrial Refined === */
-:root,
-[data-theme="classic"] {
-  --color-primary: #0EA5E9;
-  --color-primary-hover: #0284C7;
-  --color-primary-dim: rgba(14, 165, 233, 0.07);
-  --color-primary-border: rgba(14, 165, 233, 0.20);
-  --color-accent: #6366F1;
-  --color-accent-dim: rgba(99, 102, 241, 0.10);
-  --gradient-icon: linear-gradient(135deg, #0EA5E9, #6366F1);
-
-  --color-bg: #F6F7F9;
-  --color-surface: #FFFFFF;
-  --color-input: #EDEEF2;
-  --color-text: #1A1D26;
-  --color-text-secondary: #6B7080;
-  --color-text-muted: #9CA3AF;
-  --color-border: rgba(0, 0, 0, 0.06);
-  --color-border-light: rgba(0, 0, 0, 0.10);
-
-  --color-success: #10B981;
-  --color-danger: #EF4444;
-  --color-danger-hover: #DC2626;
-  --color-danger-dim: rgba(239, 68, 68, 0.07);
-  --color-danger-text: #EF4444;
-  --color-warning: #F59E0B;
-
-  --font-body: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+/* === Shared tokens (all themes) === */
+:root {
+  /* Typography */
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-
-  /* Type scale */
   --text-h1: 1.5rem;
   --text-h2: 1.125rem;
   --text-body: 0.875rem;
@@ -49,141 +23,83 @@
   --space-xl: 24px;
   --space-2xl: 32px;
 
+  /* Border radius */
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-tag: 9999px;
 
+  /* Shadows */
   --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.03);
-  --shadow-fab: none;
   --shadow-toast: 0 4px 16px rgba(0, 0, 0, 0.08);
-  --shadow-glow: none;
 
-  --text-transform-btn: none;
-  --bg-pattern: none;
-  --icon-style: solid;
+  /* Animation */
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --easing-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* === Cyber — Cool Precision === */
-[data-theme="cyber"] {
-  --color-primary: #0891B2;
-  --color-primary-hover: #0E7490;
-  --color-primary-dim: rgba(8, 145, 178, 0.07);
-  --color-primary-border: rgba(8, 145, 178, 0.20);
-  --color-accent: #DB2777;
-  --color-accent-dim: rgba(219, 39, 119, 0.10);
-  --gradient-icon: linear-gradient(135deg, #0891B2, #DB2777);
+/* === Light — Trust & Security === */
+:root,
+[data-theme="light"] {
+  --color-primary: #1E3A5F;
+  --color-primary-hover: #153050;
+  --color-primary-dim: rgba(30, 58, 95, 0.07);
+  --color-primary-border: rgba(30, 58, 95, 0.20);
+  --color-accent: #0D9488;
+  --color-accent-dim: rgba(13, 148, 136, 0.10);
+  --gradient-icon: linear-gradient(135deg, #1E3A5F, #0D9488);
 
-  --color-bg: #F0F4F8;
+  --color-bg: #F8FAFC;
   --color-surface: #FFFFFF;
-  --color-input: #E4EAF0;
+  --color-input: #EDEEF2;
   --color-text: #0F172A;
   --color-text-secondary: #475569;
   --color-text-muted: #94A3B8;
   --color-border: rgba(0, 0, 0, 0.06);
-  --color-border-light: rgba(8, 145, 178, 0.12);
-
-  --color-success: #059669;
-  --color-danger: #E11D48;
-  --color-danger-hover: #BE123C;
-  --color-danger-dim: rgba(225, 29, 72, 0.07);
-  --color-danger-text: #E11D48;
-  --color-warning: #D97706;
-
-  --font-body: 'Space Grotesk', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-
-  /* Type scale */
-  --text-h1: 1.5rem;
-  --text-h2: 1.125rem;
-  --text-body: 0.875rem;
-  --text-label: 0.75rem;
-  --text-micro: 0.6875rem;
-  --text-mono: 0.8125rem;
-
-  /* Spacing */
-  --space-xs: 4px;
-  --space-sm: 8px;
-  --space-md: 12px;
-  --space-lg: 16px;
-  --space-xl: 24px;
-  --space-2xl: 32px;
-
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-tag: 9999px;
-
-  --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.03);
-  --shadow-fab: none;
-  --shadow-toast: 0 4px 16px rgba(0, 0, 0, 0.08);
-  --shadow-glow: none;
-
-  --text-transform-btn: none;
-  --bg-pattern: none;
-  --icon-style: solid;
-}
-
-/* === Hybrid — Warm-Tech Fusion === */
-[data-theme="hybrid"] {
-  --color-primary: #0D9488;
-  --color-primary-hover: #0F766E;
-  --color-primary-dim: rgba(13, 148, 136, 0.07);
-  --color-primary-border: rgba(13, 148, 136, 0.20);
-  --color-accent: #E11D48;
-  --color-accent-dim: rgba(225, 29, 72, 0.10);
-  --gradient-icon: linear-gradient(135deg, #0D9488, #E11D48);
-
-  --color-bg: #F8F5F2;
-  --color-surface: #FFFFFF;
-  --color-input: #EDE8E3;
-  --color-text: #1C1917;
-  --color-text-secondary: #57534E;
-  --color-text-muted: #A8A29E;
-  --color-border: rgba(0, 0, 0, 0.06);
   --color-border-light: rgba(0, 0, 0, 0.10);
 
-  --color-success: #16A34A;
+  --color-success: #059669;
   --color-danger: #DC2626;
   --color-danger-hover: #B91C1C;
   --color-danger-dim: rgba(220, 38, 38, 0.07);
-  --color-danger-text: #DC2626;
-  --color-warning: #CA8A04;
+  --color-warning: #D97706;
 
-  --font-body: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-
-  /* Type scale */
-  --text-h1: 1.5rem;
-  --text-h2: 1.125rem;
-  --text-body: 0.875rem;
-  --text-label: 0.75rem;
-  --text-micro: 0.6875rem;
-  --text-mono: 0.8125rem;
-
-  /* Spacing */
-  --space-xs: 4px;
-  --space-sm: 8px;
-  --space-md: 12px;
-  --space-lg: 16px;
-  --space-xl: 24px;
-  --space-2xl: 32px;
-
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-tag: 9999px;
-
-  --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.03);
-  --shadow-fab: none;
-  --shadow-toast: 0 4px 16px rgba(0, 0, 0, 0.08);
-  --shadow-glow: none;
-
-  --text-transform-btn: none;
-  --bg-pattern: none;
-  --icon-style: solid;
+  --shadow-overlay: rgba(0, 0, 0, 0.3);
 }
 
+/* === Dark — Modern Deep === */
+[data-theme="dark"] {
+  --color-primary: #14B8A6;
+  --color-primary-hover: #0D9488;
+  --color-primary-dim: rgba(20, 184, 166, 0.10);
+  --color-primary-border: rgba(20, 184, 166, 0.25);
+  --color-accent: #5EEAD4;
+  --color-accent-dim: rgba(94, 234, 212, 0.10);
+  --gradient-icon: linear-gradient(135deg, #14B8A6, #5EEAD4);
+
+  --color-bg: #020203;
+  --color-surface: #0A0A0C;
+  --color-input: #16161E;
+  --color-text: #EDEDEF;
+  --color-text-secondary: #8A8F98;
+  --color-text-muted: #5C6370;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-light: rgba(255, 255, 255, 0.12);
+
+  --color-success: #34D399;
+  --color-danger: #F87171;
+  --color-danger-hover: #EF4444;
+  --color-danger-dim: rgba(248, 113, 113, 0.10);
+  --color-warning: #FBBF24;
+
+  --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --shadow-toast: 0 4px 16px rgba(0, 0, 0, 0.3);
+  --shadow-overlay: rgba(0, 0, 0, 0.6);
+}
+
+/* Theme transition */
 html.theme-transitioning,
 html.theme-transitioning *,
 html.theme-transitioning *::before,
