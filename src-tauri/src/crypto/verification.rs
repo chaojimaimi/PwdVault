@@ -4,7 +4,9 @@
 //! without decrypting actual data.
 
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use thiserror::Error;
+use zeroize::Zeroize;
 
 use super::cipher::{self, EncryptedData};
 use super::keystore;
@@ -61,14 +63,16 @@ pub fn verify_password(
     password: &str,
     verification_data: &VerificationData,
 ) -> Result<bool, VerificationError> {
-    let (key, _) =
+    let (mut key, _) =
         derive_key_with_params(password, &verification_data.salt, &verification_data.params)
             .map_err(|e| VerificationError::KdfError(e.to_string()))?;
 
-    match cipher::decrypt(&key, &verification_data.encrypted_header) {
-        Ok(decrypted) => Ok(decrypted.as_slice() == VERIFICATION_HEADER),
+    let result = match cipher::decrypt(&key, &verification_data.encrypted_header) {
+        Ok(decrypted) => Ok(decrypted.as_slice().ct_eq(VERIFICATION_HEADER).into()),
         Err(_) => Ok(false),
-    }
+    };
+    key.zeroize();
+    result
 }
 
 /// Verify password and store key in keystore if correct
@@ -76,20 +80,24 @@ pub fn unlock_with_password(
     password: &str,
     verification_data: &VerificationData,
 ) -> Result<bool, VerificationError> {
-    let (key, _) =
+    let (mut key, _) =
         derive_key_with_params(password, &verification_data.salt, &verification_data.params)
             .map_err(|e| VerificationError::KdfError(e.to_string()))?;
 
-    match cipher::decrypt(&key, &verification_data.encrypted_header) {
+    let result = match cipher::decrypt(&key, &verification_data.encrypted_header) {
         Ok(decrypted) => {
-            if decrypted.as_slice() == VERIFICATION_HEADER {
-                keystore::set_key(key)?;
+            if decrypted.as_slice().ct_eq(VERIFICATION_HEADER).into() {
+                let key_copy = key;
+                key.zeroize();
+                keystore::set_key(key_copy)?;
                 return Ok(true);
             }
             Ok(false)
         }
         Err(_) => Ok(false),
-    }
+    };
+    key.zeroize();
+    result
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@
 //! with adaptive parameters targeting ~500ms derivation time.
 
 use argon2::{Algorithm, Argon2, Params, Version};
+use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -96,7 +97,7 @@ impl AdaptiveParams {
 /// Generate a random salt
 pub fn generate_salt() -> [u8; SALT_SIZE] {
     let mut salt = [0u8; SALT_SIZE];
-    rand::thread_rng().fill_bytes(&mut salt);
+    OsRng.fill_bytes(&mut salt);
     salt
 }
 

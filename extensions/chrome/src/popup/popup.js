@@ -634,7 +634,7 @@ class PopupApp {
 
   renderEntryDetails(entry, details, isPasswordVisible) {
     const password = details ? details.password : '';
-    const maskedPassword = password ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : '';
+    const maskedPassword = password ? '\u2022'.repeat(password.length) : '';
 
     return `
       <div class="entry-details">
@@ -642,7 +642,7 @@ class PopupApp {
           <span class="detail-label">Username</span>
           <span class="detail-value">${this.escapeHtml(entry.username || '-')}</span>
           <div class="detail-actions">
-            <button class="detail-btn" data-action="copy-username" data-value="${this.escapeHtml(entry.username || '')}" title="Copy username">
+            <button class="detail-btn" data-action="copy-username" data-id="${entry.id}" title="Copy username">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                 <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
@@ -663,7 +663,7 @@ class PopupApp {
                 }
               </svg>
             </button>
-            <button class="detail-btn" data-action="copy-password" data-value="${this.escapeHtml(password || '')}" title="Copy password">
+            <button class="detail-btn" data-action="copy-password" data-id="${entry.id}" title="Copy password">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                 <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
@@ -1091,19 +1091,18 @@ class PopupApp {
         const action = btn.dataset.action;
 
         switch (action) {
-          case 'copy-username':
-            await this.copyToClipboard(btn.dataset.value, 'Username copied!');
+          case 'copy-username': {
+            const ue = this.state.entries.find(e => e.id === btn.dataset.id);
+            await this.copyToClipboard(ue ? ue.username : '', 'Username copied!');
             break;
-          case 'copy-password':
-            if (!btn.dataset.value && btn.dataset.id) {
-              const details = await this.getEntryDetails(btn.dataset.id);
-              if (details && details.password) {
-                await this.copyToClipboard(details.password, 'Password copied!', true);
-              }
-            } else {
-              await this.copyToClipboard(btn.dataset.value, 'Password copied!', true);
+          }
+          case 'copy-password': {
+            const details = await this.getEntryDetails(btn.dataset.id);
+            if (details && details.password) {
+              await this.copyToClipboard(details.password, 'Password copied!', true);
             }
             break;
+          }
           case 'toggle-password':
             this.togglePasswordVisibility(btn.dataset.id);
             break;

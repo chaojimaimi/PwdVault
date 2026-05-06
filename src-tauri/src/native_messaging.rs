@@ -2,15 +2,30 @@
 //!
 //! Provides an HTTP server for browser extension communication.
 
+use std::io::Read;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tiny_http::{Request, Response, Server};
+use zeroize::Zeroize;
 
 use crate::AppState;
+use crate::auth;
 use crate::crypto;
 use crate::database;
 use crate::paths;
+
+/// Maximum request body size (10 MB)
+const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
+
+/// Maximum length for text fields
+const MAX_FIELD_LENGTH: usize = 4096;
+
+/// Maximum length for password fields
+const MAX_PASSWORD_LENGTH: usize = 1024;
+
+/// Maximum length for notes field
+const MAX_NOTES_LENGTH: usize = 65536;
 
 /// Native messaging request
 #[derive(Debug, Deserialize)]
@@ -82,7 +97,7 @@ pub fn start_server(port: u16, state: Arc<AppState>) -> Result<(), String> {
     let addr = format!("127.0.0.1:{}", port);
 
     let server = Server::http(&addr)
-        .map_err(|e| format!("Failed to bind server: {}", e))?;
+        .map_err(|_| "Server error".to_string())?;
 
     println!("Native messaging server listening on {}", addr);
 
@@ -93,43 +108,63 @@ pub fn start_server(port: u16, state: Arc<AppState>) -> Result<(), String> {
     Ok(())
 }
 
-/// CORS allows all origins because the server is bound to 127.0.0.1 only.
-/// External machines cannot reach this endpoint. Browser extensions have
-/// varying origins (chrome-extension://, null for content scripts) that
-/// prevent a static allowlist.
-fn add_cors_headers(response: &mut Response<std::io::Cursor<Vec<u8>>>) {
-    response.add_header(
-        tiny_http::Header::from_bytes("Access-Control-Allow-Origin".as_bytes(), "*".as_bytes()).expect("valid CORS header")
-    );
+/// Build CORS headers based on the request Origin.
+/// Only allows localhost and browser extension origins.
+fn get_cors_origin(origin: Option<&str>) -> Option<String> {
+    match origin {
+        Some(o) if o.starts_with("chrome-extension://") => Some(o.to_string()),
+        Some(o) if o.starts_with("moz-extension://") => Some(o.to_string()),
+        Some(o) if o.starts_with("http://localhost") => Some(o.to_string()),
+        Some(o) if o.starts_with("http://127.0.0.1") => Some(o.to_string()),
+        _ => None,
+    }
+}
+
+fn add_cors_headers<T: std::io::Read>(response: &mut Response<T>, origin: Option<&str>) {
+    if let Some(allowed) = get_cors_origin(origin) {
+        response.add_header(
+            tiny_http::Header::from_bytes("Access-Control-Allow-Origin".as_bytes(), allowed.as_bytes()).expect("valid CORS header")
+        );
+    }
     response.add_header(
         tiny_http::Header::from_bytes("Access-Control-Allow-Methods".as_bytes(), "POST, OPTIONS".as_bytes()).expect("valid CORS header")
     );
     response.add_header(
-        tiny_http::Header::from_bytes("Access-Control-Allow-Headers".as_bytes(), "Content-Type".as_bytes()).expect("valid CORS header")
+        tiny_http::Header::from_bytes("Access-Control-Allow-Headers".as_bytes(), "Content-Type, Authorization".as_bytes()).expect("valid CORS header")
     );
 }
 
 fn handle_request(mut request: Request, state: Arc<AppState>) {
+    let origin: Option<String> = request.headers()
+        .iter()
+        .find(|h| h.field.equiv("Origin"))
+        .map(|h| h.value.to_string());
+
     // Handle CORS preflight
     if request.method() == &tiny_http::Method::Options {
-        let response = Response::empty(204)
-            .with_header(
-                tiny_http::Header::from_bytes("Access-Control-Allow-Origin".as_bytes(), "*".as_bytes()).expect("valid CORS header")
-            )
-            .with_header(
-                tiny_http::Header::from_bytes("Access-Control-Allow-Methods".as_bytes(), "POST, OPTIONS".as_bytes()).expect("valid CORS header")
-            )
-            .with_header(
-                tiny_http::Header::from_bytes("Access-Control-Allow-Headers".as_bytes(), "Content-Type".as_bytes()).expect("valid CORS header")
-            );
+        let mut response = Response::empty(204);
+        add_cors_headers(&mut response, origin.as_deref());
         let _ = request.respond(response);
         return;
     }
 
-    // Read request body
+    // Read request body with size limit
+    let content_length: usize = request.headers()
+        .iter()
+        .find(|h| h.field.equiv("Content-Length"))
+        .and_then(|h| h.value.as_str().parse().ok())
+        .unwrap_or(0);
+
+    if content_length > MAX_BODY_SIZE {
+        let response = create_error_response(0, "Request too large".to_string(), origin.as_deref());
+        let _ = request.respond(response);
+        return;
+    }
+
     let mut body = String::new();
-    if let Err(e) = request.as_reader().read_to_string(&mut body) {
-        let response = create_error_response(0, format!("Failed to read request: {}", e));
+    let mut reader = request.as_reader().take(MAX_BODY_SIZE as u64);
+    if let Err(_) = reader.read_to_string(&mut body) {
+        let response = create_error_response(0, "Request failed".to_string(), origin.as_deref());
         let _ = request.respond(response);
         return;
     }
@@ -137,14 +172,38 @@ fn handle_request(mut request: Request, state: Arc<AppState>) {
     // Parse request
     let native_req: NativeRequest = match serde_json::from_str(&body) {
         Ok(r) => r,
-        Err(e) => {
-            let response = create_error_response(0, format!("Invalid JSON: {}", e));
+        Err(_) => {
+            let response = create_error_response(0, "Invalid request".to_string(), origin.as_deref());
             let _ = request.respond(response);
             return;
         }
     };
 
     let id = native_req.id;
+    let command = native_req.command.clone();
+
+    // Authentication: /api/pair is unauthenticated (extension pairing),
+    // all other endpoints require Bearer token
+    if command != "pair" {
+        let auth_header = request.headers()
+            .iter()
+            .find(|h| h.field.equiv("Authorization"))
+            .map(|h| h.value.as_str())
+            .unwrap_or("");
+
+        if !auth::validate_token(auth_header) {
+            let response = create_error_response(id, "Unauthorized".to_string(), origin.as_deref());
+            let _ = request.respond(response);
+            return;
+        }
+    } else {
+        // /api/pair only responds to browser extension origins
+        if !auth::is_extension_origin(origin.as_deref()) {
+            let response = create_error_response(id, "Forbidden".to_string(), origin.as_deref());
+            let _ = request.respond(response);
+            return;
+        }
+    }
 
     // Execute command
     let result = execute_command(native_req, state);
@@ -165,31 +224,37 @@ fn handle_request(mut request: Request, state: Arc<AppState>) {
         },
     };
 
-    let _ = request.respond(create_json_response(&response));
+    let _ = request.respond(create_json_response(&response, origin.as_deref()));
 }
 
-fn create_json_response(response: &NativeResponse) -> Response<std::io::Cursor<Vec<u8>>> {
+fn create_json_response(response: &NativeResponse, origin: Option<&str>) -> Response<std::io::Cursor<Vec<u8>>> {
     let body = serde_json::to_vec(response).unwrap_or_default();
     let mut response = Response::from_data(body)
         .with_header(
             tiny_http::Header::from_bytes("Content-Type".as_bytes(), "application/json".as_bytes()).expect("valid Content-Type header")
         );
-    add_cors_headers(&mut response);
+    add_cors_headers(&mut response, origin);
     response
 }
 
-fn create_error_response(id: u32, error: String) -> Response<std::io::Cursor<Vec<u8>>> {
+fn create_error_response(id: u32, error: String, origin: Option<&str>) -> Response<std::io::Cursor<Vec<u8>>> {
     let response = NativeResponse {
         id,
         success: false,
         data: None,
         error: Some(error),
     };
-    create_json_response(&response)
+    create_json_response(&response, origin)
 }
 
 fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_json::Value, String> {
     match req.command.as_str() {
+        // Extension pairing — returns API token (no auth required, origin checked in handle_request)
+        "pair" => {
+            let token = auth::get_or_create_token()?;
+            Ok(serde_json::json!({ "token": token }))
+        }
+
         "is_vault_initialized" => {
             let initialized = state.verification_data.lock().expect("verification lock poisoned").is_some();
             Ok(serde_json::json!(initialized))
@@ -215,10 +280,10 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             }
 
             // Initialize database
-            let db = std::sync::Arc::new(database::init_database(&db_path).map_err(|e| e.to_string())?);
+            let db = std::sync::Arc::new(database::init_database(&db_path).map_err(|_| "Database error".to_string())?);
 
             // Load verification data from database
-            let verification_data = database::load_verification_data(&db).map_err(|e| e.to_string())?;
+            let verification_data = database::load_verification_data(&db).map_err(|_| "Database error".to_string())?;
 
             if let Some(data) = verification_data {
                 *state.verification_data.lock().expect("verification lock poisoned") = Some(data);
@@ -240,39 +305,39 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             // Generate salt and derive key
             let salt = crypto::kdf::generate_salt();
             let (key, params) = crypto::kdf::derive_key(&password, &salt)
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "Key derivation failed".to_string())?;
 
             // Create verification data
             let verification_data = crypto::create_verification_header(&key, salt, params)
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "Verification failed".to_string())?;
 
             // Initialize database
-            let db_path = paths::ensure_db_dir().map_err(|e| e.to_string())?;
+            let db_path = paths::ensure_db_dir().map_err(|_| "Database path error".to_string())?;
             let db = database::init_database(&db_path)
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "Database error".to_string())?;
 
             // Save verification data
             database::save_verification_data(&db, &verification_data)
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "Database error".to_string())?;
 
             // Update state
             *state.verification_data.lock().expect("verification lock poisoned") = Some(verification_data);
             *state.database.lock().expect("db lock poisoned") = Some(std::sync::Arc::new(db));
 
             // Set key in memory
-            crypto::set_key(key).map_err(|e| e.to_string())?;
+            crypto::set_key(key).map_err(|_| "Key store error".to_string())?;
 
             Ok(serde_json::json!(true))
         }
 
         "unlock_vault" => {
-            crate::check_rate_limit(&state).map_err(|e| e.to_string())?;
+            crate::check_rate_limit(&state).map_err(|_| "Rate limited".to_string())?;
 
             let password = req.password.ok_or("Password required")?;
             let verification_data = state.verification_data.lock().expect("verification lock poisoned");
             let data = verification_data.as_ref().ok_or("Vault not initialized")?;
             let success = crypto::unlock_with_password(&password, data)
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "Unlock failed".to_string())?;
             if success {
                 crate::reset_rate_limit(&state);
                 state.touch_activity();
@@ -294,7 +359,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             }
             let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
-            let settings = database::load_settings(db).map_err(|e| e.to_string())?;
+            let settings = database::load_settings(db).map_err(|_| "Database error".to_string())?;
             state.touch_activity();
             Ok(serde_json::to_value(settings).expect("settings serializable"))
         }
@@ -305,7 +370,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             }
             let settings_json = req.settings.ok_or("Settings required")?;
             let settings: database::Settings = serde_json::from_value(settings_json)
-                .map_err(|e| format!("Invalid settings: {}", e))?;
+                .map_err(|_| "Invalid settings".to_string())?;
             if settings.auto_lock_secs < 30 || settings.auto_lock_secs > 3600 {
                 return Err("Auto-lock timeout must be between 30 and 3600 seconds".to_string());
             }
@@ -314,7 +379,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             }
             let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
-            database::save_settings(db, &settings).map_err(|e| e.to_string())?;
+            database::save_settings(db, &settings).map_err(|_| "Database error".to_string())?;
             *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
             state.touch_activity();
             Ok(serde_json::to_value(settings).expect("settings serializable"))
@@ -329,22 +394,32 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let username = req.username.ok_or("Username required")?;
             let password = req.password.ok_or("Password required")?;
 
+            validate_field_length(&title, MAX_FIELD_LENGTH, "Title")?;
+            validate_field_length(&username, MAX_FIELD_LENGTH, "Username")?;
+            validate_field_length(&password, MAX_PASSWORD_LENGTH, "Password")?;
+            if let Some(ref notes) = req.notes {
+                validate_field_length(notes, MAX_NOTES_LENGTH, "Notes")?;
+            }
+            if let Some(ref url) = req.url {
+                validate_field_length(url, MAX_FIELD_LENGTH, "URL")?;
+            }
+
             let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
-            let key = crypto::get_key().map_err(|e| e.to_string())?;
+            let key = crypto::get_key().map_err(|_| "Internal error".to_string())?;
 
             // Encrypt password
             let encrypted_password = crypto::encrypt(&key, password.as_bytes())
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "Encryption failed".to_string())?;
             let encrypted_password_bytes = bincode::serialize(&encrypted_password)
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "Serialization failed".to_string())?;
 
             // Encrypt notes if present
             let encrypted_notes = if let Some(notes) = &req.notes {
                 let encrypted = crypto::encrypt(&key, notes.as_bytes())
-                    .map_err(|e| e.to_string())?;
-                Some(bincode::serialize(&encrypted).map_err(|e| e.to_string())?)
+                    .map_err(|_| "Encryption failed".to_string())?;
+                Some(bincode::serialize(&encrypted).map_err(|_| "Serialization failed".to_string())?)
             } else {
                 None
             };
@@ -355,7 +430,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             entry.tags = req.tags.unwrap_or_default();
             entry.group_id = req.group_id;
 
-            database::save_entry(db, &entry).map_err(|e| e.to_string())?;
+            database::save_entry(db, &entry).map_err(|_| "Database error".to_string())?;
 
             state.touch_activity();
 
@@ -379,11 +454,11 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
-            let ids = database::list_entries(db).map_err(|e| e.to_string())?;
+            let ids = database::list_entries(db).map_err(|_| "Internal error".to_string())?;
             let mut entries = Vec::new();
 
             for id in ids {
-                if let Some(entry) = database::load_entry(db, &id).map_err(|e| e.to_string())? {
+                if let Some(entry) = database::load_entry(db, &id).map_err(|_| "Internal error".to_string())? {
                     entries.push(serde_json::to_value(entry).expect("entry serializable"));
                 }
             }
@@ -403,29 +478,35 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
             let entry = database::load_entry(db, &id)
-                .map_err(|e| e.to_string())?
+                .map_err(|_| "Database error".to_string())?
                 .ok_or("Entry not found")?;
 
             // Decrypt password
-            let key = crypto::get_key().map_err(|e| e.to_string())?;
+            let key = crypto::get_key().map_err(|_| "Internal error".to_string())?;
             let encrypted: crypto::EncryptedData = bincode::deserialize(&entry.encrypted_password)
-                .map_err(|e| e.to_string())?;
-            let password_bytes = crypto::decrypt(&key, &encrypted).map_err(|e| e.to_string())?;
-            let password = String::from_utf8(password_bytes).map_err(|e| e.to_string())?;
+                .map_err(|_| "Decryption failed".to_string())?;
+            let mut password_bytes = crypto::decrypt(&key, &encrypted)
+                .map_err(|_| "Decryption failed".to_string())?;
+            let mut password = String::from_utf8(password_bytes.clone())
+                .map_err(|_| "Decryption failed".to_string())?;
 
             // Decrypt notes
-            let notes = if let Some(ref encrypted_notes) = entry.encrypted_notes {
+            let mut notes = if let Some(ref encrypted_notes) = entry.encrypted_notes {
                 let encrypted: crypto::EncryptedData = bincode::deserialize(encrypted_notes)
-                    .map_err(|e| e.to_string())?;
-                let notes_bytes = crypto::decrypt(&key, &encrypted).map_err(|e| e.to_string())?;
-                Some(String::from_utf8(notes_bytes).map_err(|e| e.to_string())?)
+                    .map_err(|_| "Decryption failed".to_string())?;
+                let mut notes_bytes = crypto::decrypt(&key, &encrypted)
+                    .map_err(|_| "Decryption failed".to_string())?;
+                let notes_str = String::from_utf8(notes_bytes.clone())
+                    .map_err(|_| "Decryption failed".to_string())?;
+                notes_bytes.zeroize();
+                Some(notes_str)
             } else {
                 None
             };
 
             state.touch_activity();
 
-            Ok(serde_json::json!({
+            let result = serde_json::json!({
                 "id": entry.id,
                 "title": entry.title,
                 "url": entry.url,
@@ -436,7 +517,16 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                 "group_id": entry.group_id,
                 "created_at": entry.created_at,
                 "updated_at": entry.updated_at,
-            }))
+            });
+
+            // Zeroize plaintext password and notes after building response
+            password.zeroize();
+            password_bytes.zeroize();
+            if let Some(ref mut n) = notes {
+                n.zeroize();
+            }
+
+            Ok(result)
         }
 
         "generate_password" => {
@@ -510,12 +600,19 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let username = req.username.ok_or("Username required")?;
             let password = req.password.ok_or("Password required")?;
 
+            validate_field_length(&title, MAX_FIELD_LENGTH, "Title")?;
+            validate_field_length(&username, MAX_FIELD_LENGTH, "Username")?;
+            validate_field_length(&password, MAX_PASSWORD_LENGTH, "Password")?;
+            if let Some(ref notes) = req.notes {
+                validate_field_length(notes, MAX_NOTES_LENGTH, "Notes")?;
+            }
+
             let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
-            let key = crypto::get_key().map_err(|e| e.to_string())?;
+            let key = crypto::get_key().map_err(|_| "Internal error".to_string())?;
 
             let mut entry = database::load_entry(db, &id)
-                .map_err(|e| e.to_string())?
+                .map_err(|_| "Database error".to_string())?
                 .ok_or("Entry not found")?;
 
             entry.title = title;
@@ -525,19 +622,19 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             entry.updated_at = chrono::Utc::now().timestamp();
 
             let encrypted_password = crypto::encrypt(&key, password.as_bytes())
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "Encryption failed".to_string())?;
             entry.encrypted_password = bincode::serialize(&encrypted_password)
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "Serialization failed".to_string())?;
 
             entry.encrypted_notes = if let Some(notes) = &req.notes {
                 let encrypted = crypto::encrypt(&key, notes.as_bytes())
-                    .map_err(|e| e.to_string())?;
-                Some(bincode::serialize(&encrypted).map_err(|e| e.to_string())?)
+                    .map_err(|_| "Encryption failed".to_string())?;
+                Some(bincode::serialize(&encrypted).map_err(|_| "Serialization failed".to_string())?)
             } else {
                 None
             };
 
-            database::save_entry(db, &entry).map_err(|e| e.to_string())?;
+            database::save_entry(db, &entry).map_err(|_| "Database error".to_string())?;
 
             state.touch_activity();
 
@@ -561,7 +658,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
-            let existed = database::delete_entry(db, &id).map_err(|e| e.to_string())?;
+            let existed = database::delete_entry(db, &id).map_err(|_| "Internal error".to_string())?;
 
             state.touch_activity();
 
@@ -576,7 +673,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
-            let count = database::count_entries(db).map_err(|e| e.to_string())?;
+            let count = database::count_entries(db).map_err(|_| "Internal error".to_string())?;
 
             state.touch_activity();
 
@@ -593,7 +690,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
             let group = database::Group::new(name);
-            database::save_group(db, &group).map_err(|e| e.to_string())?;
+            database::save_group(db, &group).map_err(|_| "Internal error".to_string())?;
 
             state.touch_activity();
 
@@ -613,10 +710,10 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
-            let ids = database::list_groups(db).map_err(|e| e.to_string())?;
+            let ids = database::list_groups(db).map_err(|_| "Internal error".to_string())?;
             let mut groups = Vec::new();
             for id in ids {
-                if let Some(g) = database::load_group(db, &id).map_err(|e| e.to_string())? {
+                if let Some(g) = database::load_group(db, &id).map_err(|_| "Internal error".to_string())? {
                     groups.push(serde_json::json!({
                         "id": g.id,
                         "name": g.name,
@@ -642,11 +739,11 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
             let mut group = database::load_group(db, &id)
-                .map_err(|e| e.to_string())?
+                .map_err(|_| "Internal error".to_string())?
                 .ok_or("Group not found")?;
             group.name = name;
             group.updated_at = chrono::Utc::now().timestamp();
-            database::save_group(db, &group).map_err(|e| e.to_string())?;
+            database::save_group(db, &group).map_err(|_| "Internal error".to_string())?;
 
             state.touch_activity();
 
@@ -667,7 +764,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
-            let existed = database::delete_group(db, &id).map_err(|e| e.to_string())?;
+            let existed = database::delete_group(db, &id).map_err(|_| "Internal error".to_string())?;
 
             state.touch_activity();
 
@@ -681,23 +778,23 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let export_password = req.export_password.ok_or("Export password required")?;
             let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
-            let key = crypto::get_key().map_err(|e| e.to_string())?;
+            let key = crypto::get_key().map_err(|_| "Internal error".to_string())?;
 
             // Load all entries and decrypt
-            let entry_ids = database::list_entries(db).map_err(|e| e.to_string())?;
+            let entry_ids = database::list_entries(db).map_err(|_| "Internal error".to_string())?;
             let mut export_entries = Vec::new();
             for id in entry_ids {
-                if let Some(entry) = database::load_entry(db, &id).map_err(|e| e.to_string())? {
+                if let Some(entry) = database::load_entry(db, &id).map_err(|_| "Internal error".to_string())? {
                     let enc_pwd: crypto::EncryptedData = bincode::deserialize(&entry.encrypted_password)
-                        .map_err(|e| e.to_string())?;
-                    let pwd_bytes = crypto::decrypt(&key, &enc_pwd).map_err(|e| e.to_string())?;
-                    let password = String::from_utf8(pwd_bytes).map_err(|e| e.to_string())?;
+                        .map_err(|_| "Internal error".to_string())?;
+                    let pwd_bytes = crypto::decrypt(&key, &enc_pwd).map_err(|_| "Internal error".to_string())?;
+                    let password = String::from_utf8(pwd_bytes).map_err(|_| "Internal error".to_string())?;
 
                     let notes = if let Some(ref enc_notes_bytes) = entry.encrypted_notes {
                         let enc: crypto::EncryptedData = bincode::deserialize(enc_notes_bytes)
-                            .map_err(|e| e.to_string())?;
-                        let notes_bytes = crypto::decrypt(&key, &enc).map_err(|e| e.to_string())?;
-                        Some(String::from_utf8(notes_bytes).map_err(|e| e.to_string())?)
+                            .map_err(|_| "Internal error".to_string())?;
+                        let notes_bytes = crypto::decrypt(&key, &enc).map_err(|_| "Internal error".to_string())?;
+                        Some(String::from_utf8(notes_bytes).map_err(|_| "Internal error".to_string())?)
                     } else {
                         None
                     };
@@ -718,10 +815,10 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             }
 
             // Load groups
-            let group_ids = database::list_groups(db).map_err(|e| e.to_string())?;
+            let group_ids = database::list_groups(db).map_err(|_| "Internal error".to_string())?;
             let mut groups = Vec::new();
             for id in group_ids {
-                if let Some(g) = database::load_group(db, &id).map_err(|e| e.to_string())? {
+                if let Some(g) = database::load_group(db, &id).map_err(|_| "Internal error".to_string())? {
                     groups.push(serde_json::json!({
                         "id": g.id,
                         "name": g.name,
@@ -732,7 +829,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             }
 
             // Load settings
-            let settings = database::load_settings(db).map_err(|e| e.to_string())?;
+            let settings = database::load_settings(db).map_err(|_| "Internal error".to_string())?;
 
             let payload = serde_json::json!({
                 "entries": export_entries,
@@ -740,15 +837,15 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                 "settings": settings,
             });
             let payload_bytes = serde_json::to_vec(&payload)
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "Internal error".to_string())?;
 
             // Derive export key
             let salt = crypto::kdf::generate_salt();
             let (export_key, params) = crypto::kdf::derive_key(&export_password, &salt)
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "Internal error".to_string())?;
 
             let encrypted = crypto::encrypt(&export_key, &payload_bytes)
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "Internal error".to_string())?;
 
             use base64::Engine;
             let b64 = base64::engine::general_purpose::STANDARD;
@@ -790,9 +887,9 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let kdf_iterations = backup_json.get("kdf_iterations").and_then(|v| v.as_u64()).ok_or("Missing kdf_iterations")? as u32;
             let kdf_parallelism = backup_json.get("kdf_parallelism").and_then(|v| v.as_u64()).unwrap_or(4) as u32;
 
-            let salt = b64.decode(salt_str).map_err(|e| format!("Invalid salt: {}", e))?;
-            let nonce_bytes = b64.decode(nonce_str).map_err(|e| format!("Invalid nonce: {}", e))?;
-            let ciphertext = b64.decode(data_str).map_err(|e| format!("Invalid data: {}", e))?;
+            let salt = b64.decode(salt_str).map_err(|_| "Invalid backup".to_string())?;
+            let nonce_bytes = b64.decode(nonce_str).map_err(|_| "Invalid backup".to_string())?;
+            let ciphertext = b64.decode(data_str).map_err(|_| "Invalid backup".to_string())?;
 
             if salt.len() != 16 {
                 return Err("Invalid salt length".to_string());
@@ -807,7 +904,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                     t_cost: kdf_iterations,
                     p_cost: kdf_parallelism,
                 },
-            ).map_err(|e| e.to_string())?;
+            ).map_err(|_| "Internal error".to_string())?;
 
             let encrypted_data = crypto::EncryptedData {
                 nonce: nonce_bytes,
@@ -817,20 +914,20 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                 .map_err(|_| "Invalid password or corrupted backup".to_string())?;
 
             let payload: serde_json::Value = serde_json::from_slice(&payload_bytes)
-                .map_err(|e| format!("Invalid payload: {}", e))?;
+                .map_err(|_| "Invalid backup".to_string())?;
 
             let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
-            let key = crypto::get_key().map_err(|e| e.to_string())?;
+            let key = crypto::get_key().map_err(|_| "Internal error".to_string())?;
 
             // Clear existing data
-            let existing_ids = database::list_entries(db).map_err(|e| e.to_string())?;
+            let existing_ids = database::list_entries(db).map_err(|_| "Internal error".to_string())?;
             for id in existing_ids {
-                database::delete_entry(db, &id).map_err(|e| e.to_string())?;
+                database::delete_entry(db, &id).map_err(|_| "Internal error".to_string())?;
             }
-            let existing_groups = database::list_groups(db).map_err(|e| e.to_string())?;
+            let existing_groups = database::list_groups(db).map_err(|_| "Internal error".to_string())?;
             for id in existing_groups {
-                database::delete_group(db, &id).map_err(|e| e.to_string())?;
+                database::delete_group(db, &id).map_err(|_| "Internal error".to_string())?;
             }
 
             // Import groups
@@ -841,7 +938,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                 let name = g.get("name").and_then(|v| v.as_str()).ok_or("Missing group name")?;
                 let new_group = database::Group::new(name.to_string());
                 group_id_map.insert(old_id.to_string(), new_group.id.clone());
-                database::save_group(db, &new_group).map_err(|e| e.to_string())?;
+                database::save_group(db, &new_group).map_err(|_| "Internal error".to_string())?;
             }
 
             // Import entries
@@ -859,11 +956,11 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                     .and_then(|gid| group_id_map.get(gid).cloned());
 
                 let mut entry = database::PasswordEntry::new(title.to_string(), url, username.to_string());
-                let enc_pwd = crypto::encrypt(&key, password.as_bytes()).map_err(|e| e.to_string())?;
-                entry.encrypted_password = bincode::serialize(&enc_pwd).map_err(|e| e.to_string())?;
+                let enc_pwd = crypto::encrypt(&key, password.as_bytes()).map_err(|_| "Internal error".to_string())?;
+                entry.encrypted_password = bincode::serialize(&enc_pwd).map_err(|_| "Internal error".to_string())?;
                 entry.encrypted_notes = if let Some(ref n) = notes {
-                    let enc = crypto::encrypt(&key, n.as_bytes()).map_err(|e| e.to_string())?;
-                    Some(bincode::serialize(&enc).map_err(|e| e.to_string())?)
+                    let enc = crypto::encrypt(&key, n.as_bytes()).map_err(|_| "Internal error".to_string())?;
+                    Some(bincode::serialize(&enc).map_err(|_| "Internal error".to_string())?)
                 } else {
                     None
                 };
@@ -872,7 +969,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                 entry.created_at = e.get("created_at").and_then(|v| v.as_i64()).unwrap_or(entry.created_at);
                 entry.updated_at = e.get("updated_at").and_then(|v| v.as_i64()).unwrap_or(entry.updated_at);
 
-                database::save_entry(db, &entry).map_err(|e| e.to_string())?;
+                database::save_entry(db, &entry).map_err(|_| "Internal error".to_string())?;
             }
 
             state.touch_activity();
@@ -882,7 +979,16 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             }))
         }
 
-        _ => Err(format!("Unknown command: {}", req.command))
+        _ => Err("Unknown command".to_string())
+    }
+}
+
+/// Validate that a field does not exceed the maximum length
+fn validate_field_length(value: &str, max: usize, field_name: &str) -> Result<(), String> {
+    if value.len() > max {
+        Err(format!("{} too long (max {} chars)", field_name, max))
+    } else {
+        Ok(())
     }
 }
 

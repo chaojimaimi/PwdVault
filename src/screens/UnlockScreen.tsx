@@ -17,6 +17,8 @@ export function UnlockScreen() {
       }
     } catch {
       setLocalError('Failed to unlock vault');
+    } finally {
+      setPassword('');
     }
   };
 

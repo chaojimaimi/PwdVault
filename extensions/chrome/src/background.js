@@ -5,18 +5,48 @@ const API_BASE = 'http://127.0.0.1:17429';
 
 let connectionStatus = 'disconnected';
 let requestId = 0;
+let apiToken = null;
 
 // ============================================================================
 // HTTP API Communication
 // ============================================================================
 
+async function pairWithApp() {
+  try {
+    const response = await fetch(`${API_BASE}/api/pair`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 0, command: 'pair' }),
+    });
+
+    const data = await response.json();
+    if (data.success && data.data && data.data.token) {
+      apiToken = data.data.token;
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 async function sendToApp(command, params = {}) {
   const id = ++requestId;
+
+  // If we don't have a token yet, try to pair first
+  if (!apiToken && command !== 'pair') {
+    await pairWithApp();
+  }
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiToken) {
+    headers['Authorization'] = `Bearer ${apiToken}`;
+  }
 
   try {
     const response = await fetch(`${API_BASE}/api/${command}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ id, command, ...params }),
     });
 
@@ -39,6 +69,7 @@ async function sendToApp(command, params = {}) {
 
 async function checkConnection() {
   try {
+    await pairWithApp();
     await sendToApp('is_vault_initialized');
     connectionStatus = 'connected';
   } catch {

@@ -305,98 +305,127 @@
 
     notificationBar = document.createElement('div');
     notificationBar.id = 'pwdvault-autofill-bar';
-    notificationBar.innerHTML = `
-      <style>
-        #pwdvault-autofill-bar {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
-          padding: 12px 20px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          font-size: 14px;
-          color: #e0e0e0;
-          z-index: 2147483646;
-          box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-          animation: slideDown 0.3s ease-out;
-        }
-        @keyframes slideDown {
-          from { transform: translateY(-100%); }
-          to { transform: translateY(0); }
-        }
-        #pwdvault-autofill-bar .pv-bar-content {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        #pwdvault-autofill-bar .pv-icon {
-          width: 28px;
-          height: 28px;
-          background: #6366f1;
-          border-radius: 6px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 600;
-          color: #fff;
-          font-size: 12px;
-        }
-        #pwdvault-autofill-bar .pv-text {
-          display: flex;
-          flex-direction: column;
-        }
-        #pwdvault-autofill-bar .pv-title {
-          font-weight: 500;
-        }
-        #pwdvault-autofill-bar .pv-subtitle {
-          font-size: 12px;
-          color: #888;
-        }
-        #pwdvault-autofill-bar .pv-actions {
-          display: flex;
-          gap: 8px;
-        }
-        #pwdvault-autofill-bar .pv-btn {
-          padding: 8px 16px;
-          border-radius: 6px;
-          border: none;
-          font-size: 13px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-        #pwdvault-autofill-bar .pv-btn-primary {
-          background: #6366f1;
-          color: white;
-        }
-        #pwdvault-autofill-bar .pv-btn-primary:hover {
-          background: #4f46e5;
-        }
-        #pwdvault-autofill-bar .pv-btn-secondary {
-          background: #333;
-          color: #aaa;
-        }
-        #pwdvault-autofill-bar .pv-btn-secondary:hover {
-          background: #444;
-          color: #fff;
-        }
-      </style>
-      <div class="pv-bar-content">
-        <div class="pv-icon">${entry.title.charAt(0).toUpperCase()}</div>
-        <div class="pv-text">
-          <span class="pv-title">Fill credentials for ${escapeHtml(entry.title)}?</span>
-          <span class="pv-subtitle">${escapeHtml(entry.username)}</span>
-        </div>
-      </div>
-      <div class="pv-actions">
-        <button class="pv-btn pv-btn-secondary" id="pv-dismiss">Dismiss</button>
-        <button class="pv-btn pv-btn-primary" id="pv-fill">Fill</button>
-      </div>
+
+    const style = document.createElement('style');
+    style.textContent = `
+      #pwdvault-autofill-bar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
+        padding: 12px 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 14px;
+        color: #e0e0e0;
+        z-index: 2147483646;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        animation: slideDown 0.3s ease-out;
+      }
+      @keyframes slideDown {
+        from { transform: translateY(-100%); }
+        to { transform: translateY(0); }
+      }
+      #pwdvault-autofill-bar .pv-bar-content {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      #pwdvault-autofill-bar .pv-icon {
+        width: 28px;
+        height: 28px;
+        background: #6366f1;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        color: #fff;
+        font-size: 12px;
+      }
+      #pwdvault-autofill-bar .pv-text {
+        display: flex;
+        flex-direction: column;
+      }
+      #pwdvault-autofill-bar .pv-title {
+        font-weight: 500;
+      }
+      #pwdvault-autofill-bar .pv-subtitle {
+        font-size: 12px;
+        color: #888;
+      }
+      #pwdvault-autofill-bar .pv-actions {
+        display: flex;
+        gap: 8px;
+      }
+      #pwdvault-autofill-bar .pv-btn {
+        padding: 8px 16px;
+        border-radius: 6px;
+        border: none;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      #pwdvault-autofill-bar .pv-btn-primary {
+        background: #6366f1;
+        color: white;
+      }
+      #pwdvault-autofill-bar .pv-btn-primary:hover {
+        background: #4f46e5;
+      }
+      #pwdvault-autofill-bar .pv-btn-secondary {
+        background: #333;
+        color: #aaa;
+      }
+      #pwdvault-autofill-bar .pv-btn-secondary:hover {
+        background: #444;
+        color: #fff;
+      }
     `;
+    notificationBar.appendChild(style);
+
+    const barContent = document.createElement('div');
+    barContent.className = 'pv-bar-content';
+
+    const icon = document.createElement('div');
+    icon.className = 'pv-icon';
+    icon.textContent = entry.title.charAt(0).toUpperCase();
+    barContent.appendChild(icon);
+
+    const text = document.createElement('div');
+    text.className = 'pv-text';
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'pv-title';
+    titleSpan.textContent = 'Fill credentials for ' + entry.title + '?';
+    text.appendChild(titleSpan);
+    const subtitleSpan = document.createElement('span');
+    subtitleSpan.className = 'pv-subtitle';
+    subtitleSpan.textContent = entry.username;
+    text.appendChild(subtitleSpan);
+    barContent.appendChild(text);
+
+    notificationBar.appendChild(barContent);
+
+    const actions = document.createElement('div');
+    actions.className = 'pv-actions';
+
+    const dismissBtn = document.createElement('button');
+    dismissBtn.className = 'pv-btn pv-btn-secondary';
+    dismissBtn.id = 'pv-dismiss';
+    dismissBtn.textContent = 'Dismiss';
+    actions.appendChild(dismissBtn);
+
+    const fillBtn = document.createElement('button');
+    fillBtn.className = 'pv-btn pv-btn-primary';
+    fillBtn.id = 'pv-fill';
+    fillBtn.textContent = 'Fill';
+    actions.appendChild(fillBtn);
+
+    notificationBar.appendChild(actions);
 
     notificationBar.querySelector('#pv-fill').addEventListener('click', async () => {
       hideNotificationBar();
@@ -633,14 +662,24 @@
       });
 
       if (response.error) {
-        content.innerHTML = `<div id="pwdvault-status" class="error">${response.error}</div>`;
+        content.innerHTML = '';
+        const statusEl = document.createElement('div');
+        statusEl.id = 'pwdvault-status';
+        statusEl.className = 'error';
+        statusEl.textContent = response.error;
+        content.appendChild(statusEl);
         return;
       }
 
       cachedEntries = response;
       renderEntries(response);
     } catch (error) {
-      content.innerHTML = `<div id="pwdvault-status" class="error">Failed to load entries: ${error.message}</div>`;
+      content.innerHTML = '';
+      const statusEl = document.createElement('div');
+      statusEl.id = 'pwdvault-status';
+      statusEl.className = 'error';
+      statusEl.textContent = 'Failed to load entries: ' + error.message;
+      content.appendChild(statusEl);
     }
   }
 
@@ -648,7 +687,11 @@
     const content = overlay.querySelector('#pwdvault-content');
 
     if (!entries || entries.length === 0) {
-      content.innerHTML = `<div id="pwdvault-empty">No passwords found for this site</div>`;
+      content.innerHTML = '';
+      const emptyEl = document.createElement('div');
+      emptyEl.id = 'pwdvault-empty';
+      emptyEl.textContent = 'No passwords found for this site';
+      content.appendChild(emptyEl);
       return;
     }
 
@@ -658,21 +701,34 @@
     entries.forEach(entry => {
       const item = document.createElement('div');
       item.className = 'pwdvault-item';
-      item.innerHTML = `
-        <div class="pwdvault-icon">${entry.title.charAt(0)}</div>
-        <div class="pwdvault-info">
-          <h4>${escapeHtml(entry.title)}</h4>
-          <p>${escapeHtml(entry.username)}</p>
-        </div>
-        <div class="pwdvault-item-actions">
-          <button class="pwdvault-action-btn" data-action="copy" data-id="${entry.id}" title="Copy password">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-            </svg>
-          </button>
-        </div>
-      `;
+
+      const icon = document.createElement('div');
+      icon.className = 'pwdvault-icon';
+      icon.textContent = entry.title.charAt(0);
+
+      const info = document.createElement('div');
+      info.className = 'pwdvault-info';
+      const h4 = document.createElement('h4');
+      h4.textContent = entry.title;
+      const p = document.createElement('p');
+      p.textContent = entry.username;
+      info.appendChild(h4);
+      info.appendChild(p);
+
+      const actionsDiv = document.createElement('div');
+      actionsDiv.className = 'pwdvault-item-actions';
+
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'pwdvault-action-btn';
+      copyBtn.setAttribute('data-action', 'copy');
+      copyBtn.setAttribute('data-id', entry.id);
+      copyBtn.title = 'Copy password';
+      copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+      actionsDiv.appendChild(copyBtn);
+
+      item.appendChild(icon);
+      item.appendChild(info);
+      item.appendChild(actionsDiv);
 
       // Click to fill
       item.addEventListener('click', (e) => {

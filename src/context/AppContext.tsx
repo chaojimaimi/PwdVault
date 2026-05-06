@@ -67,8 +67,15 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, groups: action.payload };
     case 'SET_SELECTED_GROUP':
       return { ...state, selectedGroupId: action.payload };
-    case 'SET_SELECTED_ENTRY':
+    case 'SET_SELECTED_ENTRY': {
+      // Zeroize sensitive fields from the previously selected entry
+      const prev = state.selectedEntry;
+      if (prev) {
+        prev.password = '';
+        prev.notes = '';
+      }
       return { ...state, selectedEntry: action.payload };
+    }
     case 'SET_SEARCH_QUERY':
       return { ...state, searchQuery: action.payload };
     case 'SET_SCREEN':
@@ -182,6 +189,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
 
     lock: () => {
+      dispatch({ type: 'SET_SELECTED_ENTRY', payload: null });
       api.lockVault();
       dispatch({ type: 'RESET' });
       dispatch({ type: 'SET_SCREEN', payload: 'unlock' });

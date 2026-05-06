@@ -10,8 +10,8 @@
     "clipboardWrite"
   ],
   "host_permissions": [
-    "<all_urls>",
-    "http://127.0.0.1:17429/*"
+    "http://127.0.0.1:17429/*",
+    "http://localhost:17429/*"
   ],
   "background": {
     "service_worker": "src/background.js",

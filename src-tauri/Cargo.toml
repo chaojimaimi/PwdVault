@@ -29,6 +29,7 @@ aes-gcm = { version = "0.10", features = ["std"] }
 argon2 = { version = "0.5", features = ["std"] }
 rand = "0.8"
 zeroize = { version = "1", features = ["derive"] }
+subtle = "2"
 typenum = "1"
 
 # Database

@@ -1,5 +1,6 @@
 //! PwdVault - A secure, local-first password manager
 
+pub mod auth;
 pub mod crypto;
 pub mod database;
 pub mod native_messaging;
@@ -367,6 +368,9 @@ fn generate_password(
     include_numbers: bool,
     include_symbols: bool,
 ) -> String {
+    // Clamp length to sane bounds
+    let length = length.clamp(4, 128);
+
     use rand::{rngs::OsRng, Rng};
 
     let mut charset = String::new();
@@ -539,6 +543,20 @@ fn create_entry(request: CreateEntryRequest, state: State<'_, Arc<AppState>>) ->
         return Err(VaultError::VaultLocked);
     }
 
+    // Input validation
+    if request.title.is_empty() || request.title.len() > 4096 {
+        return Err(VaultError::InternalError("Invalid title length".to_string()));
+    }
+    if request.username.is_empty() || request.username.len() > 4096 {
+        return Err(VaultError::InternalError("Invalid username length".to_string()));
+    }
+    if request.password.len() > 1024 {
+        return Err(VaultError::InternalError("Invalid password length".to_string()));
+    }
+    if request.notes.as_ref().map_or(false, |n| n.len() > 65536) {
+        return Err(VaultError::InternalError("Notes too long".to_string()));
+    }
+
     let db = get_db(&state)?;
     let key = crypto::get_key()?;
 
@@ -644,6 +662,17 @@ fn update_entry(
 ) -> Result<EntrySummary, VaultError> {
     if !is_unlocked() {
         return Err(VaultError::VaultLocked);
+    }
+
+    // Input validation
+    if request.title.is_empty() || request.title.len() > 4096 {
+        return Err(VaultError::InternalError("Invalid title length".to_string()));
+    }
+    if request.username.is_empty() || request.username.len() > 4096 {
+        return Err(VaultError::InternalError("Invalid username length".to_string()));
+    }
+    if request.password.len() > 1024 {
+        return Err(VaultError::InternalError("Invalid password length".to_string()));
     }
 
     let db = get_db(&state)?;

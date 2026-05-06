@@ -25,6 +25,9 @@ export function SetupScreen() {
       await actions.initialize(password);
     } catch {
       setLocalError('Failed to initialize vault');
+    } finally {
+      setPassword('');
+      setConfirmPassword('');
     }
   };
 

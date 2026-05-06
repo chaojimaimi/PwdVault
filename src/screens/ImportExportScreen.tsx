@@ -29,8 +29,8 @@ export function ImportExportScreen() {
       showToast('Please enter an export password');
       return;
     }
-    if (exportPassword.length < 4) {
-      showToast('Password must be at least 4 characters');
+    if (exportPassword.length < 8) {
+      showToast('Password must be at least 8 characters');
       return;
     }
     if (exportPassword !== exportConfirm) {

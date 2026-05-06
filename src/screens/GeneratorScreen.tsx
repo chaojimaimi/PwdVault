@@ -29,7 +29,7 @@ export function GeneratorScreen() {
       setPassword(pwd);
       setCopied(false);
     } catch (error) {
-      console.error('Failed to generate password:', error);
+      showToast(error instanceof Error ? error.message : 'Failed to generate password');
     }
   };
 
