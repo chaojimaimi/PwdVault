@@ -1,42 +1,18 @@
 //! API Token Authentication
 //!
 //! Provides Bearer token authentication for the HTTP API.
-//! Token is stored in a file with restricted permissions (0o600).
+//! Token is stored in memory only and regenerated on each application start.
 
-use std::io::Write;
-use std::path::PathBuf;
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
 
 /// Token length in bytes (32 bytes = 64 hex chars)
 const TOKEN_BYTES: usize = 32;
 
-/// Get the API token file path
-fn token_path() -> PathBuf {
-    let base = {
-        #[cfg(target_os = "macos")]
-        {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| std::env::current_dir().unwrap())
-                .join("com.pwdvault.app")
-        }
-        #[cfg(target_os = "windows")]
-        {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| std::env::current_dir().unwrap())
-                .join("PwdVault")
-        }
-        #[cfg(target_os = "linux")]
-        {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| std::env::current_dir().unwrap())
-                .join("pwdvault")
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-        {
-            std::env::current_dir().unwrap()
-        }
-    };
-    base.join("api_token")
-}
+/// In-memory token storage (regenerated on each app start)
+static API_TOKEN: Lazy<Mutex<String>> = Lazy::new(|| {
+    Mutex::new(generate_token())
+});
 
 /// Generate a cryptographically random hex token
 fn generate_token() -> String {
@@ -46,61 +22,27 @@ fn generate_token() -> String {
     hex::encode(&bytes)
 }
 
-/// Get or create the API token. Returns the token as a string.
-pub fn get_or_create_token() -> Result<String, String> {
-    let path = token_path();
+/// Get the current API token. The token is generated once per application session
+/// and stored in memory. It is never written to disk.
+pub fn get_token() -> String {
+    let guard = API_TOKEN.lock().expect("token lock poisoned");
+    guard.clone()
+}
 
-    // Try to read existing token
-    if path.exists() {
-        let token = std::fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read token: {}", e))?;
-        let trimmed = token.trim().to_string();
-        if !trimmed.is_empty() {
-            return Ok(trimmed);
-        }
-    }
-
-    // Generate new token
-    let token = generate_token();
-
-    // Ensure parent directory exists
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create token dir: {}", e))?;
-    }
-
-    // Write token with restricted permissions
-    {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&path)
-                .map_err(|e| format!("Failed to create token file: {}", e))?;
-            file.write_all(token.as_bytes())
-                .map_err(|e| format!("Failed to write token: {}", e))?;
-        }
-        #[cfg(not(unix))]
-        {
-            std::fs::write(&path, &token)
-                .map_err(|e| format!("Failed to write token: {}", e))?;
-        }
-    }
-
-    Ok(token)
+/// Regenerate the API token. This invalidates all existing browser extensions
+/// and requires them to re-pair. Call this when the user wants to revoke extension access.
+pub fn regenerate_token() -> String {
+    let mut guard = API_TOKEN.lock().expect("token lock poisoned");
+    let new_token = generate_token();
+    *guard = new_token.clone();
+    new_token
 }
 
 /// Validate a Bearer token from the Authorization header.
-/// Returns true if the token matches the stored token.
+/// Returns true if the token matches the current in-memory token.
 pub fn validate_token(auth_header: &str) -> bool {
-    let expected = match get_or_create_token() {
-        Ok(t) => t,
-        Err(_) => return false,
-    };
+    let current = API_TOKEN.lock().expect("token lock poisoned");
+    let expected = current.trim();
 
     // Parse "Bearer <token>"
     if let Some(provided) = auth_header.strip_prefix("Bearer ") {
@@ -158,5 +100,33 @@ mod tests {
         assert!(is_extension_origin(Some("moz-extension://xyz789")));
         assert!(!is_extension_origin(Some("http://localhost:3000")));
         assert!(!is_extension_origin(None));
+    }
+
+    #[test]
+    fn test_token_consistent() {
+        let t1 = get_token();
+        let t2 = get_token();
+        assert_eq!(t1, t2, "token should be consistent within a session");
+    }
+
+    #[test]
+    fn test_regenerate_token() {
+        let t1 = get_token();
+        let t2 = regenerate_token();
+        assert_ne!(t1, t2, "regenerated token should be different");
+        let t3 = get_token();
+        assert_eq!(t2, t3, "after regeneration, get_token should return new token");
+    }
+
+    #[test]
+    fn test_validate_token_success() {
+        let token = get_token();
+        assert!(validate_token(&format!("Bearer {}", token)));
+    }
+
+    #[test]
+    fn test_validate_token_failure() {
+        assert!(!validate_token("Bearer wrongtoken"));
+        assert!(!validate_token("invalid"));
     }
 }

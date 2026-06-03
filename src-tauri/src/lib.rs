@@ -80,6 +80,9 @@ pub struct AppState {
     pub failed_unlock_attempts: Mutex<u32>,
     /// Timestamp when lockout expires (None = not locked out)
     pub lockout_until: Mutex<Option<Instant>>,
+    /// Rate limiting for pair endpoint (requests per minute)
+    pub pair_request_count: Mutex<u32>,
+    pub pair_last_reset: Mutex<Option<Instant>>,
 }
 
 impl AppState {
@@ -126,6 +129,8 @@ impl Default for AppState {
             auto_lock_secs: Mutex::new(AUTO_LOCK_SECS),
             failed_unlock_attempts: Mutex::new(0),
             lockout_until: Mutex::new(None),
+            pair_request_count: Mutex::new(0),
+            pair_last_reset: Mutex::new(None),
         }
     }
 }
@@ -367,7 +372,7 @@ fn generate_password(
     include_lowercase: bool,
     include_numbers: bool,
     include_symbols: bool,
-) -> String {
+) -> Result<String, VaultError> {
     // Clamp length to sane bounds
     let length = length.clamp(4, 128);
 
@@ -395,8 +400,9 @@ fn generate_password(
     }
 
     if charset.is_empty() {
-        charset = "abcdefghijklmnopqrstuvwxyz".to_string();
-        required_chars = vec!['a'];
+        return Err(VaultError::InternalError(
+            "At least one character type must be selected".to_string(),
+        ));
     }
 
     let mut rng = OsRng; // Use OS entropy source for better security
@@ -418,7 +424,7 @@ fn generate_password(
         password_chars.swap(i, j);
     }
 
-    password_chars.into_iter().collect()
+    Ok(password_chars.into_iter().collect())
 }
 
 // ============================================================================
@@ -602,35 +608,47 @@ fn get_entry(id: String, state: State<'_, Arc<AppState>>) -> Result<EntryRespons
     // Decrypt password
     let encrypted_password: EncryptedData = bincode::deserialize(&entry.encrypted_password)
         .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
-    let password_bytes = decrypt(&key, &encrypted_password)?;
-    let password = String::from_utf8(password_bytes)
+    let mut password_bytes = decrypt(&key, &encrypted_password)?;
+    let mut password = String::from_utf8(password_bytes.clone())
         .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
 
     // Decrypt notes if present
-    let notes = if let Some(encrypted_notes_bytes) = &entry.encrypted_notes {
+    let mut notes = if let Some(encrypted_notes_bytes) = &entry.encrypted_notes {
         let encrypted: EncryptedData = bincode::deserialize(encrypted_notes_bytes)
             .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
-        let notes_bytes = decrypt(&key, &encrypted)?;
-        Some(String::from_utf8(notes_bytes).map_err(|e| VaultError::DecryptionFailed(e.to_string()))?)
+        let mut notes_bytes = decrypt(&key, &encrypted)?;
+        let notes_str = String::from_utf8(notes_bytes.clone())
+            .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
+        notes_bytes.zeroize();
+        Some(notes_str)
     } else {
         None
     };
 
     state.touch_activity();
 
-    Ok(EntryResponse {
+    let response = EntryResponse {
         id: entry.id,
         title: entry.title,
         url: entry.url,
         username: entry.username,
-        password,
-        notes,
+        password: password.clone(),
+        notes: notes.clone(),
         tags: entry.tags,
         group_id: entry.group_id,
         created_at: entry.created_at,
         updated_at: entry.updated_at,
         last_used_at: entry.last_used_at,
-    })
+    };
+
+    // Zeroize plaintext sensitive data after building response
+    password.zeroize();
+    password_bytes.zeroize();
+    if let Some(ref mut n) = notes {
+        n.zeroize();
+    }
+
+    Ok(response)
 }
 
 #[tauri::command]
@@ -753,6 +771,19 @@ fn remove_group(id: String, state: State<'_, Arc<AppState>>) -> Result<bool, Vau
 
     let db = get_db(&state)?;
     let existed = delete_group(&db, &id)?;
+
+    // Cascade: clear group_id on entries that referenced the deleted group
+    if existed {
+        let entry_ids = list_entries(&db)?;
+        for entry_id in entry_ids {
+            if let Some(mut entry) = load_entry(&db, &entry_id)? {
+                if entry.group_id.as_deref() == Some(id.as_str()) {
+                    entry.group_id = None;
+                    save_entry(&db, &entry)?;
+                }
+            }
+        }
+    }
 
     state.touch_activity();
     Ok(existed)
@@ -1052,25 +1083,17 @@ fn import_vault(backup: VaultBackup, mut import_password: String, state: State<'
     let db = get_db(&state)?;
     let key = crypto::get_key()?;
 
-    // Clear existing entries and groups (propagate errors)
-    let existing_entry_ids = list_entries(&db)?;
-    for id in existing_entry_ids {
-        delete_entry(&db, &id)?;
-    }
-    let existing_group_ids = list_groups(&db)?;
-    for id in existing_group_ids {
-        delete_group(&db, &id)?;
-    }
-
-    // Import groups (generate new IDs to avoid conflicts)
+    // Pre-validate and prepare groups (generate new IDs to avoid conflicts)
     let mut group_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut new_groups = Vec::new();
     for g in &payload.groups {
         let new_group = Group::new(g.name.clone());
         group_id_map.insert(g.id.clone(), new_group.id.clone());
-        save_group(&db, &new_group)?;
+        new_groups.push(new_group);
     }
 
-    // Import entries
+    // Pre-validate and encrypt all entries before any destructive operations
+    let mut new_entries = Vec::new();
     for export_entry in &payload.entries {
         let mut entry = PasswordEntry::new(
             export_entry.title.clone(),
@@ -1099,7 +1122,28 @@ fn import_vault(backup: VaultBackup, mut import_password: String, state: State<'
         entry.created_at = export_entry.created_at;
         entry.updated_at = export_entry.updated_at;
 
-        save_entry(&db, &entry)?;
+        new_entries.push(entry);
+    }
+
+    // All validation and encryption succeeded — now perform database mutations
+    // Clear existing entries and groups (propagate errors)
+    let existing_entry_ids = list_entries(&db)?;
+    for id in existing_entry_ids {
+        delete_entry(&db, &id)?;
+    }
+    let existing_group_ids = list_groups(&db)?;
+    for id in existing_group_ids {
+        delete_group(&db, &id)?;
+    }
+
+    // Write new groups
+    for g in &new_groups {
+        save_group(&db, g)?;
+    }
+
+    // Write new entries
+    for entry in &new_entries {
+        save_entry(&db, entry)?;
     }
 
     // Apply imported settings
@@ -1389,35 +1433,35 @@ mod tests {
 
     #[test]
     fn test_generate_password_length() {
-        let pw = generate_password(20, true, true, true, true);
+        let pw = generate_password(20, true, true, true, true).unwrap();
         assert_eq!(pw.len(), 20);
     }
 
     #[test]
     fn test_generate_password_all_charsets() {
-        let pw = generate_password(100, true, true, true, true);
+        let pw = generate_password(100, true, true, true, true).unwrap();
         assert!(pw.chars().any(|c| c.is_ascii_uppercase()));
         assert!(pw.chars().any(|c| c.is_ascii_lowercase()));
         assert!(pw.chars().any(|c| c.is_ascii_digit()));
     }
 
     #[test]
-    fn test_generate_password_empty_charset_fallback() {
-        let pw = generate_password(10, false, false, false, false);
-        assert_eq!(pw.len(), 10);
-        assert!(pw.chars().all(|c| c.is_ascii_lowercase()));
+    fn test_generate_password_empty_charset_returns_error() {
+        let result = generate_password(10, false, false, false, false);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("character type"));
     }
 
     #[test]
     fn test_generate_password_only_symbols() {
-        let pw = generate_password(20, false, false, false, true);
+        let pw = generate_password(20, false, false, false, true).unwrap();
         assert_eq!(pw.len(), 20);
     }
 
     #[test]
     fn test_generate_password_guarantees_all_types() {
         // Verify that all requested character types are included
-        let pw = generate_password(16, true, true, true, true);
+        let pw = generate_password(16, true, true, true, true).unwrap();
 
         let has_upper = pw.chars().any(|c| c.is_ascii_uppercase());
         let has_lower = pw.chars().any(|c| c.is_ascii_lowercase());
@@ -1435,7 +1479,7 @@ mod tests {
         // Even very short passwords should contain all requested types
         // With 4 requested types and length 4, each position gets exactly one type
         for _ in 0..100 {
-            let pw = generate_password(4, true, true, true, true);
+            let pw = generate_password(4, true, true, true, true).unwrap();
             assert_eq!(pw.len(), 4);
 
             let has_upper = pw.chars().any(|c| c.is_ascii_uppercase());
@@ -1453,7 +1497,7 @@ mod tests {
     #[test]
     fn test_generate_password_partial_types() {
         // Test with only some character types enabled
-        let pw = generate_password(12, true, false, true, false);
+        let pw = generate_password(12, true, false, true, false).unwrap();
         assert!(pw.chars().any(|c| c.is_ascii_uppercase()));
         assert!(pw.chars().any(|c| c.is_ascii_digit()));
         assert!(!pw.chars().any(|c| c.is_ascii_lowercase()));

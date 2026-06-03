@@ -666,7 +666,7 @@
         const statusEl = document.createElement('div');
         statusEl.id = 'pwdvault-status';
         statusEl.className = 'error';
-        statusEl.textContent = response.error;
+        statusEl.textContent = escapeHtml(response.error);
         content.appendChild(statusEl);
         return;
       }
@@ -678,7 +678,7 @@
       const statusEl = document.createElement('div');
       statusEl.id = 'pwdvault-status';
       statusEl.className = 'error';
-      statusEl.textContent = 'Failed to load entries: ' + error.message;
+      statusEl.textContent = 'Failed to load entries: ' + escapeHtml(error.message || 'Unknown error');
       content.appendChild(statusEl);
     }
   }
@@ -704,14 +704,15 @@
 
       const icon = document.createElement('div');
       icon.className = 'pwdvault-icon';
-      icon.textContent = entry.title.charAt(0);
+      // Use first character safely - textContent is safe
+      icon.textContent = entry.title ? entry.title.charAt(0) : '?';
 
       const info = document.createElement('div');
       info.className = 'pwdvault-info';
       const h4 = document.createElement('h4');
-      h4.textContent = entry.title;
+      h4.textContent = entry.title || 'Untitled';
       const p = document.createElement('p');
-      p.textContent = entry.username;
+      p.textContent = entry.username || 'No username';
       info.appendChild(h4);
       info.appendChild(p);
 
@@ -721,7 +722,8 @@
       const copyBtn = document.createElement('button');
       copyBtn.className = 'pwdvault-action-btn';
       copyBtn.setAttribute('data-action', 'copy');
-      copyBtn.setAttribute('data-id', entry.id);
+      // Escape the ID attribute value to prevent XSS
+      copyBtn.setAttribute('data-id', escapeHtml(entry.id));
       copyBtn.title = 'Copy password';
       copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
       actionsDiv.appendChild(copyBtn);
@@ -779,7 +781,7 @@
       hideOverlay();
       autofillLogin(entry.username, entry.password);
     } catch (error) {
-      showNotification('Failed to get entry: ' + error.message, 'error');
+      showNotification('Failed to get entry: ' + escapeHtml(error.message || 'Unknown error'), 'error');
     }
   }
 
@@ -802,7 +804,7 @@
         showNotification('Failed to copy password', 'error');
       }
     } catch (error) {
-      showNotification('Failed to copy password: ' + error.message, 'error');
+      showNotification('Failed to copy password: ' + escapeHtml(error.message || 'Unknown error'), 'error');
     }
   }
 

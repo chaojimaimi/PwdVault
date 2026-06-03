@@ -101,7 +101,7 @@ interface AppContextValue {
   actions: {
     initialize: (password: string) => Promise<void>;
     unlock: (password: string) => Promise<boolean>;
-    lock: () => void;
+    lock: () => Promise<void>;
     loadEntries: () => Promise<void>;
     loadGroups: () => Promise<void>;
     createGroup: (name: string) => Promise<void>;
@@ -188,9 +188,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     },
 
-    lock: () => {
+    lock: async () => {
       dispatch({ type: 'SET_SELECTED_ENTRY', payload: null });
-      api.lockVault();
+      await api.lockVault();
       dispatch({ type: 'RESET' });
       dispatch({ type: 'SET_SCREEN', payload: 'unlock' });
     },

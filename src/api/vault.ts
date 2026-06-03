@@ -1,4 +1,4 @@
-import type { CreateEntryRequest, EntryResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, UpdateInfo } from '../types';
+import type { CreateEntryRequest, EntryResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, UpdateInfo, Group } from '../types';
 
 // Unified invoke function that works in both Tauri and browser environments
 async function invoke<T>(cmd: string, args?: Record<string, any>): Promise<T> {
@@ -8,27 +8,9 @@ async function invoke<T>(cmd: string, args?: Record<string, any>): Promise<T> {
     return tauriInvoke(cmd, args);
   }
 
-  // Fallback to HTTP API for browser extension or dev in browser
-  const response = await fetch('http://127.0.0.1:17429', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: 1, command: cmd, ...args }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP error: ${response.status}`);
-  }
-
-  const data = await response.json();
-
-  if (!data.success) {
-    const errorMsg = typeof data.error === 'string'
-      ? data.error
-      : JSON.stringify(data.error) || 'Request failed';
-    throw new Error(errorMsg);
-  }
-
-  return data.data;
+  // Not in Tauri environment — this frontend is designed for the Tauri desktop app only.
+  // Browser extension uses its own background.js with proper Bearer Token auth.
+  throw new Error('PwdVault desktop app is required. Please run this application inside the Tauri desktop environment.');
 }
 
 // Vault Management
@@ -97,11 +79,11 @@ export async function getEntryCount(): Promise<number> {
 
 // Group Management
 
-export async function createGroup(name: string): Promise<any> {
+export async function createGroup(name: string): Promise<Group> {
   return invoke('create_group', { name });
 }
 
-export async function listAllGroups(): Promise<any[]> {
+export async function listAllGroups(): Promise<Group[]> {
   return invoke('list_all_groups');
 }
 
@@ -109,7 +91,7 @@ export async function removeGroup(id: string): Promise<boolean> {
   return invoke('remove_group', { id });
 }
 
-export async function updateGroup(id: string, name: string): Promise<any> {
+export async function updateGroup(id: string, name: string): Promise<Group> {
   return invoke('update_group', { id, name });
 }
 

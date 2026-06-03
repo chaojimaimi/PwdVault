@@ -250,8 +250,32 @@ fn create_error_response(id: u32, error: String, origin: Option<&str>) -> Respon
 fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_json::Value, String> {
     match req.command.as_str() {
         // Extension pairing — returns API token (no auth required, origin checked in handle_request)
+        // Rate limited to prevent token enumeration attacks
         "pair" => {
-            let token = auth::get_or_create_token()?;
+            // Check rate limit for pair endpoint (max 10 requests per minute)
+            {
+                let mut pair_count = state.pair_request_count.lock().expect("pair count lock poisoned");
+                let now = std::time::Instant::now();
+
+                // Reset count if more than a minute has passed
+                if let Some(last_reset) = state.pair_last_reset.lock().expect("pair reset lock poisoned").as_ref() {
+                    if now.duration_since(*last_reset).as_secs() > 60 {
+                        *pair_count = 0;
+                        *state.pair_last_reset.lock().expect("pair reset lock poisoned") = Some(now);
+                    }
+                } else {
+                    *state.pair_last_reset.lock().expect("pair reset lock poisoned") = Some(now);
+                }
+
+                // Rate limit: max 10 pair requests per minute
+                if *pair_count >= 10 {
+                    return Err("Too many pair requests. Please try again later.".to_string());
+                }
+
+                *pair_count += 1;
+            }
+
+            let token = auth::get_token();
             Ok(serde_json::json!({ "token": token }))
         }
 
@@ -295,10 +319,11 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
         }
 
         "init_vault" => {
-            let password = req.password.ok_or("Password required")?;
+            let mut password = req.password.ok_or("Password required")?;
 
             // Check if already initialized
             if state.verification_data.lock().expect("verification lock poisoned").is_some() {
+                password.zeroize();
                 return Err("Vault already initialized".to_string());
             }
 
@@ -306,6 +331,9 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let salt = crypto::kdf::generate_salt();
             let (key, params) = crypto::kdf::derive_key(&password, &salt)
                 .map_err(|_| "Key derivation failed".to_string())?;
+
+            // Zeroize password immediately after key derivation
+            password.zeroize();
 
             // Create verification data
             let verification_data = crypto::create_verification_header(&key, salt, params)
@@ -320,6 +348,11 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             database::save_verification_data(&db, &verification_data)
                 .map_err(|_| "Database error".to_string())?;
 
+            // Save default settings
+            let default_settings = database::Settings::default();
+            database::save_settings(&db, &default_settings)
+                .map_err(|_| "Database error".to_string())?;
+
             // Update state
             *state.verification_data.lock().expect("verification lock poisoned") = Some(verification_data);
             *state.database.lock().expect("db lock poisoned") = Some(std::sync::Arc::new(db));
@@ -327,19 +360,34 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             // Set key in memory
             crypto::set_key(key).map_err(|_| "Key store error".to_string())?;
 
+            // Update activity and lock menu
+            state.touch_activity();
+            state.update_lock_menu("Lock Vault");
+
             Ok(serde_json::json!(true))
         }
 
         "unlock_vault" => {
             crate::check_rate_limit(&state).map_err(|_| "Rate limited".to_string())?;
 
-            let password = req.password.ok_or("Password required")?;
+            let mut password = req.password.ok_or("Password required")?;
             let verification_data = state.verification_data.lock().expect("verification lock poisoned");
             let data = verification_data.as_ref().ok_or("Vault not initialized")?;
             let success = crypto::unlock_with_password(&password, data)
                 .map_err(|_| "Unlock failed".to_string())?;
+
+            // Zeroize password after use
+            password.zeroize();
+
             if success {
                 crate::reset_rate_limit(&state);
+                // Load settings from database (e.g. auto-lock timeout)
+                let db_guard = state.database.lock().expect("db lock poisoned");
+                if let Some(db) = db_guard.as_ref() {
+                    if let Ok(settings) = database::load_settings(db) {
+                        *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
+                    }
+                }
                 state.touch_activity();
                 state.update_lock_menu("Lock Vault");
             } else {
@@ -459,7 +507,17 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
 
             for id in ids {
                 if let Some(entry) = database::load_entry(db, &id).map_err(|_| "Internal error".to_string())? {
-                    entries.push(serde_json::to_value(entry).expect("entry serializable"));
+                    // Return only safe summary fields (no encrypted data)
+                    entries.push(serde_json::json!({
+                        "id": entry.id,
+                        "title": entry.title,
+                        "url": entry.url,
+                        "username": entry.username,
+                        "tags": entry.tags,
+                        "group_id": entry.group_id,
+                        "created_at": entry.created_at,
+                        "updated_at": entry.updated_at,
+                    }));
                 }
             }
 
@@ -562,8 +620,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             }
 
             if charset.is_empty() {
-                charset = "abcdefghijklmnopqrstuvwxyz".to_string();
-                required_chars = vec!['a'];
+                return Err("At least one character type must be selected".to_string());
             }
 
             let mut rng = OsRng; // Use OS entropy source for better security
@@ -619,6 +676,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             entry.url = req.url;
             entry.username = username;
             entry.tags = req.tags.unwrap_or_default();
+            entry.group_id = req.group_id;
             entry.updated_at = chrono::Utc::now().timestamp();
 
             let encrypted_password = crypto::encrypt(&key, password.as_bytes())
@@ -766,6 +824,19 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
 
             let existed = database::delete_group(db, &id).map_err(|_| "Internal error".to_string())?;
 
+            // Cascade: clear group_id on entries that referenced the deleted group
+            if existed {
+                let entry_ids = database::list_entries(db).map_err(|_| "Internal error".to_string())?;
+                for entry_id in entry_ids {
+                    if let Some(mut entry) = database::load_entry(db, &entry_id).map_err(|_| "Internal error".to_string())? {
+                        if entry.group_id.as_deref() == Some(id.as_str()) {
+                            entry.group_id = None;
+                            database::save_entry(db, &entry).map_err(|_| "Internal error".to_string())?;
+                        }
+                    }
+                }
+            }
+
             state.touch_activity();
 
             Ok(serde_json::json!(existed))
@@ -775,7 +846,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             if !crypto::is_unlocked() {
                 return Err("Vault locked".to_string());
             }
-            let export_password = req.export_password.ok_or("Export password required")?;
+            let mut export_password = req.export_password.ok_or("Export password required")?;
             let db_guard = state.database.lock().expect("db lock poisoned");
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
             let key = crypto::get_key().map_err(|_| "Internal error".to_string())?;
@@ -844,6 +915,9 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let (export_key, params) = crypto::kdf::derive_key(&export_password, &salt)
                 .map_err(|_| "Internal error".to_string())?;
 
+            // Zeroize export password after key derivation
+            export_password.zeroize();
+
             let encrypted = crypto::encrypt(&export_key, &payload_bytes)
                 .map_err(|_| "Internal error".to_string())?;
 
@@ -868,7 +942,7 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                 return Err("Vault locked".to_string());
             }
             let backup_json = req.backup.ok_or("Backup data required")?;
-            let import_password = req.import_password.ok_or("Import password required")?;
+            let mut import_password = req.import_password.ok_or("Import password required")?;
 
             let version = backup_json.get("version")
                 .and_then(|v| v.as_u64())
@@ -906,6 +980,9 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                 },
             ).map_err(|_| "Internal error".to_string())?;
 
+            // Zeroize import password after key derivation
+            import_password.zeroize();
+
             let encrypted_data = crypto::EncryptedData {
                 nonce: nonce_bytes,
                 ciphertext,
@@ -920,29 +997,21 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
             let db = db_guard.as_ref().ok_or("Database not initialized")?;
             let key = crypto::get_key().map_err(|_| "Internal error".to_string())?;
 
-            // Clear existing data
-            let existing_ids = database::list_entries(db).map_err(|_| "Internal error".to_string())?;
-            for id in existing_ids {
-                database::delete_entry(db, &id).map_err(|_| "Internal error".to_string())?;
-            }
-            let existing_groups = database::list_groups(db).map_err(|_| "Internal error".to_string())?;
-            for id in existing_groups {
-                database::delete_group(db, &id).map_err(|_| "Internal error".to_string())?;
-            }
-
-            // Import groups
+            // Pre-validate and parse all groups before mutating database
             let groups = payload.get("groups").and_then(|v| v.as_array()).ok_or("Missing groups")?;
             let mut group_id_map = std::collections::HashMap::new();
+            let mut new_groups = Vec::new();
             for g in groups {
                 let old_id = g.get("id").and_then(|v| v.as_str()).ok_or("Missing group id")?;
                 let name = g.get("name").and_then(|v| v.as_str()).ok_or("Missing group name")?;
                 let new_group = database::Group::new(name.to_string());
                 group_id_map.insert(old_id.to_string(), new_group.id.clone());
-                database::save_group(db, &new_group).map_err(|_| "Internal error".to_string())?;
+                new_groups.push(new_group);
             }
 
-            // Import entries
+            // Pre-validate and encrypt all entries before mutating database
             let entries = payload.get("entries").and_then(|v| v.as_array()).ok_or("Missing entries")?;
+            let mut new_entries = Vec::new();
             for e in entries {
                 let title = e.get("title").and_then(|v| v.as_str()).ok_or("Missing title")?;
                 let username = e.get("username").and_then(|v| v.as_str()).ok_or("Missing username")?;
@@ -969,13 +1038,42 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                 entry.created_at = e.get("created_at").and_then(|v| v.as_i64()).unwrap_or(entry.created_at);
                 entry.updated_at = e.get("updated_at").and_then(|v| v.as_i64()).unwrap_or(entry.updated_at);
 
-                database::save_entry(db, &entry).map_err(|_| "Internal error".to_string())?;
+                new_entries.push(entry);
+            }
+
+            // All validation and encryption succeeded — now perform database mutations
+            // Clear existing data
+            let existing_ids = database::list_entries(db).map_err(|_| "Internal error".to_string())?;
+            for id in existing_ids {
+                database::delete_entry(db, &id).map_err(|_| "Internal error".to_string())?;
+            }
+            let existing_groups = database::list_groups(db).map_err(|_| "Internal error".to_string())?;
+            for id in existing_groups {
+                database::delete_group(db, &id).map_err(|_| "Internal error".to_string())?;
+            }
+
+            // Write new groups
+            for g in &new_groups {
+                database::save_group(db, g).map_err(|_| "Internal error".to_string())?;
+            }
+
+            // Write new entries
+            for entry in &new_entries {
+                database::save_entry(db, entry).map_err(|_| "Internal error".to_string())?;
+            }
+
+            // Apply imported settings if present
+            if let Some(settings_val) = payload.get("settings") {
+                if let Ok(settings) = serde_json::from_value::<database::Settings>(settings_val.clone()) {
+                    let _ = database::save_settings(db, &settings);
+                    *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
+                }
             }
 
             state.touch_activity();
             Ok(serde_json::json!({
-                "entries_imported": entries.len(),
-                "groups_imported": groups.len(),
+                "entries_imported": new_entries.len(),
+                "groups_imported": new_groups.len(),
             }))
         }
 

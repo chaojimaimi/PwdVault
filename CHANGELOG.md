@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [1.0.2.0] - 2026-06-03
+
+### Fixed
+- **Security: remove_group cascade** — Deleting a group now clears `group_id` on all associated entries (prevents orphaned references)
+- **Security: Tauri get_entry zeroization** — Plaintext password and notes are zeroized after building response, matching the HTTP API path
+- **Security: generate_password explicit error** — Returns error instead of silent fallback when all character types are disabled
+- **Architecture: vault.ts HTTP fallback removed** — Eliminated unauthenticated HTTP fallback path; non-Tauri environments now throw a clear error
+- **Extension: popup.js DOM hardening** — Password no longer stored in `data-value` attribute; uses `data-id` + memory cache lookup
+- **Extension: CSS blur replaced** — Hidden passwords render as Unicode bullet characters instead of blurred plaintext
+- **Extension: innerHTML eliminated** — Content script and popup use `textContent` / `createElement` for all user data
+- **Extension: host_permissions narrowed** — Restricted to `localhost:17429` only
+
 ## [0.3.1.0] - 2026-04-30
 
 ### Added
