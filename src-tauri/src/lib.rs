@@ -1244,15 +1244,16 @@ fn register_native_host(app: &tauri::App) {
         }
     };
 
-    // In a packaged bundle the binary lives at the resource dir root
-    // (placed there by bundle.resources in tauri.conf.json). During development
-    // (pnpm tauri dev) it is absent — registration is skipped silently.
+    // In a packaged bundle the binary lives under resources/binaries/
+    // (placed there by bundle.resources in tauri.conf.json, which preserves the
+    // directory structure). During development (pnpm tauri dev) it is absent —
+    // registration is skipped silently.
     let binary_name = if cfg!(windows) {
         "pwdvault-native.exe"
     } else {
         "pwdvault-native"
     };
-    let host_path = resource_dir.join(binary_name);
+    let host_path = resource_dir.join("binaries").join(binary_name);
 
     if !host_path.exists() {
         // Expected in dev mode (no bundle). Stay quiet so dev logs aren't noisy.
