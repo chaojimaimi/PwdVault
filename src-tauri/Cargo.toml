@@ -1,6 +1,6 @@
 [package]
 name = "pwdvault"
-version = "1.0.2"
+version = "1.0.3"
 description = "A secure, local-first password manager"
 authors = ["andylee"]
 edition = "2021"
@@ -49,6 +49,10 @@ tiny_http = "0.12"
 # Update checker
 ureq = { version = "3", features = ["json"] }
 semver = "1"
+
+# Native messaging host registration (Windows registry)
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
 
 [dev-dependencies]
 tempfile = "3"

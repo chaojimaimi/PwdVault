@@ -1,9 +1,0 @@
-{
-  "name": "com.pwdvault.app",
-  "description": "PwdVault Password Manager",
-  "path": "/Users/andylee/Documents/ClaudeCode/projects/PwdVault/extensions/native-host/target/release/pwdvault-native",
-  "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://EXTENSION_ID/"
-  ]
-}

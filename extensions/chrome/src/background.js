@@ -1,26 +1,62 @@
 // PwdVault Background Service Worker
-// Handles communication between content scripts, popup, and desktop app via HTTP API
+// Handles communication between content scripts, popup, and desktop app via
+// Native Messaging (the browser spawns a host binary that bridges to the
+// desktop app's local HTTP API on 127.0.0.1:17429).
 
-const API_BASE = 'http://127.0.0.1:17429';
+// The native messaging host name; must match the "name" field in the manifest
+// registered by the desktop app (native_host_setup.rs).
+const NATIVE_HOST = 'com.pwdvault.app';
 
 let connectionStatus = 'disconnected';
 let requestId = 0;
 let apiToken = null;
 
 // ============================================================================
-// HTTP API Communication
+// Native Messaging Communication
 // ============================================================================
+
+// sendNativeMessage is promise-based in Firefox (chrome.runtime.sendMessage is
+// promise-based too in MV3). We wrap it to normalize the response shape and
+// apply a timeout so a hung host doesn't block the caller indefinitely.
+const NM_TIMEOUT_MS = 30000;
+
+function sendNativeMessageP(message) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        chrome.runtime.lastError; // clear any pending error
+        reject(new Error('Native messaging host timed out'));
+      }
+    }, NM_TIMEOUT_MS);
+
+    try {
+      chrome.runtime.sendNativeMessage(NATIVE_HOST, message, (response) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(response);
+      });
+    } catch (e) {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(e);
+      }
+    }
+  });
+}
 
 async function pairWithApp() {
   try {
-    const response = await fetch(`${API_BASE}/api/pair`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: 0, command: 'pair' }),
-    });
-
-    const data = await response.json();
-    if (data.success && data.data && data.data.token) {
+    const data = await sendNativeMessageP({ id: 0, command: 'pair' });
+    if (data && data.success && data.data && data.data.token) {
       apiToken = data.data.token;
       return true;
     }
@@ -38,28 +74,27 @@ async function sendToApp(command, params = {}) {
     await pairWithApp();
   }
 
-  const headers = { 'Content-Type': 'application/json' };
+  // Native Messaging has no HTTP headers, so the Bearer token travels in the
+  // body as `auth_token`. The host binary lifts it into an Authorization header
+  // before forwarding to the desktop app's HTTP API.
+  const message = { id, command, ...params };
   if (apiToken) {
-    headers['Authorization'] = `Bearer ${apiToken}`;
+    message.auth_token = apiToken;
   }
 
   try {
-    const response = await fetch(`${API_BASE}/api/${command}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ id, command, ...params }),
-    });
+    const data = await sendNativeMessageP(message);
 
-    const data = await response.json();
-
-    if (data.success) {
+    if (data && data.success) {
       connectionStatus = 'connected';
       return data.data;
     } else {
-      throw new Error(data.error || 'Unknown error');
+      throw new Error((data && data.error) || 'Unknown error');
     }
   } catch (error) {
-    if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+    const msg = error.message || '';
+    if (msg.includes('native messaging') || msg.includes('not found') ||
+        msg.includes('timed out') || msg.includes('connect')) {
       connectionStatus = 'disconnected';
       throw new Error('Cannot connect to PwdVault desktop app. Is it running?');
     }

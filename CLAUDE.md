@@ -84,13 +84,12 @@ PwdVault/
 │   │   ├── manifest.json          # Firefox MV3 manifest with gecko settings
 │   │   ├── src → ../chrome/src/   # Symlink to shared source
 │   │   └── icons → ../chrome/icons/ # Symlink to shared icons
-│   └── native-host/              # Native messaging host (legacy, unused)
 │
 ├── .github/workflows/
 │   └── release.yml               # CI: macOS + Windows + extension builds
 ├── releases/                     # Local release artifacts
 ├── scripts/
-│   └── bump-version.sh           # Version sync across 7 files
+│   └── bump-version.sh           # Version sync across 6 files
 ├── DESIGN.md                     # Design system specification (Light/Dark themes)
 ├── VERSION                       # 4-digit version: 1.0.0.0
 ├── CHANGELOG.md

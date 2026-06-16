@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod crypto;
 pub mod database;
+pub mod native_host_setup;
 pub mod native_messaging;
 pub mod paths;
 
@@ -1232,6 +1233,83 @@ fn start_auto_lock_thread(state: Arc<AppState>) {
 
 const NATIVE_MESSAGING_PORT: u16 = 17429;
 
+/// Locate the bundled native messaging host binary and register it with the
+/// installed browsers. Reads extension IDs from a config file next to the
+/// database; if absent (e.g. dev mode or IDs not yet configured), registration
+/// is skipped so we never write a manifest with invalid placeholders.
+fn register_native_host(app: &tauri::App) {
+    let resource_dir = match app.path().resource_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("native_host_setup: cannot resolve resource dir: {}", e);
+            return;
+        }
+    };
+
+    // In a packaged bundle the binary lives under resources/binaries/
+    // (placed there by bundle.resources in tauri.conf.json, which preserves the
+    // directory structure). During development (pnpm tauri dev) it is absent —
+    // registration is skipped silently.
+    let binary_name = if cfg!(windows) {
+        "pwdvault-native.exe"
+    } else {
+        "pwdvault-native"
+    };
+    let host_path = resource_dir.join("binaries").join(binary_name);
+
+    if !host_path.exists() {
+        // Expected in dev mode (no bundle). Stay quiet so dev logs aren't noisy.
+        return;
+    }
+
+    // Tauri's bundle.resources does not preserve the executable bit, so the
+    // host binary may lack +x after packaging. Fix it on every launch (cheap
+    // and idempotent). No-op on Windows where the extension governs execution.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&host_path) {
+            let mut perms = meta.permissions();
+            if perms.mode() & 0o111 == 0 {
+                perms.set_mode(0o755);
+                let _ = std::fs::set_permissions(&host_path, perms);
+            }
+        }
+    }
+
+    // Read extension IDs from a config file next to the database. This file is
+    // created by the registration script (install-native-host.sh) or manually.
+    // Without valid IDs we cannot write a usable manifest.
+    let ids = match load_extension_ids() {
+        Some(ids) if !ids.chrome.is_empty() => ids,
+        _ => {
+            // IDs not configured yet — skip silently. Use the install script.
+            return;
+        }
+    };
+
+    native_host_setup::register(&host_path, &ids);
+}
+
+/// Load extension IDs from a JSON config file placed next to the vault
+/// database (e.g. ~/Library/Application Support/com.pwdvault.app/native-host.json).
+/// Format: {"chrome": "<id>", "firefox": "<id>"}
+fn load_extension_ids() -> Option<native_host_setup::ExtensionIds> {
+    let config_path = paths::get_db_path()
+        .parent()?
+        .join("native-host.json");
+    let content = std::fs::read_to_string(&config_path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    Some(native_host_setup::ExtensionIds {
+        chrome: value.get("chrome")?.as_str()?.to_string(),
+        firefox: value
+            .get("firefox")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let state = Arc::new(AppState::default());
@@ -1250,6 +1328,11 @@ pub fn run() {
                     eprintln!("Failed to start native messaging server: {}", e);
                 }
             });
+
+            // Register the native messaging host so browsers can spawn it.
+            // Idempotent: overwrites the manifest on every launch so the binary
+            // path stays correct after upgrades relocate the bundle.
+            register_native_host(app);
 
             // Build system tray menu
             let show_i = MenuItem::with_id(app, "show", "Show PwdVault", true, None::<&str>)?;

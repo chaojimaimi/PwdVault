@@ -1,49 +1,41 @@
 #!/bin/bash
-# Install Native Messaging Host for Chrome Extension
-# This script installs the native messaging host manifest
+# install-native-host.sh — Register the PwdVault native messaging host
+#
+# Usage: ./install-native-host.sh <chrome-extension-id> [firefox-extension-id]
+#
+# This script writes a config file (native-host.json) next to the PwdVault
+# database so the desktop app can auto-register the NM manifest with the
+# correct extension IDs on next launch.
+#
+# After running this script, restart the PwdVault desktop app so it picks up
+# the new IDs and writes the browser manifests.
 
-set -e
+set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXTENSION_DIR="$(dirname "$SCRIPT_DIR")"
-PROJECT_ROOT="$(dirname "$(dirname "$EXTENSION_DIR")")"
-NATIVE_HOST_DIR="$PROJECT_ROOT/extensions/native-host"
-NATIVE_HOST_BINARY="$NATIVE_HOST_DIR/target/release/pwdvault-native"
+HOST_NAME="com.pwdvault.app"
 
-# Native host name
-NATIVE_HOST_NAME="com.pwdvault.app"
-
-# Check if native host binary exists
-if [ ! -f "$NATIVE_HOST_BINARY" ]; then
-    echo "Building native host binary..."
-    cd "$NATIVE_HOST_DIR"
-    ~/.cargo/bin/cargo build --release
-fi
-
-echo "Installing PwdVault Native Messaging Host..."
-echo ""
-
-# Get extension ID from user
-read -p "Enter your Chrome extension ID: " EXTENSION_ID
-
-if [ -z "$EXTENSION_ID" ]; then
-    echo "Error: Extension ID is required"
+if [[ $# -lt 1 ]]; then
+    echo "Usage: $0 <chrome-extension-id> [firefox-extension-id]"
+    echo ""
+    echo "Find your Chrome extension ID at chrome://extensions/ (enable Developer mode)."
+    echo "Example: $0 abcdefghijklmnopabcdefghijklmnop"
     exit 1
 fi
 
-# Determine platform-specific manifest directory
+CHROME_ID="$1"
+FIREFOX_ID="${2:-}"
+
+# --- Locate the config directory (next to the vault database) ---
+
 case "$(uname -s)" in
-    Darwin)
-        # macOS
-        MANIFEST_DIR="$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
+    Darwin*)
+        CONFIG_DIR="$HOME/Library/Application Support/com.pwdvault.app"
         ;;
-    Linux)
-        # Linux
-        MANIFEST_DIR="$HOME/.config/google-chrome/NativeMessagingHosts"
+    Linux*)
+        CONFIG_DIR="$HOME/.local/share/pwdvault"
         ;;
     MINGW*|MSYS*|CYGWIN*)
-        # Windows (Git Bash / MSYS2)
-        MANIFEST_DIR="$(cygpath -u "$LOCALAPPDATA/Google/Chrome/User Data/NativeMessagingHosts")"
+        CONFIG_DIR="$LOCALAPPDATA/PwdVault"
         ;;
     *)
         echo "Unsupported platform: $(uname -s)"
@@ -51,31 +43,31 @@ case "$(uname -s)" in
         ;;
 esac
 
-# Create manifest directory if it doesn't exist
-mkdir -p "$MANIFEST_DIR"
+mkdir -p "$CONFIG_DIR"
+CONFIG_FILE="$CONFIG_DIR/native-host.json"
 
-# Create manifest file
-MANIFEST_FILE="$MANIFEST_DIR/$NATIVE_HOST_NAME.json"
+# --- Write the config file ---
 
-cat > "$MANIFEST_FILE" << EOF
+if [[ -n "$FIREFOX_ID" ]]; then
+    cat > "$CONFIG_FILE" <<EOF
 {
-  "name": "$NATIVE_HOST_NAME",
-  "description": "PwdVault Password Manager",
-  "path": "$NATIVE_HOST_BINARY",
-  "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://$EXTENSION_ID/"
-  ]
+  "chrome": "$CHROME_ID",
+  "firefox": "$FIREFOX_ID"
 }
 EOF
+else
+    cat > "$CONFIG_FILE" <<EOF
+{
+  "chrome": "$CHROME_ID"
+}
+EOF
+fi
 
-echo "Native messaging host installed!"
-echo "Manifest: $MANIFEST_FILE"
+echo "Native host config written to: $CONFIG_FILE"
+echo "  Chrome extension ID:  $CHROME_ID"
+if [[ -n "$FIREFOX_ID" ]]; then
+    echo "  Firefox extension ID: $FIREFOX_ID"
+fi
 echo ""
-echo "Configuration:"
-echo "  Extension ID: $EXTENSION_ID"
-echo "  Binary: $NATIVE_HOST_BINARY"
-echo ""
-echo "Next steps:"
-echo "1. Restart Chrome completely (quit and reopen)"
-echo "2. The extension should now be able to connect to the PwdVault desktop app"
+echo "Now restart the PwdVault desktop app to complete registration."
+echo "The app will write the browser manifests on next launch."

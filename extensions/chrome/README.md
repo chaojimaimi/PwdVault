@@ -15,7 +15,7 @@ Chrome/Firefox extension for PwdVault password manager.
 ### Prerequisites
 
 1. PwdVault desktop app must be installed and running
-2. The desktop app runs an HTTP server on port 17429 for extension communication
+2. The desktop app runs an HTTP server on `127.0.0.1:17429` for extension communication
 
 ### Chrome Installation
 
@@ -24,45 +24,38 @@ Chrome/Firefox extension for PwdVault password manager.
 3. Click **Load unpacked**
 4. Select the `dist` folder from this directory
 
-### Native Messaging Host Setup
-
-For the extension to communicate with the desktop app, you need to install the native messaging host:
-
-1. Get your extension ID from `chrome://extensions/` (it looks like: `abcdefghijklmnopqrstuvwxyz123456`)
-2. Run the install script:
-   ```bash
-   ./scripts/install-native-host.sh
-   ```
-3. Enter your extension ID when prompted
-4. Restart Chrome completely
-
 ### Firefox Installation
 
-Firefox support is planned for a future release.
+1. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`
+2. Click **Load Temporary Add-on**
+3. Select the `firefox/dist/manifest.json` file
 
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Chrome         │     │  Native Host     │     │  PwdVault       │
-│  Extension      │────▶│  (Rust binary)   │────▶│  Desktop App    │
-│  (JS/HTML/CSS)  │     │  (stdio ↔ HTTP)  │     │  (HTTP :17429)  │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
+┌─────────────────┐                         ┌─────────────────┐
+│  Chrome/Firefox │                         │  PwdVault       │
+│  Extension      │──── HTTP :17429 ───────▶│  Desktop App    │
+│  (JS/HTML/CSS)  │◀── HTTP :17429 ────────│  (tiny_http)    │
+└─────────────────┘   (loopback only)       └─────────────────┘
 ```
+
+The extension communicates directly with the desktop app over a local
+HTTP API bound to `127.0.0.1:17429`. Pairing is authenticated with a
+per-session Bearer token.
 
 ### Components
 
-- **`background.js`**: Service worker handling native messaging and extension events
+- **`background.js`**: Service worker handling HTTP API calls and extension events
 - **`content.js`**: Content script for form detection and auto-fill
 - **`popup/`**: Extension popup UI for password management
-- **`native-host/`**: Rust binary bridging Chrome's native messaging to HTTP
 
 ### Communication Flow
 
 1. User clicks extension icon or triggers auto-fill
 2. Extension sends message to background service worker
-3. Background worker connects to native host via Chrome's native messaging API
-4. Native host forwards request to desktop app via HTTP on port 17429
+3. Background worker pairs with the desktop app and obtains a Bearer token
+4. Background worker calls the desktop app HTTP API with the token
 5. Desktop app processes request and returns response
 6. Response flows back through the chain to the user
 
@@ -74,13 +67,6 @@ Firefox support is planned for a future release.
 ./scripts/build.sh
 ```
 
-### Build Native Host
-
-```bash
-cd ../native-host
-cargo build --release
-```
-
 ### Testing
 
 1. Start the PwdVault desktop app
@@ -90,8 +76,8 @@ cargo build --release
 
 ## Security
 
-- All communication happens locally on the machine
-- Native messaging only allows the specific extension ID
+- All communication happens locally on the machine (loopback only)
+- HTTP API is authenticated with a per-session Bearer token
 - Passwords are only decrypted on-demand
 - Master password is never transmitted
 
@@ -100,20 +86,13 @@ cargo build --release
 ### Extension shows "Not Connected"
 
 1. Ensure PwdVault desktop app is running
-2. Check that the HTTP server is running on port 17429
-3. Verify native messaging host is installed correctly
+2. Check that the HTTP server is running on `127.0.0.1:17429`
 
 ### Auto-fill not working
 
 1. Check if the page has a password input field
 2. Try refreshing the page
 3. Check browser console for errors
-
-### Native host errors
-
-1. Check Chrome's console at `chrome://extensions/` for error details
-2. Verify the native host binary path in the manifest is correct
-3. Ensure the binary has execute permissions
 
 ## File Structure
 
@@ -123,8 +102,7 @@ chrome/
 ├── icons/             # Extension icons
 ├── manifest.json      # Chrome extension manifest
 ├── scripts/
-│   ├── build.sh              # Build extension
-│   └── install-native-host.sh # Install native messaging host
+│   └── build.sh              # Build extension
 └── src/
     ├── background.js  # Service worker
     ├── content.js     # Content script
