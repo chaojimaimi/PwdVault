@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod crypto;
 pub mod database;
+pub mod native_host_setup;
 pub mod native_messaging;
 pub mod paths;
 
@@ -1232,6 +1233,35 @@ fn start_auto_lock_thread(state: Arc<AppState>) {
 
 const NATIVE_MESSAGING_PORT: u16 = 17429;
 
+/// Locate the bundled native messaging host binary and register it with the
+/// installed browsers. Runs on every app launch; failures are non-fatal.
+fn register_native_host(app: &tauri::App) {
+    let resource_dir = match app.path().resource_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("native_host_setup: cannot resolve resource dir: {}", e);
+            return;
+        }
+    };
+
+    // In a packaged bundle the binary lives at the resource dir root
+    // (placed there by bundle.resources in tauri.conf.json). During development
+    // (pnpm tauri dev) it is absent — registration is skipped silently.
+    let binary_name = if cfg!(windows) {
+        "pwdvault-native.exe"
+    } else {
+        "pwdvault-native"
+    };
+    let host_path = resource_dir.join(binary_name);
+
+    if !host_path.exists() {
+        // Expected in dev mode (no bundle). Stay quiet so dev logs aren't noisy.
+        return;
+    }
+
+    native_host_setup::register(&host_path);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let state = Arc::new(AppState::default());
@@ -1250,6 +1280,11 @@ pub fn run() {
                     eprintln!("Failed to start native messaging server: {}", e);
                 }
             });
+
+            // Register the native messaging host so browsers can spawn it.
+            // Idempotent: overwrites the manifest on every launch so the binary
+            // path stays correct after upgrades relocate the bundle.
+            register_native_host(app);
 
             // Build system tray menu
             let show_i = MenuItem::with_id(app, "show", "Show PwdVault", true, None::<&str>)?;

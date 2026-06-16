@@ -3019,6 +3019,7 @@ dependencies = [
  "typenum",
  "ureq",
  "uuid",
+ "winreg",
  "zeroize",
 ]
 
