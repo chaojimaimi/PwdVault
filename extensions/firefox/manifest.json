@@ -13,7 +13,8 @@
     "activeTab",
     "storage",
     "contextMenus",
-    "clipboardWrite"
+    "clipboardWrite",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "http://127.0.0.1:17429/*",

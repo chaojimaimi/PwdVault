@@ -165,12 +165,16 @@ fn extract_id(payload: &[u8]) -> Option<u32> {
 /// matching what the extension does over `fetch`. The server dispatches on the
 /// `command` field in the body, so the path is informational, but we keep it
 /// consistent with the extension for log readability.
+///
+/// Because Native Messaging has no concept of HTTP headers, the extension
+/// carries the Bearer token in a body field `auth_token`; we lift it into an
+/// `Authorization` header here so the server's existing header-based auth works
+/// unchanged.
 fn forward_to_server(payload: &[u8], origin: &str) -> Result<Vec<u8>, String> {
     let command = extract_command(payload).unwrap_or_else(|| "request".to_string());
     let path = format!("/api/{}", command);
+    let auth_header = extract_auth_header(payload);
 
-    // Resolve the command from the payload so the path mirrors the extension's
-    // requests (the server ignores the path, but consistency aids debugging).
     let mut stream = TcpStream::connect((SERVER_HOST, SERVER_PORT))
         .map_err(|e| format!("Cannot connect to desktop app ({}:{}): {}", SERVER_HOST, SERVER_PORT, e))?;
 
@@ -185,16 +189,29 @@ fn forward_to_server(payload: &[u8], origin: &str) -> Result<Vec<u8>, String> {
 
     // Build a minimal HTTP/1.1 POST. We hand-write headers because the
     // dependency footprint of this binary must stay tiny (serde only).
-    let request = format!(
-        "POST {} HTTP/1.1\r\n\
-         Host: {}:{}\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Origin: {}\r\n\
-         Connection: close\r\n\
-         \r\n",
-        path, SERVER_HOST, SERVER_PORT, body_len, origin
-    );
+    let request = match auth_header.as_deref() {
+        Some(token) => format!(
+            "POST {} HTTP/1.1\r\n\
+             Host: {}:{}\r\n\
+             Content-Type: application/json\r\n\
+             Content-Length: {}\r\n\
+             Origin: {}\r\n\
+             Authorization: Bearer {}\r\n\
+             Connection: close\r\n\
+             \r\n",
+            path, SERVER_HOST, SERVER_PORT, body_len, origin, token
+        ),
+        None => format!(
+            "POST {} HTTP/1.1\r\n\
+             Host: {}:{}\r\n\
+             Content-Type: application/json\r\n\
+             Content-Length: {}\r\n\
+             Origin: {}\r\n\
+             Connection: close\r\n\
+             \r\n",
+            path, SERVER_HOST, SERVER_PORT, body_len, origin
+        ),
+    };
 
     stream
         .write_all(request.as_bytes())
@@ -244,6 +261,14 @@ fn extract_command(payload: &[u8]) -> Option<String> {
     value.get("command")?.as_str().map(str::to_owned)
 }
 
+/// Extract the `auth_token` field the extension carries in the body (since NM
+/// has no HTTP headers). Returns `None` when absent (e.g. for the `pair`
+/// command). The caller lifts this into an `Authorization: Bearer` header.
+fn extract_auth_header(payload: &[u8]) -> Option<String> {
+    let value = serde_json::from_slice::<serde_json::Value>(payload).ok()?;
+    value.get("auth_token")?.as_str().map(str::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,6 +301,18 @@ mod tests {
     fn extract_command_missing_returns_none() {
         let payload = br#"{"id":1}"#;
         assert_eq!(extract_command(payload), None);
+    }
+
+    #[test]
+    fn extract_auth_header_reads_token() {
+        let payload = br#"{"id":1,"command":"get_entry","auth_token":"abc123"}"#;
+        assert_eq!(extract_auth_header(payload), Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn extract_auth_header_missing_returns_none() {
+        let payload = br#"{"id":1,"command":"pair"}"#;
+        assert_eq!(extract_auth_header(payload), None);
     }
 
     #[test]
