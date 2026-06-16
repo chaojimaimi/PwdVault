@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [1.0.3.0] - 2026-06-17
+
+### Added
+- **Native Messaging bridge architecture** — Extension now communicates via the official Chrome/Firefox Native Messaging API instead of direct HTTP fetch
+  - New host binary (`extensions/native-host/`) bridges stdio (NM protocol) to the desktop app's HTTP API on 127.0.0.1:17429
+  - Host binary bundled into the app via Tauri `resources`; auto-registered with browsers on app startup (`native_host_setup.rs`)
+  - Extension carries Bearer token in body field `auth_token` (NM has no HTTP headers); host lifts it into an `Authorization` header
+  - `install-native-host.sh` script writes extension IDs to a config file for browser manifest registration
+  - Cross-platform registration: file-based on macOS/Linux, registry-based on Windows (`winreg`)
+
+### Fixed
+- **pair rate-limit deadlock (pre-existing, v1.0.1)** — The pair handler re-locked `pair_last_reset` Mutex within its own guard scope, deadlocking on first call. Now reads/writes in separate scopes.
+- **Body reader over-read (pre-existing)** — `request.as_reader().take(MAX_BODY_SIZE)` blocked on short bodies. Now limited to declared Content-Length.
+- **Tauri resources executable bit** — Host binary lost +x when bundled. `register_native_host()` now auto-fixes permissions on every launch.
+
+### Changed
+- Removed dead legacy native-host code (stdio→TCP forwarder, stale manifest templates, Chrome-only install script)
+- Updated docs (CLAUDE.md, extensions/chrome/README.md, TEST_RESULTS.md) to reflect the NM architecture
+- Extension zip repackaged with flat structure (no top-level `dist/` directory)
+- Bump version to 1.0.3 across all files
+
+### Known Issues
+- Stage 3 (Unix socket / named pipe transport) deferred — TCP port 17429 still open (loopback only)
+- Extension IDs unstable in development (load unpacked); use `install-native-host.sh` to configure
+- 9-10 pre-existing unit test failures from global-state pollution (keystore/auth singletons)
+
 ## [1.0.2.0] - 2026-06-03
 
 ### Fixed

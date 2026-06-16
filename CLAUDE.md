@@ -239,7 +239,7 @@ PwdVault/
 |----------|--------|-----------|
 | Database | redb | Pure Rust, no external deps, ACID-compliant |
 | Key storage | Memory only | Max security, key gone on power off |
-| Extension comm | HTTP API (port 17429) | Cross-browser, no native host manifest |
+| Extension comm | Native Messaging → stdio host → HTTP API (port 17429) | Official browser API; host binary bridges stdio to the existing HTTP server |
 | Cloud sync | None (local-first) | Simpler, no server costs, max privacy |
 | System tray | Close-to-tray | Keeps HTTP server alive for extension |
 
@@ -522,3 +522,66 @@ All font choices, colors, spacing, and aesthetic direction are defined there.
 Two themes available: Light (default), Dark. Automatically follows OS preference.
 Do not deviate without explicit user approval.
 In QA mode, flag any code that doesn't match DESIGN.md.
+
+---
+
+## Native Messaging Architecture (v1.0.3+)
+
+### Current Architecture
+
+The browser extension communicates with the desktop app via the official
+**Native Messaging API**, not direct HTTP fetch:
+
+```
+extension (background.js)
+  │ chrome.runtime.sendNativeMessage('com.pwdvault.app', {...})
+  │   (Bearer token carried in body field 'auth_token' — NM has no headers)
+  ▼
+pwdvault-native (host binary, stdio, serde-only deps)
+  │ 4-byte length-prefixed JSON  →  HTTP POST 127.0.0.1:17429
+  │   (injects Origin header + lifts auth_token → Authorization: Bearer)
+  ▼
+desktop app (tiny_http server on 17429, unchanged business logic)
+  ▼
+encrypted vault (redb)
+```
+
+### Key Files
+
+| File | Role |
+|------|------|
+| `extensions/native-host/src/main.rs` | Host binary: stdio↔HTTP bridge |
+| `extensions/chrome/src/background.js` | Extension: sendNativeMessage transport |
+| `src-tauri/src/native_host_setup.rs` | Manifest generation + browser registration |
+| `src-tauri/src/lib.rs` `register_native_host()` | Auto-register on startup (chmod +x, read IDs from config) |
+| `extensions/chrome/scripts/install-native-host.sh` | Write extension IDs to config file |
+
+### Setup for Development
+
+The extension ID is unstable when loading unpacked. To connect:
+
+```bash
+# 1. Load extension in Chrome, copy the ID from chrome://extensions/
+# 2. Write the ID to the config file:
+bash extensions/chrome/scripts/install-native-host.sh <chrome-extension-id> [firefox-id]
+# 3. Restart the desktop app — it reads the config and writes browser manifests
+```
+
+Config file: `~/Library/Application Support/com.pwdvault.app/native-host.json`
+Format: `{"chrome": "<id>", "firefox": "<id>"}`
+
+### Known Issues / Deferred
+
+- **Stage 3 (socket transport) skipped**: The HTTP TCP port 17429 is still
+  open (loopback only). Converting to Unix domain socket / Windows named pipe
+  is deferred as a non-blocking optimization. NM's `allowed_origins` already
+  provides the source-locking security benefit.
+- **Extension ID stability**: `allowed_origins` uses the dev extension ID from
+  config. After store publication with fixed IDs, update `native_host_setup.rs`.
+- **Pre-existing test failures**: 9-10 unit tests fail due to global-state
+  pollution (keystore/auth token singletons). These are unrelated to the NM
+  change and existed before. Run tests with `--test-threads=1` to avoid.
+- **macOS code signing**: The host binary is unsigned in local builds. CI
+  release builds may need codesign/notarize steps for distribution.
+- **Tauri resources executable bit**: `bundle.resources` does not preserve +x;
+  `register_native_host()` auto-fixes this on every launch.
