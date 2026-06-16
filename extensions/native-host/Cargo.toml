@@ -1,9 +1,0 @@
-[package]
-name = "pwdvault-native"
-version = "1.0.2"
-edition = "2021"
-description = "Native messaging host for PwdVault browser extension"
-
-[dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"

@@ -128,7 +128,4 @@ Response: {"id":13,"success":true,"data":true}
 2. Enable "Developer mode"
 3. Click "Load unpacked"
 4. Select: `/Users/andylee/Documents/ClaudeCode/projects/PwdVault/extensions/chrome/dist`
-5. Copy the extension ID
-6. Run: `/Users/andylee/Documents/ClaudeCode/projects/PwdVault/extensions/chrome/scripts/install-native-host.sh`
-7. Enter the extension ID when prompted
-8. Restart Chrome
+5. Ensure the PwdVault desktop app is running (HTTP API on `127.0.0.1:17429`)

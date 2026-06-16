@@ -62,11 +62,6 @@ echo "Firefox extension built successfully!"
 echo "Dist: $FIREFOX_DIST"
 echo ""
 
-# Build native host (for development)
-echo "Building native messaging host..."
-cd "$EXTENSION_DIR/native-host/../../../extensions/native-host"
-~/.cargo/bin/cargo build --release 2>/dev/null || true
-
 echo ""
 echo "All extensions built!"
 echo ""
@@ -75,8 +70,3 @@ echo "1. Open chrome://extensions/ → Enable Developer mode → Load unpacked �
 echo ""
 echo "Firefox install:"
 echo "1. Open about:debugging#/runtime/this-firefox → Load Temporary Add-on → $FIREFOX_DIST/manifest.json"
-echo ""
-echo "Native messaging host:"
-echo "1. Get your extension ID"
-echo "2. Update EXTENSION_ID in native-host manifest"
-echo "3. Run: ./install-native-host.sh"

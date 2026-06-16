@@ -4,7 +4,7 @@
 # Usage: ./scripts/bump-version.sh <X.Y.Z> [--changelog]
 #
 # Updates VERSION, Cargo.toml, tauri.conf.json, package.json,
-# Chrome manifest.json, and native-host Cargo.toml.
+# and Chrome/Firefox manifest.json.
 # With --changelog, prepends a new section header to CHANGELOG.md.
 
 set -euo pipefail
@@ -62,10 +62,6 @@ if [[ -f extensions/firefox/manifest.json ]]; then
     echo "  extensions/firefox/manifest.json → $V3"
 fi
 
-# 7. extensions/native-host/Cargo.toml (line 3)
-sed -i.bak "3s/^version = \".*\"/version = \"${V3}\"/" extensions/native-host/Cargo.toml && rm -f extensions/native-host/Cargo.toml.bak
-echo "  extensions/native-host/Cargo.toml → $V3"
-
 # --- Optional: CHANGELOG.md ---
 if $CHANGELOG; then
     DATE=$(date +%Y-%m-%d)
@@ -90,7 +86,6 @@ grep -q "\"version\": \"${V3}\"" extensions/chrome/manifest.json || { echo "  FA
 if [[ -f extensions/firefox/manifest.json ]]; then
     grep -q "\"version\": \"${V3}\"" extensions/firefox/manifest.json || { echo "  FAIL: firefox/manifest.json"; ERRORS=$((ERRORS+1)); }
 fi
-grep -q "version = \"${V3}\"" extensions/native-host/Cargo.toml || { echo "  FAIL: native-host/Cargo.toml"; ERRORS=$((ERRORS+1)); }
 
 if [[ $ERRORS -eq 0 ]]; then
     echo "  All 6 files updated to $V3"

@@ -25,7 +25,6 @@ dist-ssr
 
 # Rust / Tauri
 src-tauri/target/
-extensions/native-host/target/
 
 # Database files (user data)
 *.db
