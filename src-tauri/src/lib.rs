@@ -1262,6 +1262,21 @@ fn register_native_host(app: &tauri::App) {
         return;
     }
 
+    // Tauri's bundle.resources does not preserve the executable bit, so the
+    // host binary may lack +x after packaging. Fix it on every launch (cheap
+    // and idempotent). No-op on Windows where the extension governs execution.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&host_path) {
+            let mut perms = meta.permissions();
+            if perms.mode() & 0o111 == 0 {
+                perms.set_mode(0o755);
+                let _ = std::fs::set_permissions(&host_path, perms);
+            }
+        }
+    }
+
     // Read extension IDs from a config file next to the database. This file is
     // created by the registration script (install-native-host.sh) or manually.
     // Without valid IDs we cannot write a usable manifest.

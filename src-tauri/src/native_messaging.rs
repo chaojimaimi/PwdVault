@@ -162,7 +162,9 @@ fn handle_request(mut request: Request, state: Arc<AppState>) {
     }
 
     let mut body = String::new();
-    let mut reader = request.as_reader().take(MAX_BODY_SIZE as u64);
+    // Limit the reader to the declared Content-Length so read_to_string
+    // returns promptly instead of blocking for MAX_BODY_SIZE bytes.
+    let mut reader = request.as_reader().take(content_length.min(MAX_BODY_SIZE) as u64);
     if let Err(_) = reader.read_to_string(&mut body) {
         let response = create_error_response(0, "Request failed".to_string(), origin.as_deref());
         let _ = request.respond(response);
@@ -254,17 +256,25 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
         "pair" => {
             // Check rate limit for pair endpoint (max 10 requests per minute)
             {
-                let mut pair_count = state.pair_request_count.lock().expect("pair count lock poisoned");
                 let now = std::time::Instant::now();
-
-                // Reset count if more than a minute has passed
-                if let Some(last_reset) = state.pair_last_reset.lock().expect("pair reset lock poisoned").as_ref() {
-                    if now.duration_since(*last_reset).as_secs() > 60 {
-                        *pair_count = 0;
-                        *state.pair_last_reset.lock().expect("pair reset lock poisoned") = Some(now);
+                // Determine whether to reset the counter. We read
+                // pair_last_reset in its own short-lived scope so its guard is
+                // dropped before we write it back — re-locking a Mutex while
+                // still holding it would deadlock.
+                let needs_reset = {
+                    let last_reset = state.pair_last_reset.lock().expect("pair reset lock poisoned");
+                    match last_reset.as_ref() {
+                        Some(t) => now.duration_since(*t).as_secs() > 60,
+                        None => true,
                     }
-                } else {
+                };
+                if needs_reset {
                     *state.pair_last_reset.lock().expect("pair reset lock poisoned") = Some(now);
+                }
+
+                let mut pair_count = state.pair_request_count.lock().expect("pair count lock poisoned");
+                if needs_reset {
+                    *pair_count = 0;
                 }
 
                 // Rate limit: max 10 pair requests per minute
