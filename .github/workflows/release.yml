@@ -48,6 +48,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build native messaging host (arm64 + x86_64 universal)
+        run: |
+          cargo build --release --manifest-path extensions/native-host/Cargo.toml \
+            --target aarch64-apple-darwin --target x86_64-apple-darwin
+          mkdir -p src-tauri/binaries
+          # Merge into a universal binary so the same bundle runs on both archs
+          lipo -create \
+            extensions/native-host/target/aarch64-apple-darwin/release/pwdvault-native \
+            extensions/native-host/target/x86_64-apple-darwin/release/pwdvault-native \
+            -output src-tauri/binaries/pwdvault-native
+          chmod +x src-tauri/binaries/pwdvault-native
+
       - name: Build macOS app (DMG + app bundle)
         run: pnpm tauri build --bundles dmg,app
         env:
@@ -94,6 +106,12 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install
+
+      - name: Build native messaging host (x86_64)
+        run: |
+          cargo build --release --manifest-path extensions/native-host/Cargo.toml --target x86_64-pc-windows-msvc
+          mkdir -p src-tauri/binaries
+          copy extensions\native-host\target\x86_64-pc-windows-msvc\release\pwdvault-native.exe src-tauri\binaries\pwdvault-native.exe
 
       - name: Build Windows installer
         run: pnpm tauri build --bundles nsis
