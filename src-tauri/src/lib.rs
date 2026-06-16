@@ -1234,7 +1234,9 @@ fn start_auto_lock_thread(state: Arc<AppState>) {
 const NATIVE_MESSAGING_PORT: u16 = 17429;
 
 /// Locate the bundled native messaging host binary and register it with the
-/// installed browsers. Runs on every app launch; failures are non-fatal.
+/// installed browsers. Reads extension IDs from a config file next to the
+/// database; if absent (e.g. dev mode or IDs not yet configured), registration
+/// is skipped so we never write a manifest with invalid placeholders.
 fn register_native_host(app: &tauri::App) {
     let resource_dir = match app.path().resource_dir() {
         Ok(d) => d,
@@ -1260,7 +1262,37 @@ fn register_native_host(app: &tauri::App) {
         return;
     }
 
-    native_host_setup::register(&host_path);
+    // Read extension IDs from a config file next to the database. This file is
+    // created by the registration script (install-native-host.sh) or manually.
+    // Without valid IDs we cannot write a usable manifest.
+    let ids = match load_extension_ids() {
+        Some(ids) if !ids.chrome.is_empty() => ids,
+        _ => {
+            // IDs not configured yet — skip silently. Use the install script.
+            return;
+        }
+    };
+
+    native_host_setup::register(&host_path, &ids);
+}
+
+/// Load extension IDs from a JSON config file placed next to the vault
+/// database (e.g. ~/Library/Application Support/com.pwdvault.app/native-host.json).
+/// Format: {"chrome": "<id>", "firefox": "<id>"}
+fn load_extension_ids() -> Option<native_host_setup::ExtensionIds> {
+    let config_path = paths::get_db_path()
+        .parent()?
+        .join("native-host.json");
+    let content = std::fs::read_to_string(&config_path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    Some(native_host_setup::ExtensionIds {
+        chrome: value.get("chrome")?.as_str()?.to_string(),
+        firefox: value
+            .get("firefox")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+    })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -16,19 +16,42 @@ pub const HOST_NAME: &str = "com.pwdvault.app";
 ///
 /// `host_binary_path` is the absolute path to the bundled `pwdvault-native`
 /// binary inside the app bundle's resources directory.
+/// `extension_ids` maps each browser to its extension ID (the 32-char string
+/// shown in chrome://extensions). In development the IDs are unstable, so a
+/// separate registration script is provided for manual re-registration.
 ///
 /// This is safe to call on every startup: each target is overwritten with the
 /// current path, so reinstalls that move the bundle are handled automatically.
-pub fn register(host_binary_path: &Path) {
+pub fn register(host_binary_path: &Path, extension_ids: &ExtensionIds) {
     // Best-effort: registration failures are logged but never fatal. The app
     // must still start even if a browser isn't installed or the user lacks
     // write permission to the NM directory.
     for browser in [Browser::Chrome, Browser::Firefox] {
-        if let Err(e) = register_browser(browser, host_binary_path) {
+        if let Err(e) = register_browser(browser, host_binary_path, extension_ids) {
             eprintln!(
                 "native_host_setup: failed to register {} for {:?}: {}",
                 HOST_NAME, browser, e
             );
+        }
+    }
+}
+
+/// Extension IDs for each browser. In development these are the 32-char IDs
+/// shown in chrome://extensions / about:addons. After store publication the
+/// IDs become stable.
+#[derive(Debug, Clone)]
+pub struct ExtensionIds {
+    pub chrome: String,
+    pub firefox: String,
+}
+
+impl Default for ExtensionIds {
+    fn default() -> Self {
+        // Placeholders — real IDs must be supplied. The auto-registration in
+        // lib.rs uses these only when the bundled config file is absent.
+        ExtensionIds {
+            chrome: String::new(),
+            firefox: String::new(),
         }
     }
 }
@@ -39,20 +62,13 @@ enum Browser {
     Firefox,
 }
 
-/// Build the manifest JSON for a given browser. The `allowed_origins` field
-/// is broad during development (extensions are not yet on the stores and have
-/// unstable IDs). Once the extension IDs are fixed post-publication, this can
-/// be tightened to the exact IDs.
-fn build_manifest(host_binary_path: &Path, browser: Browser) -> String {
+/// Build the manifest JSON for a given browser.
+fn build_manifest(host_binary_path: &Path, browser: Browser, ids: &ExtensionIds) -> String {
     let path_str = host_binary_path.to_string_lossy().replace('\\', "\\\\");
 
     let origin = match browser {
-        // Chrome matches the extension ID in allowed_origins. The ID below is a
-        // placeholder; once the extension is published with a stable ID, replace
-        // it. During development the extension is loaded unpacked and its ID is
-        // derived from the key/public key, so the user must update this.
-        Browser::Chrome => "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
-        Browser::Firefox => "moz-extension://abcdefghijklmnopabcdefghijklmnop/",
+        Browser::Chrome => format!("chrome-extension://{}/", ids.chrome),
+        Browser::Firefox => format!("moz-extension://{}/", ids.firefox),
     };
 
     format!(
@@ -70,8 +86,8 @@ fn build_manifest(host_binary_path: &Path, browser: Browser) -> String {
     )
 }
 
-fn register_browser(browser: Browser, host_binary_path: &Path) -> io::Result<()> {
-    let manifest = build_manifest(host_binary_path, browser);
+fn register_browser(browser: Browser, host_binary_path: &Path, ids: &ExtensionIds) -> io::Result<()> {
+    let manifest = build_manifest(host_binary_path, browser, ids);
 
     #[cfg(target_os = "macos")]
     {
@@ -170,10 +186,17 @@ fn register_browser(_browser: Browser, _host_binary_path: &Path) -> io::Result<(
 mod tests {
     use super::*;
 
+    fn test_ids() -> ExtensionIds {
+        ExtensionIds {
+            chrome: "abcdefghijklmnopabcdefghijklmnop".to_string(),
+            firefox: "zyxwvutsrqponmlkjihgfedcba".to_string(),
+        }
+    }
+
     #[test]
     fn manifest_contains_required_fields() {
         let path = Path::new("/tmp/pwdvault-native");
-        let manifest = build_manifest(path, Browser::Chrome);
+        let manifest = build_manifest(path, Browser::Chrome, &test_ids());
 
         assert!(manifest.contains("\"name\": \"com.pwdvault.app\""));
         assert!(manifest.contains("\"type\": \"stdio\""));
@@ -184,7 +207,7 @@ mod tests {
     #[test]
     fn manifest_escapes_backslashes_for_windows() {
         let path = Path::new(r"C:\Program Files\PwdVault\pwdvault-native.exe");
-        let manifest = build_manifest(path, Browser::Chrome);
+        let manifest = build_manifest(path, Browser::Chrome, &test_ids());
 
         // Backslashes must be escaped in JSON string values.
         assert!(manifest.contains(r"C:\\Program Files\\PwdVault\\pwdvault-native.exe"));
@@ -193,16 +216,16 @@ mod tests {
     #[test]
     fn manifest_has_chrome_origin_for_chrome() {
         let path = Path::new("/tmp/pwdvault-native");
-        let manifest = build_manifest(path, Browser::Chrome);
-        assert!(manifest.contains("chrome-extension://"));
+        let manifest = build_manifest(path, Browser::Chrome, &test_ids());
+        assert!(manifest.contains("chrome-extension://abcdefghijklmnopabcdefghijklmnop/"));
         assert!(!manifest.contains("moz-extension://"));
     }
 
     #[test]
     fn manifest_has_firefox_origin_for_firefox() {
         let path = Path::new("/tmp/pwdvault-native");
-        let manifest = build_manifest(path, Browser::Firefox);
-        assert!(manifest.contains("moz-extension://"));
+        let manifest = build_manifest(path, Browser::Firefox, &test_ids());
+        assert!(manifest.contains("moz-extension://zyxwvutsrqponmlkjihgfedcba/"));
         assert!(!manifest.contains("chrome-extension://"));
     }
 }
