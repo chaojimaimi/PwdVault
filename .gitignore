@@ -38,6 +38,9 @@ vault.db
 /releases/*.dmg
 /releases/*.exe
 /releases/*.db.bak
+/releases/*.app
+/releases/PwdVault.app
+/releases/pwdvault-native*
 
 # Environment variables
 .env
