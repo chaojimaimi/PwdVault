@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [1.0.5.0] - 2026-07-04
+
+### Security
+- **B1 元数据加密**: PasswordEntry 与 Group 整体使用 AES-256-GCM 加密（entry_codec / group_codec），title/username/url/tags 等元数据不再以明文存储于 redb
+- **B2 全库完整性 MAC**: HMAC-SHA256 全库摘要，unlock 时校验，写操作后刷新，检测任何篡改
+- **B3 Zeroizing 替换 unsafe**: 使用 `Zeroizing<String>` 替代 `as_bytes_mut()`，敏感数据出作用域自动清零；移除所有 unsafe 块
+- **B4 缩短明文密码生命周期**: `get_entry` 拆分为 `get_entry_meta`（无密码）与 `get_entry_secret`（按需解密），前端 selectedEntry 仅存 meta
+- **B5 CSP 去 unsafe-inline**: `style-src 'self'`，动态样式改用 CSS 变量
+- **B6 错误信息脱敏**: `VaultError::public_message()` 统一脱敏，HTTP/扩展路径不泄露内部路径
+
+### Architecture
+- **A1 Service 层抽取**: 新增 `src-tauri/src/service/`，Tauri commands 与 HTTP handler 共享业务逻辑
+- **A2 HTTP 加固 + pair 配对确认**: 6 位配对码、60s 过期、一次性消费，防止 token 枚举
+- **A3 keystore 移入 AppState**: 移除全局 static，测试可并行运行（`--test-threads=4` 通过）
+- **A4 事件驱动自锁**: deadline-based sleep 替代 30s 轮询，消除锁延迟
+
+### Code Quality
+- **C1/C2 tracing 结构化日志**: 引入 tracing + tracing-appender，日志按日滚动至 `<app_data>/logs/pwdvault.log`
+- **C3/C4 常量集中**: 新建 `constants.rs`，移除各模块硬编码常量
+- **D1 拆分 Context**: AuthContext / VaultContext / SettingsContext 三域分离，AppContext 保持向后兼容
+- **D2 数据缓存层**: `useEntries` hook 提供 O(1) 查找 + 乐观更新
+- **D3 文档同步**: CLAUDE.md 更新测试数量、移除 test-threads=1 约束
+
+## [1.0.4.0] - 2026-07-04
+
 ## [1.0.3.0] - 2026-06-17
 
 ### Added

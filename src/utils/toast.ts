@@ -74,3 +74,78 @@ export function showToastWithType(
     }, 200);
   }, duration);
 }
+
+/**
+ * Show a pairing-code toast with a large code, countdown progress bar,
+ * and an OK button to dismiss early. Auto-dismisses after `duration`.
+ *
+ * Styling follows the V4 "neon" design adapted to both light and dark app
+ * themes via CSS variables (see `.pairing-toast` in components.css). The
+ * toast automatically switches colors when `<html data-theme>` changes.
+ *
+ * @param code - The 6-digit pairing code to display
+ * @param duration - Duration in milliseconds (default: 30000, kept in sync
+ *                   with the backend SESSION_TTL)
+ */
+export function showPairingCodeToast(
+  code: string,
+  duration: number = 30000
+): void {
+  const container = ensureContainer();
+
+  // Dismiss any existing pairing toast to avoid stacking.
+  container.querySelectorAll('.pairing-toast').forEach((el) => el.remove());
+
+  const toast = document.createElement('div');
+  toast.className = 'toast pairing-toast';
+
+  // Format code as "XXX XXX" for readability.
+  const formatted = code.length === 6
+    ? `${code.slice(0, 3)} ${code.slice(3)}`
+    : code;
+
+  toast.innerHTML = `
+    <div class="pairing-toast-head">
+      <div class="pairing-toast-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+      </div>
+      <div class="pairing-toast-title">浏览器扩展配对</div>
+      <button class="pairing-toast-close" type="button" aria-label="关闭">×</button>
+    </div>
+    <div class="pairing-toast-body">
+      <div class="pairing-toast-label">请在扩展弹窗中输入此配对码</div>
+      <div class="pairing-toast-code">${formatted}</div>
+    </div>
+    <div class="pairing-toast-progress">
+      <div class="pairing-toast-progress-bar"></div>
+    </div>
+  `;
+
+  container.appendChild(toast);
+
+  // Animate the progress bar from 100% → 0% over `duration`.
+  const bar = toast.querySelector<HTMLDivElement>('.pairing-toast-progress-bar');
+  if (bar) {
+    // Force a reflow so the transition runs from the initial 100% width.
+    void bar.offsetWidth;
+    bar.style.transition = `width ${duration}ms linear`;
+    bar.style.width = '0%';
+  }
+
+  // OK / close button dismisses immediately.
+  const closeBtn = toast.querySelector<HTMLButtonElement>('.pairing-toast-close');
+  const dismiss = () => {
+    if (!toast.parentNode) return;
+    toast.style.animation = 'fadeOut 0.2s ease-out forwards';
+    setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 200);
+  };
+  if (closeBtn) closeBtn.onclick = dismiss;
+
+  // Auto-dismiss after duration.
+  setTimeout(dismiss, duration);
+}

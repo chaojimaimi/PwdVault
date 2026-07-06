@@ -28,7 +28,7 @@ pub fn register(host_binary_path: &Path, extension_ids: &ExtensionIds) {
     // write permission to the NM directory.
     for browser in [Browser::Chrome, Browser::Firefox] {
         if let Err(e) = register_browser(browser, host_binary_path, extension_ids) {
-            eprintln!(
+            tracing::error!(
                 "native_host_setup: failed to register {} for {:?}: {}",
                 HOST_NAME, browser, e
             );

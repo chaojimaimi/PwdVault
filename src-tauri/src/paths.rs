@@ -43,3 +43,16 @@ pub fn ensure_db_dir() -> Result<PathBuf, std::io::Error> {
     }
     Ok(db_path)
 }
+
+/// Get the directory used for persistent log files.
+pub fn log_dir() -> PathBuf {
+    let base = get_db_path()
+        .parent()
+        .map(|p| p.join("logs"))
+        .unwrap_or_else(|| match std::env::current_dir() {
+            Ok(p) => p,
+            Err(_) => PathBuf::from("."),
+        });
+    let _ = std::fs::create_dir_all(&base);
+    base
+}

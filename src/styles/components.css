@@ -143,6 +143,18 @@
   color: var(--color-text-muted);
 }
 
+/* --- Group selector --- */
+
+.group-selector-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.group-selector-error {
+  margin-top: 0.25rem;
+}
+
 .input-field {
   width: 100%;
   padding: 0.5rem 0.75rem;
@@ -495,6 +507,230 @@
   }
 }
 
+/* --- Pairing Toast (V4 双主题霓虹风 · 浏览器扩展配对码) ---
+   配色全部走 CSS 变量，自动跟随 <html data-theme="light|dark">。
+   结构：卡片轮廓 + 氛围光晕 + 主色图标方块 + 发光配对码 + 渐变进度条。
+   浅色用柔和发光（避免过曝），深色用强发光（霓虹感）。 */
+
+.pairing-toast {
+  /* 覆盖默认 toast 的内边距与背景 */
+  padding: 0 !important;
+  min-width: 320px;
+  max-width: 90vw;
+  border-radius: 16px;
+  overflow: hidden;
+  pointer-events: auto;
+  font-size: var(--text-body);
+  position: relative;
+  /* 颜色由主题分支控制 */
+}
+
+/* 氛围光晕：用 ::before 蒙一层径向渐变 */
+.pairing-toast::before {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.pairing-toast-head,
+.pairing-toast-body,
+.pairing-toast-progress {
+  position: relative;
+  z-index: 1;
+}
+
+.pairing-toast-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px 4px;
+}
+
+.pairing-toast-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pairing-toast-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.pairing-toast-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.pairing-toast-close {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.pairing-toast-body {
+  padding: 8px 18px 18px;
+  text-align: center;
+}
+
+.pairing-toast-label {
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.pairing-toast-code {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-indent: 0.18em;
+  line-height: 1.05;
+  margin: 2px 0 14px;
+  user-select: all;
+}
+
+.pairing-toast-progress {
+  height: 3px;
+  overflow: hidden;
+}
+
+.pairing-toast-progress-bar {
+  width: 100%;
+  height: 100%;
+}
+
+/* === 浅色主题 V4-Light === */
+:root[data-theme="light"] .pairing-toast,
+:root:not([data-theme]) .pairing-toast {
+  background: #FFFFFF;
+  color: #0F172A;
+  box-shadow: 0 12px 32px rgba(30, 58, 95, 0.12), 0 0 0 1px rgba(30, 58, 95, 0.12);
+}
+
+:root[data-theme="light"] .pairing-toast::before,
+:root:not([data-theme]) .pairing-toast::before {
+  background:
+    radial-gradient(circle at 30% 20%, rgba(30, 58, 95, 0.06), transparent 50%),
+    radial-gradient(circle at 70% 80%, rgba(13, 148, 136, 0.05), transparent 50%);
+}
+
+:root[data-theme="light"] .pairing-toast-icon,
+:root:not([data-theme]) .pairing-toast-icon {
+  background: rgba(30, 58, 95, 0.10);
+  color: #1E3A5F;
+}
+
+:root[data-theme="light"] .pairing-toast-title,
+:root:not([data-theme]) .pairing-toast-title {
+  color: #0F172A;
+}
+
+:root[data-theme="light"] .pairing-toast-close,
+:root:not([data-theme]) .pairing-toast-close {
+  color: #94A3B8;
+}
+
+:root[data-theme="light"] .pairing-toast-close:hover,
+:root:not([data-theme]) .pairing-toast-close:hover,
+:root[data-theme="light"] .pairing-toast-close:focus-visible,
+:root:not([data-theme]) .pairing-toast-close:focus-visible {
+  background: rgba(30, 58, 95, 0.08);
+  color: #0F172A;
+  outline: none;
+}
+
+:root[data-theme="light"] .pairing-toast-label,
+:root:not([data-theme]) .pairing-toast-label {
+  color: #475569;
+}
+
+:root[data-theme="light"] .pairing-toast-code,
+:root:not([data-theme]) .pairing-toast-code {
+  color: #1E3A5F;
+  /* 浅底发光需更柔和，避免过曝 */
+  text-shadow: 0 0 12px rgba(30, 58, 95, 0.25), 0 0 24px rgba(30, 58, 95, 0.12);
+}
+
+:root[data-theme="light"] .pairing-toast-progress,
+:root:not([data-theme]) .pairing-toast-progress {
+  background: rgba(30, 58, 95, 0.08);
+}
+
+:root[data-theme="light"] .pairing-toast-progress-bar,
+:root:not([data-theme]) .pairing-toast-progress-bar {
+  background: linear-gradient(90deg, #1E3A5F, #0D9488);
+}
+
+/* === 深色主题 V4-Dark === */
+:root[data-theme="dark"] .pairing-toast {
+  background: #0A0A0C;
+  color: #EDEDEF;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(20, 184, 166, 0.25);
+}
+
+:root[data-theme="dark"] .pairing-toast::before {
+  background:
+    radial-gradient(circle at 30% 20%, rgba(20, 184, 166, 0.15), transparent 50%),
+    radial-gradient(circle at 70% 80%, rgba(94, 234, 212, 0.10), transparent 50%);
+}
+
+:root[data-theme="dark"] .pairing-toast-icon {
+  background: rgba(20, 184, 166, 0.15);
+  color: #14B8A6;
+}
+
+:root[data-theme="dark"] .pairing-toast-title {
+  color: #EDEDEF;
+}
+
+:root[data-theme="dark"] .pairing-toast-close {
+  color: #5C6370;
+}
+
+:root[data-theme="dark"] .pairing-toast-close:hover,
+:root[data-theme="dark"] .pairing-toast-close:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  color: #EDEDEF;
+  outline: none;
+}
+
+:root[data-theme="dark"] .pairing-toast-label {
+  color: #8A8F98;
+}
+
+:root[data-theme="dark"] .pairing-toast-code {
+  color: #14B8A6;
+  /* 深底发光可更强，霓虹感显著 */
+  text-shadow: 0 0 20px rgba(20, 184, 166, 0.5), 0 0 40px rgba(20, 184, 166, 0.3);
+}
+
+:root[data-theme="dark"] .pairing-toast-progress {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+:root[data-theme="dark"] .pairing-toast-progress-bar {
+  background: linear-gradient(90deg, #14B8A6, #5EEAD4);
+}
+
 /* --- Strength meter --- */
 
 .strength-meter {
@@ -510,6 +746,8 @@
   height: 4px;
   border-radius: 2px;
   background: var(--color-border);
+  width: var(--strength-fill, 0%);
+  background-color: var(--strength-color, var(--color-border));
   overflow: hidden;
   transition: width 0.3s ease, background-color 0.3s ease;
 }
@@ -520,6 +758,7 @@
   white-space: nowrap;
   min-width: 5.5rem;
   text-align: right;
+  color: var(--strength-color, var(--color-text-secondary));
 }
 
 /* --- Empty state --- */
@@ -614,4 +853,9 @@
   flex-wrap: wrap;
   gap: var(--space-sm);
   margin-bottom: var(--space-sm);
+}
+
+.tag-label {
+  display: block;
+  margin-top: var(--space-md);
 }

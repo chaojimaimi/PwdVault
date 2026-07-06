@@ -9,7 +9,7 @@ import { EyeIcon, EyeOffIcon, CopyIcon, GenerateIcon } from '../components/Icons
 import ConfirmationModal, { ChangeItem } from '../components/ConfirmationModal';
 import DeleteConfirmModal from '../components/DeleteConfirmModal';
 import GroupSelector from '../components/GroupSelector';
-import type { CreateEntryRequest } from '../types';
+import type { CreateEntryRequest, EntrySummary } from '../types';
 
 export function EntryScreen() {
   const { state, actions } = useApp();
@@ -25,6 +25,8 @@ export function EntryScreen() {
     tags: [],
     group_id: null,
   });
+  const [originalSecret, setOriginalSecret] = useState<{ password: string; notes: string } | null>(null);
+  const [secretLoaded, setSecretLoaded] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,17 +41,71 @@ export function EntryScreen() {
 
   useEffect(() => {
     if (state.selectedEntry) {
+      // Fill non-sensitive metadata immediately; secrets are fetched on demand
+      // and kept only in this component's state while the user is on this screen.
       setFormData({
         title: state.selectedEntry.title,
         url: state.selectedEntry.url || '',
         username: state.selectedEntry.username,
-        password: state.selectedEntry.password,
-        notes: state.selectedEntry.notes || '',
+        password: '',
+        notes: '',
         tags: state.selectedEntry.tags,
         group_id: state.selectedEntry.group_id || null,
       });
+      setOriginalSecret(null);
+      setSecretLoaded(false);
+
+      // Editing an existing entry: load secrets once so the form can be saved
+      // with the existing password/notes if unchanged.
+      setIsLoading(true);
+      actions.getEntrySecret(state.selectedEntry.id)
+        .then((secret) => {
+          if (secret) {
+            setFormData((prev) => ({
+              ...prev,
+              password: secret.password,
+              notes: secret.notes || '',
+            }));
+            setOriginalSecret({
+              password: secret.password,
+              notes: secret.notes || '',
+            });
+          } else {
+            setError('Failed to load entry secrets (empty response)');
+          }
+          setSecretLoaded(true);
+        })
+        .catch((err) => {
+          const msg = typeof err === 'string' ? err
+            : err?.message ? err.message
+            : (() => { try { return JSON.stringify(err); } catch { return String(err); } })();
+          setError(`Failed to load entry secrets: ${msg}`);
+          setSecretLoaded(true);
+        })
+        .finally(() => setIsLoading(false));
+    } else {
+      setFormData({
+        title: '',
+        url: '',
+        username: '',
+        password: '',
+        notes: '',
+        tags: [],
+        group_id: null,
+      });
+      setOriginalSecret(null);
+      setSecretLoaded(false);
     }
   }, [state.selectedEntry]);
+
+  // Clear plaintext secrets from component state as soon as the user leaves
+  // the screen, minimizing the time they reside in memory.
+  useEffect(() => {
+    return () => {
+      setFormData((prev) => ({ ...prev, password: '', notes: '' }));
+      setOriginalSecret(null);
+    };
+  }, []);
 
   const handleBack = () => {
     actions.selectEntry(null);
@@ -78,7 +134,7 @@ export function EntryScreen() {
 
     if (!state.selectedEntry) return;
 
-    const changes = detectChanges(state.selectedEntry, formData);
+    const changes = detectChanges(state.selectedEntry, originalSecret, formData);
     if (changes.length === 0) {
       handleBack();
       return;
@@ -108,21 +164,37 @@ export function EntryScreen() {
     }
   };
 
-  function detectChanges(original: { title: string; url?: string; username: string; password: string; notes?: string; tags: string[]; group_id?: string | null }, current: CreateEntryRequest): ChangeItem[] {
+  function detectChanges(
+    originalMeta: EntrySummary,
+    originalSecret: { password: string; notes: string } | null,
+    current: CreateEntryRequest,
+  ): ChangeItem[] {
     const changes: ChangeItem[] = [];
-    if (original.title !== current.title) changes.push({ fieldId: 'title', label: 'Title', oldValue: original.title, newValue: current.title, valueType: 'text' });
-    if ((original.url || '') !== (current.url || '')) changes.push({ fieldId: 'url', label: 'URL', oldValue: original.url || '', newValue: current.url || '', valueType: 'text' });
-    if (original.username !== current.username) changes.push({ fieldId: 'username', label: 'Username', oldValue: original.username, newValue: current.username, valueType: 'text' });
-    if (original.password !== current.password) changes.push({ fieldId: 'password', label: 'Password', valueType: 'password' });
-    if ((original.notes || '') !== (current.notes || '')) changes.push({ fieldId: 'notes', label: 'Notes', oldValue: (original.notes || '').slice(0, 200), newValue: (current.notes || '').slice(0, 200), valueType: 'notes' });
-    const origTags = original.tags || [];
+    if (originalMeta.title !== current.title) {
+      changes.push({ fieldId: 'title', label: 'Title', oldValue: originalMeta.title, newValue: current.title, valueType: 'text' });
+    }
+    if ((originalMeta.url || '') !== (current.url || '')) {
+      changes.push({ fieldId: 'url', label: 'URL', oldValue: originalMeta.url || '', newValue: current.url || '', valueType: 'text' });
+    }
+    if (originalMeta.username !== current.username) {
+      changes.push({ fieldId: 'username', label: 'Username', oldValue: originalMeta.username, newValue: current.username, valueType: 'text' });
+    }
+    const originalPassword = originalSecret?.password ?? '';
+    if (originalPassword !== current.password) {
+      changes.push({ fieldId: 'password', label: 'Password', valueType: 'password' });
+    }
+    const originalNotes = originalSecret?.notes ?? '';
+    if (originalNotes !== (current.notes || '')) {
+      changes.push({ fieldId: 'notes', label: 'Notes', oldValue: originalNotes.slice(0, 200), newValue: (current.notes || '').slice(0, 200), valueType: 'notes' });
+    }
+    const origTags = originalMeta.tags || [];
     const added = current.tags.filter((t) => !origTags.includes(t));
     const removed = origTags.filter((t) => !current.tags.includes(t));
     if (added.length || removed.length) {
       changes.push({ fieldId: 'tags', label: 'Tags', oldValue: removed.join(', '), newValue: added.join(', '), valueType: 'tags' });
     }
-    if ((original.group_id || null) !== (current.group_id || null)) {
-      changes.push({ fieldId: 'group_id', label: 'Group', oldValue: original.group_id || '', newValue: current.group_id || '', valueType: 'text' });
+    if ((originalMeta.group_id || null) !== (current.group_id || null)) {
+      changes.push({ fieldId: 'group_id', label: 'Group', oldValue: originalMeta.group_id || '', newValue: current.group_id || '', valueType: 'text' });
     }
     return changes;
   }
@@ -175,7 +247,18 @@ export function EntryScreen() {
   };
 
   const handleCopyPassword = async () => {
-    await copyWithTimeout(formData.password);
+    let password = formData.password;
+    if (!password && state.selectedEntry) {
+      try {
+        const secret = await actions.getEntrySecret(state.selectedEntry.id);
+        password = secret?.password || '';
+      } catch {
+        setError('Failed to copy password');
+        return;
+      }
+    }
+    if (!password) return;
+    await copyWithTimeout(password);
     showToast('Password copied (auto-clears in 30s)');
   };
 
@@ -265,11 +348,22 @@ export function EntryScreen() {
               type={showPassword ? 'text' : 'password'}
               value={formData.password}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+              placeholder={isEditing && !secretLoaded ? 'Loading secret…' : ''}
             />
-            <button onClick={() => setShowPassword(!showPassword)} type="button" aria-label={showPassword ? 'Hide password' : 'Show password'}>
+            <button
+              onClick={() => setShowPassword(!showPassword)}
+              type="button"
+              disabled={isEditing && !secretLoaded}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+            >
               {showPassword ? <EyeOffIcon /> : <EyeIcon />}
             </button>
-            <button onClick={handleCopyPassword} type="button" aria-label="Copy password">
+            <button
+              onClick={handleCopyPassword}
+              type="button"
+              disabled={isEditing && !secretLoaded}
+              aria-label="Copy password"
+            >
               <CopyIcon />
             </button>
             <button onClick={() => setShowGenerator(true)} type="button" aria-label="Generate password">
@@ -295,7 +389,7 @@ export function EntryScreen() {
           <label>Group</label>
           <GroupSelector value={formData.group_id || null} onChange={(id) => setFormData({ ...formData, group_id: id })} />
 
-          <label htmlFor="tag-input" style={{ marginTop: 'var(--space-md)' }}>Tags</label>
+          <label htmlFor="tag-input" className="tag-label">Tags</label>
           <div className="entry-tags">
             {formData.tags.map((tag) => (
               <span key={tag} className="tag" onClick={() => handleRemoveTag(tag)}>

@@ -167,7 +167,7 @@ export function SettingsScreen() {
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
           {saving ? 'Saving...' : 'Save Settings'}
         </button>
-        <button className="btn btn-secondary" onClick={() => actions.navigate('importExport')} style={{ marginTop: 'var(--space-sm)' }}>
+        <button className="btn btn-secondary btn-full" onClick={() => actions.navigate('importExport')}>
           Backup & Restore
         </button>
       </div>

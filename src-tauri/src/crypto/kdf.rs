@@ -129,6 +129,25 @@ pub fn derive_key_with_params(
     Ok((key_bytes, params.clone()))
 }
 
+/// Derive two independent subkeys from a single master key using HKDF-SHA256.
+/// Returns (encryption_key, integrity_mac_key).
+pub fn derive_subkeys(
+    master_key: &[u8; KEY_SIZE],
+    salt: &[u8; SALT_SIZE],
+) -> ([u8; KEY_SIZE], [u8; KEY_SIZE]) {
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+
+    let hk = Hkdf::<Sha256>::new(Some(salt), master_key);
+    let mut enc_key = [0u8; KEY_SIZE];
+    let mut mac_key = [0u8; KEY_SIZE];
+    hk.expand(b"pwdvault/encryption", &mut enc_key)
+        .expect("HKDF expand for encryption key failed");
+    hk.expand(b"pwdvault/integrity", &mut mac_key)
+        .expect("HKDF expand for integrity key failed");
+    (enc_key, mac_key)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

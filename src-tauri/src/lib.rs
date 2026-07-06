@@ -1,16 +1,19 @@
 //! PwdVault - A secure, local-first password manager
 
 pub mod auth;
+pub mod constants;
 pub mod crypto;
 pub mod database;
 pub mod native_host_setup;
 pub mod native_messaging;
+pub mod pairing;
 pub mod paths;
+pub mod service;
 
 use redb::Database;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::sync::Arc;
+use zeroize::{Zeroize, Zeroizing};
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
@@ -19,49 +22,16 @@ use tauri::{
     tray::TrayIconBuilder,
     Manager, State,
 };
-use zeroize::Zeroize;
 
-use crypto::{
-    clear_key, create_verification_header, decrypt, encrypt, is_unlocked, set_key,
-    unlock_with_password, EncryptedData, EncryptionError, KeyStoreError, KdfError,
-    VerificationData,
-};
-use crypto::kdf::AdaptiveParams;
-    use database::{
-    count_entries,
-    delete_entry,
-    list_entries,
-    load_entry,
-    save_entry,
-    PasswordEntry,
-    Group,
-    save_group,
-    load_group,
-    delete_group,
-    list_groups,
-    Settings,
-    save_settings,
-    load_settings,
-};
+use crypto::{EncryptionError, KeyStoreError, KdfError, VerificationData};
+use crypto::keystore::KeyStore;
 
-// ============================================================================
-// Constants
-// ============================================================================
-
-/// Auto-lock timeout in seconds (10 minutes)
-const AUTO_LOCK_SECS: u64 = 600;
-
-/// Auto-lock check interval in seconds
-const AUTO_LOCK_CHECK_INTERVAL_SECS: u64 = 30;
-
-/// Maximum consecutive failed unlock attempts before lockout
-const MAX_FAILED_ATTEMPTS: u32 = 5;
-
-/// Lockout duration in seconds after max failed attempts
-#[cfg(not(test))]
-const LOCKOUT_DURATION_SECS: u64 = 60;
 #[cfg(test)]
-const LOCKOUT_DURATION_SECS: u64 = 1;
+use crypto::{create_verification_header, decrypt, encrypt, EncryptedData};
+use database::{Group, PasswordEntry, Settings};
+
+#[cfg(test)]
+use database::{count_entries, delete_entry, list_entries, load_entry, save_entry};
 
 // ============================================================================
 // Application State
@@ -84,6 +54,19 @@ pub struct AppState {
     /// Rate limiting for pair endpoint (requests per minute)
     pub pair_request_count: Mutex<u32>,
     pub pair_last_reset: Mutex<Option<Instant>>,
+    /// In-memory encryption key storage (isolated per AppState)
+    pub keystore: KeyStore,
+    /// In-memory integrity/MAC key (isolated per AppState)
+    pub mac_key: Mutex<Option<[u8; 32]>>,
+    /// Serialization lock for vault-mutating operations.
+    ///
+    /// The HTTP server handles requests on multiple threads; without
+    /// serialization, two concurrent operations (e.g. `update_entry` and
+    /// `import_vault`) could interleave their read-modify-write cycles and
+    /// produce a lost update or a stale integrity digest. Holding this lock
+    /// for the duration of each mutating business operation keeps the
+    /// load-modify-save-digest sequence atomic from the caller's perspective.
+    pub op_lock: Mutex<()>,
 }
 
 impl AppState {
@@ -112,7 +95,11 @@ impl AppState {
     pub fn lock_vault(&self) {
         {
             let mut activity = self.last_activity.lock().expect("activity lock poisoned");
-            clear_key();
+            self.keystore.clear_key();
+            // Zeroize the MAC key before dropping so it does not linger in memory.
+            if let Some(mut mac) = self.mac_key.lock().expect("mac key lock poisoned").take() {
+                mac.zeroize();
+            }
             *activity = None;
         }
         self.update_lock_menu("Unlock Vault");
@@ -127,11 +114,14 @@ impl Default for AppState {
             last_activity: Mutex::new(None),
             update_lock_menu_fn: Mutex::new(None),
             reload_window_fn: Mutex::new(None),
-            auto_lock_secs: Mutex::new(AUTO_LOCK_SECS),
+            auto_lock_secs: Mutex::new(constants::AUTO_LOCK_SECS),
             failed_unlock_attempts: Mutex::new(0),
             lockout_until: Mutex::new(None),
             pair_request_count: Mutex::new(0),
             pair_last_reset: Mutex::new(None),
+            keystore: KeyStore::new(),
+            mac_key: Mutex::new(None),
+            op_lock: Mutex::new(()),
         }
     }
 }
@@ -206,70 +196,31 @@ impl std::fmt::Display for VaultError {
     }
 }
 
+impl VaultError {
+    /// Returns a sanitized message suitable for external callers (HTTP API,
+    /// browser extension). Internal details such as file paths or serialization
+    /// errors are stripped to avoid information leakage.
+    pub fn public_message(&self) -> String {
+        match self {
+            VaultError::VaultLocked => "Vault is locked".to_string(),
+            VaultError::VaultAlreadyExists => "Vault already exists".to_string(),
+            VaultError::InvalidPassword => "Invalid password".to_string(),
+            VaultError::EntryNotFound => "Entry not found".to_string(),
+            VaultError::RateLimited { retry_after_secs } => {
+                format!("Too many attempts. Retry in {}s", retry_after_secs)
+            }
+            VaultError::InvalidBackup(_) => "Invalid backup file".to_string(),
+            VaultError::EncryptionFailed(_) | VaultError::DecryptionFailed(_)
+            | VaultError::DatabaseError(_) | VaultError::InternalError(_) => {
+                "Internal error".to_string()
+            }
+        }
+    }
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-/// Get the database file path (delegates to shared paths module)
-fn get_db_path() -> PathBuf {
-    paths::get_db_path()
-}
-
-// ============================================================================
-// Rate Limiting
-// ============================================================================
-
-/// Check if the rate limiter is currently blocking unlock attempts.
-pub(crate) fn check_rate_limit(state: &AppState) -> Result<(), VaultError> {
-    let lockout = state.lockout_until.lock().expect("lockout lock poisoned");
-    if let Some(until) = *lockout {
-        let now = Instant::now();
-        if now < until {
-            let remaining = (until - now).as_secs();
-            return Err(VaultError::RateLimited {
-                retry_after_secs: remaining,
-            });
-        }
-    }
-    Ok(())
-}
-
-/// Record a failed unlock attempt. After MAX_FAILED_ATTEMPTS, starts lockout.
-pub(crate) fn record_failed_attempt(state: &AppState) {
-    let mut attempts = state
-        .failed_unlock_attempts
-        .lock()
-        .expect("attempts lock poisoned");
-    *attempts += 1;
-    if *attempts >= MAX_FAILED_ATTEMPTS {
-        let mut lockout = state.lockout_until.lock().expect("lockout lock poisoned");
-        *lockout = Some(Instant::now() + Duration::from_secs(LOCKOUT_DURATION_SECS));
-        *attempts = 0;
-    }
-}
-
-/// Reset rate limit state (called on successful unlock).
-pub(crate) fn reset_rate_limit(state: &AppState) {
-    *state
-        .failed_unlock_attempts
-        .lock()
-        .expect("attempts lock poisoned") = 0;
-    *state
-        .lockout_until
-        .lock()
-        .expect("lockout lock poisoned") = None;
-}
-
-/// Get the database directory (ensures it exists)
-fn ensure_db_dir() -> Result<PathBuf, VaultError> {
-    paths::ensure_db_dir().map_err(|e| VaultError::InternalError(e.to_string()))
-}
-
-/// Get the database from state
-fn get_db(state: &Arc<AppState>) -> Result<Arc<Database>, VaultError> {
-    let guard = state.database.lock().expect("db lock poisoned");
-    guard.clone().ok_or_else(|| VaultError::InternalError("Database not initialized".to_string()))
-}
 
 // ============================================================================
 // IPC Commands
@@ -277,93 +228,27 @@ fn get_db(state: &Arc<AppState>) -> Result<Arc<Database>, VaultError> {
 
 #[tauri::command]
 fn is_vault_initialized(state: State<'_, Arc<AppState>>) -> bool {
-    state.verification_data.lock().expect("verification lock poisoned").is_some()
+    service::is_initialized(state.inner())
 }
 
 #[tauri::command]
-fn is_vault_unlocked() -> bool {
-    is_unlocked()
+fn is_vault_unlocked(state: State<'_, Arc<AppState>>) -> bool {
+    service::is_unlocked(state.inner())
 }
 
 #[tauri::command]
-fn init_vault(
-    password: String,
-    state: State<'_, Arc<AppState>>,
-) -> Result<(), VaultError> {
-    let mut password = password;
-
-    if state.verification_data.lock().expect("verification lock poisoned").is_some() {
-        password.zeroize();
-        return Err(VaultError::VaultAlreadyExists);
-    }
-
-    // Initialize database
-    let db_path = ensure_db_dir()?;
-    let db = Arc::new(database::init_database(&db_path)?);
-    *state.database.lock().expect("db lock poisoned") = Some(db.clone());
-
-    let salt = crypto::kdf::generate_salt();
-    let (key, params) = crypto::kdf::derive_key(&password, &salt)?;
-
-    password.zeroize();
-
-    let verification_data = create_verification_header(&key, salt, params)?;
-
-    // Save verification data to database
-    database::save_verification_data(&db, &verification_data)?;
-
-    *state.verification_data.lock().expect("verification lock poisoned") = Some(verification_data);
-    set_key(key)?;
-
-    // Save default settings
-    let default_settings = Settings::default();
-    save_settings(&db, &default_settings)?;
-
-    // Start auto-lock timer and update tray menu
-    state.touch_activity();
-    state.update_lock_menu("Lock Vault");
-
-    Ok(())
+fn init_vault(password: Zeroizing<String>, state: State<'_, Arc<AppState>>) -> Result<(), VaultError> {
+    service::init_vault(state.inner(), password)
 }
 
 #[tauri::command]
-fn unlock_vault(password: String, state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
-    check_rate_limit(&state)?;
-
-    let mut password = password;
-
-    let verification_data = state
-        .verification_data
-        .lock()
-        .expect("verification lock poisoned")
-        .as_ref()
-        .ok_or(VaultError::VaultLocked)?
-        .clone();
-
-    let success = unlock_with_password(&password, &verification_data)?;
-
-    password.zeroize();
-
-    if success {
-        reset_rate_limit(&state);
-        // Load settings (e.g. auto-lock timeout) from database
-        if let Ok(db) = get_db(&state) {
-            if let Ok(settings) = load_settings(&db) {
-                *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
-            }
-        }
-        state.touch_activity();
-        state.update_lock_menu("Lock Vault");
-    } else {
-        record_failed_attempt(&state);
-    }
-
-    Ok(success)
+fn unlock_vault(password: Zeroizing<String>, state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
+    service::unlock_vault(state.inner(), password)
 }
 
 #[tauri::command]
 fn lock_vault(state: State<'_, Arc<AppState>>) {
-    state.lock_vault();
+    service::lock_vault(state.inner());
 }
 
 #[tauri::command]
@@ -374,58 +259,13 @@ fn generate_password(
     include_numbers: bool,
     include_symbols: bool,
 ) -> Result<String, VaultError> {
-    // Clamp length to sane bounds
-    let length = length.clamp(4, 128);
-
-    use rand::{rngs::OsRng, Rng};
-
-    let mut charset = String::new();
-    let mut required_chars = Vec::new();
-
-    // Collect all available character classes and their representatives
-    if include_uppercase {
-        charset.push_str("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-        required_chars.push('A');
-    }
-    if include_lowercase {
-        charset.push_str("abcdefghijklmnopqrstuvwxyz");
-        required_chars.push('a');
-    }
-    if include_numbers {
-        charset.push_str("0123456789");
-        required_chars.push('0');
-    }
-    if include_symbols {
-        charset.push_str("!@#$%^&*()_+-=[]{}|;:,.<>?");
-        required_chars.push('!');
-    }
-
-    if charset.is_empty() {
-        return Err(VaultError::InternalError(
-            "At least one character type must be selected".to_string(),
-        ));
-    }
-
-    let mut rng = OsRng; // Use OS entropy source for better security
-    let bytes: Vec<u8> = charset.bytes().collect();
-
-    let num_required = required_chars.len();
-    let mut password_chars: Vec<char> = required_chars;
-
-    // Fill remaining positions with random characters from full charset
-    for _ in 0..(length.saturating_sub(num_required)) {
-        let idx = rng.gen_range(0..bytes.len());
-        password_chars.push(bytes[idx] as char);
-    }
-
-    // Fisher-Yates shuffle to avoid predictable patterns (e.g., always starting with uppercase)
-    let len = password_chars.len();
-    for i in 0..len {
-        let j = rng.gen_range(i..len);
-        password_chars.swap(i, j);
-    }
-
-    Ok(password_chars.into_iter().collect())
+    service::generate_password(
+        length,
+        include_uppercase,
+        include_lowercase,
+        include_numbers,
+        include_symbols,
+    )
 }
 
 // ============================================================================
@@ -494,25 +334,21 @@ pub struct CreateEntryRequest {
     pub title: String,
     pub url: Option<String>,
     pub username: String,
-    pub password: String,
+    /// Plaintext password. Wrapped in Zeroizing so the heap buffer is wiped
+    /// when the request is dropped (after encryption).
+    pub password: Zeroizing<String>,
     pub notes: Option<String>,
     pub tags: Vec<String>,
     pub group_id: Option<String>,
 }
 
-/// Response for password entry (password decrypted)
+/// Decrypted secrets for a password entry.
+/// Returned only by explicit secret-fetch endpoints so plaintext fields are not
+/// kept in memory longer than necessary.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct EntryResponse {
-    pub id: String,
-    pub title: String,
-    pub url: Option<String>,
-    pub username: String,
-    pub password: String,
-    pub notes: Option<String>,
-    pub tags: Vec<String>,
-    pub group_id: Option<String>,
-    pub created_at: i64,
-    pub updated_at: i64,
+pub struct EntrySecretResponse {
+    pub password: Zeroizing<String>,
+    pub notes: Option<Zeroizing<String>>,
     pub last_used_at: Option<i64>,
 }
 
@@ -545,132 +381,29 @@ impl From<PasswordEntry> for EntrySummary {
 }
 
 #[tauri::command]
-fn create_entry(request: CreateEntryRequest, state: State<'_, Arc<AppState>>) -> Result<EntrySummary, VaultError> {
-    if !is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
-
-    // Input validation
-    if request.title.is_empty() || request.title.len() > 4096 {
-        return Err(VaultError::InternalError("Invalid title length".to_string()));
-    }
-    if request.username.is_empty() || request.username.len() > 4096 {
-        return Err(VaultError::InternalError("Invalid username length".to_string()));
-    }
-    if request.password.len() > 1024 {
-        return Err(VaultError::InternalError("Invalid password length".to_string()));
-    }
-    if request.notes.as_ref().map_or(false, |n| n.len() > 65536) {
-        return Err(VaultError::InternalError("Notes too long".to_string()));
-    }
-
-    let db = get_db(&state)?;
-    let key = crypto::get_key()?;
-
-    // Encrypt password
-    let encrypted_password = encrypt(&key, request.password.as_bytes())?;
-    let encrypted_password_bytes = bincode::serialize(&encrypted_password)
-        .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
-
-    // Encrypt notes if present
-    let encrypted_notes = if let Some(notes) = &request.notes {
-        let encrypted = encrypt(&key, notes.as_bytes())?;
-        let bytes = bincode::serialize(&encrypted)
-            .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
-        Some(bytes)
-    } else {
-        None
-    };
-
-    let mut entry = PasswordEntry::new(request.title, request.url, request.username);
-    entry.encrypted_password = encrypted_password_bytes;
-    entry.encrypted_notes = encrypted_notes;
-    entry.tags = request.tags;
-    entry.group_id = request.group_id;
-
-    save_entry(&db, &entry)?;
-
-    state.touch_activity();
-
-    Ok(entry.into())
+fn create_entry(
+    request: CreateEntryRequest,
+    state: State<'_, Arc<AppState>>,
+) -> Result<EntrySummary, VaultError> {
+    service::create_entry(state.inner(), request)
 }
 
 #[tauri::command]
-fn get_entry(id: String, state: State<'_, Arc<AppState>>) -> Result<EntryResponse, VaultError> {
-    if !is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
+fn get_entry_meta(id: String, state: State<'_, Arc<AppState>>) -> Result<EntrySummary, VaultError> {
+    service::get_entry_meta(state.inner(), id)
+}
 
-    let db = get_db(&state)?;
-    let entry = load_entry(&db, &id)?.ok_or(VaultError::EntryNotFound)?;
-
-    let key = crypto::get_key()?;
-
-    // Decrypt password
-    let encrypted_password: EncryptedData = bincode::deserialize(&entry.encrypted_password)
-        .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
-    let mut password_bytes = decrypt(&key, &encrypted_password)?;
-    let mut password = String::from_utf8(password_bytes.clone())
-        .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
-
-    // Decrypt notes if present
-    let mut notes = if let Some(encrypted_notes_bytes) = &entry.encrypted_notes {
-        let encrypted: EncryptedData = bincode::deserialize(encrypted_notes_bytes)
-            .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
-        let mut notes_bytes = decrypt(&key, &encrypted)?;
-        let notes_str = String::from_utf8(notes_bytes.clone())
-            .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
-        notes_bytes.zeroize();
-        Some(notes_str)
-    } else {
-        None
-    };
-
-    state.touch_activity();
-
-    let response = EntryResponse {
-        id: entry.id,
-        title: entry.title,
-        url: entry.url,
-        username: entry.username,
-        password: password.clone(),
-        notes: notes.clone(),
-        tags: entry.tags,
-        group_id: entry.group_id,
-        created_at: entry.created_at,
-        updated_at: entry.updated_at,
-        last_used_at: entry.last_used_at,
-    };
-
-    // Zeroize plaintext sensitive data after building response
-    password.zeroize();
-    password_bytes.zeroize();
-    if let Some(ref mut n) = notes {
-        n.zeroize();
-    }
-
-    Ok(response)
+#[tauri::command]
+fn get_entry_secret(
+    id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<EntrySecretResponse, VaultError> {
+    service::get_entry_secret(state.inner(), id)
 }
 
 #[tauri::command]
 fn list_all_entries(state: State<'_, Arc<AppState>>) -> Result<Vec<EntrySummary>, VaultError> {
-    if !is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
-
-    let db = get_db(&state)?;
-    let ids = list_entries(&db)?;
-    let mut summaries = Vec::new();
-
-    for id in ids {
-        if let Some(entry) = load_entry(&db, &id)? {
-            summaries.push(entry.into());
-        }
-    }
-
-    state.touch_activity();
-
-    Ok(summaries)
+    service::list_all_entries(state.inner())
 }
 
 #[tauri::command]
@@ -679,52 +412,7 @@ fn update_entry(
     request: CreateEntryRequest,
     state: State<'_, Arc<AppState>>,
 ) -> Result<EntrySummary, VaultError> {
-    if !is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
-
-    // Input validation
-    if request.title.is_empty() || request.title.len() > 4096 {
-        return Err(VaultError::InternalError("Invalid title length".to_string()));
-    }
-    if request.username.is_empty() || request.username.len() > 4096 {
-        return Err(VaultError::InternalError("Invalid username length".to_string()));
-    }
-    if request.password.len() > 1024 {
-        return Err(VaultError::InternalError("Invalid password length".to_string()));
-    }
-
-    let db = get_db(&state)?;
-    let mut entry = load_entry(&db, &id)?.ok_or(VaultError::EntryNotFound)?;
-
-    let key = crypto::get_key()?;
-
-    // Update fields
-    entry.title = request.title;
-    entry.url = request.url;
-    entry.username = request.username;
-    entry.tags = request.tags;
-    entry.group_id = request.group_id;
-    entry.updated_at = chrono::Utc::now().timestamp();
-
-    // Encrypt and update password
-    let encrypted_password = encrypt(&key, request.password.as_bytes())?;
-    entry.encrypted_password = bincode::serialize(&encrypted_password)
-        .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
-
-    // Encrypt and update notes
-    entry.encrypted_notes = if let Some(notes) = &request.notes {
-        let encrypted = encrypt(&key, notes.as_bytes())?;
-        Some(bincode::serialize(&encrypted).map_err(|e| VaultError::EncryptionFailed(e.to_string()))?)
-    } else {
-        None
-    };
-
-    save_entry(&db, &entry)?;
-
-    state.touch_activity();
-
-    Ok(entry.into())
+    service::update_entry(state.inner(), id, request)
 }
 
 // ============================================================================
@@ -733,77 +421,26 @@ fn update_entry(
 
 #[tauri::command]
 fn create_group(name: String, state: State<'_, Arc<AppState>>) -> Result<Group, VaultError> {
-    if !is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
-
-    let db = get_db(&state)?;
-    let group = Group::new(name);
-    save_group(&db, &group)?;
-
-    state.touch_activity();
-    Ok(group)
+    service::create_group(state.inner(), name)
 }
 
 #[tauri::command]
 fn list_all_groups(state: State<'_, Arc<AppState>>) -> Result<Vec<Group>, VaultError> {
-    if !is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
-
-    let db = get_db(&state)?;
-    let ids = list_groups(&db)?;
-    let mut groups = Vec::new();
-    for id in ids {
-        if let Some(g) = load_group(&db, &id)? {
-            groups.push(g);
-        }
-    }
-
-    state.touch_activity();
-    Ok(groups)
+    service::list_all_groups(state.inner())
 }
 
 #[tauri::command]
 fn remove_group(id: String, state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
-    if !is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
-
-    let db = get_db(&state)?;
-    let existed = delete_group(&db, &id)?;
-
-    // Cascade: clear group_id on entries that referenced the deleted group
-    if existed {
-        let entry_ids = list_entries(&db)?;
-        for entry_id in entry_ids {
-            if let Some(mut entry) = load_entry(&db, &entry_id)? {
-                if entry.group_id.as_deref() == Some(id.as_str()) {
-                    entry.group_id = None;
-                    save_entry(&db, &entry)?;
-                }
-            }
-        }
-    }
-
-    state.touch_activity();
-    Ok(existed)
+    service::remove_group(state.inner(), id)
 }
 
 #[tauri::command]
-fn update_group(id: String, name: String, state: State<'_, Arc<AppState>>) -> Result<Group, VaultError> {
-    if !is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
-
-    let db = get_db(&state)?;
-    let mut group = load_group(&db, &id)?.ok_or(VaultError::InternalError("Group not found".to_string()))?;
-    group.name = name;
-    group.updated_at = chrono::Utc::now().timestamp();
-    save_group(&db, &group)?;
-
-    state.touch_activity();
-    Ok(group)
+fn update_group(
+    id: String,
+    name: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Group, VaultError> {
+    service::update_group(state.inner(), id, name)
 }
 
 // ============================================================================
@@ -811,65 +448,26 @@ fn update_group(id: String, name: String, state: State<'_, Arc<AppState>>) -> Re
 // ============================================================================
 
 #[tauri::command]
-fn get_settings(state: State<'_, Arc<AppState>>) -> Result<Settings, VaultError> {
-    if !is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
-    let db = get_db(&state)?;
-    let settings = load_settings(&db)?;
-    state.touch_activity();
-    Ok(settings)
+fn get_settings(state: State<'_, Arc<AppState>>) -> Result<database::Settings, VaultError> {
+    service::get_settings(state.inner())
 }
 
 #[tauri::command]
-fn update_settings(settings: Settings, state: State<'_, Arc<AppState>>) -> Result<Settings, VaultError> {
-    if !is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
-    if settings.auto_lock_secs < 30 || settings.auto_lock_secs > 3600 {
-        return Err(VaultError::InternalError(
-            "Auto-lock timeout must be between 30 and 3600 seconds".to_string(),
-        ));
-    }
-    if settings.default_length < 4 || settings.default_length > 128 {
-        return Err(VaultError::InternalError(
-            "Password length must be between 4 and 128".to_string(),
-        ));
-    }
-    let db = get_db(&state)?;
-    save_settings(&db, &settings)?;
-    // Apply auto-lock timeout immediately
-    *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
-    state.touch_activity();
-    Ok(settings)
+fn update_settings(
+    settings: database::Settings,
+    state: State<'_, Arc<AppState>>,
+) -> Result<database::Settings, VaultError> {
+    service::update_settings(state.inner(), settings)
 }
 
 #[tauri::command]
 fn remove_entry(id: String, state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
-    if !is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
-
-    let db = get_db(&state)?;
-    let existed = delete_entry(&db, &id)?;
-
-    state.touch_activity();
-
-    Ok(existed)
+    service::remove_entry(state.inner(), id)
 }
 
 #[tauri::command]
 fn get_entry_count(state: State<'_, Arc<AppState>>) -> Result<usize, VaultError> {
-    if !is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
-
-    let db = get_db(&state)?;
-    let count = count_entries(&db)?;
-
-    state.touch_activity();
-
-    Ok(count)
+    service::get_entry_count(state.inner())
 }
 
 // ============================================================================
@@ -883,8 +481,8 @@ pub struct ExportEntry {
     pub title: String,
     pub url: Option<String>,
     pub username: String,
-    pub password: String,
-    pub notes: Option<String>,
+    pub password: Zeroizing<String>,
+    pub notes: Option<Zeroizing<String>>,
     pub tags: Vec<String>,
     pub group_id: Option<String>,
     pub created_at: i64,
@@ -920,245 +518,20 @@ pub struct ImportResult {
 }
 
 #[tauri::command]
-fn export_vault(mut export_password: String, state: State<'_, Arc<AppState>>) -> Result<VaultBackup, VaultError> {
-    if !is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
-
-    let db = get_db(&state)?;
-    let key = crypto::get_key()?;
-
-    // Load all entries and decrypt passwords/notes
-    let entry_ids = list_entries(&db)?;
-    let mut export_entries = Vec::new();
-    for id in entry_ids {
-        if let Some(entry) = load_entry(&db, &id)? {
-            // Decrypt password
-            let enc_pwd: EncryptedData = bincode::deserialize(&entry.encrypted_password)
-                .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
-            let pwd_bytes = decrypt(&key, &enc_pwd)?;
-            let password = String::from_utf8(pwd_bytes)
-                .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
-
-            // Decrypt notes
-            let notes = if let Some(ref enc_notes_bytes) = entry.encrypted_notes {
-                let enc: EncryptedData = bincode::deserialize(enc_notes_bytes)
-                    .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
-                let notes_bytes = decrypt(&key, &enc)?;
-                Some(String::from_utf8(notes_bytes)
-                    .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?)
-            } else {
-                None
-            };
-
-            export_entries.push(ExportEntry {
-                id: entry.id,
-                title: entry.title,
-                url: entry.url,
-                username: entry.username,
-                password,
-                notes,
-                tags: entry.tags,
-                group_id: entry.group_id,
-                created_at: entry.created_at,
-                updated_at: entry.updated_at,
-            });
-        }
-    }
-
-    // Load groups
-    let group_ids = list_groups(&db)?;
-    let mut groups = Vec::new();
-    for id in group_ids {
-        if let Some(g) = load_group(&db, &id)? {
-            groups.push(g);
-        }
-    }
-
-    // Load settings
-    let settings = load_settings(&db)?;
-
-    // Build plaintext payload
-    let payload = BackupPayload {
-        entries: export_entries,
-        groups,
-        settings,
-    };
-
-    let mut payload_json = serde_json::to_vec(&payload)
-        .map_err(|e| VaultError::InternalError(e.to_string()))?;
-
-    // Derive export key from export password using Argon2id
-    let salt = crypto::kdf::generate_salt();
-    let (export_key, params) = crypto::kdf::derive_key(&export_password, &salt)?;
-
-    // Zeroize export password immediately after key derivation
-    export_password.zeroize();
-
-    // Encrypt payload with export key
-    let encrypted = encrypt(&export_key, &payload_json)?;
-
-    // Zeroize plaintext payload
-    payload_json.zeroize();
-    for mut entry in payload.entries {
-        unsafe { entry.password.as_bytes_mut() }.zeroize();
-        if let Some(ref mut n) = entry.notes {
-            unsafe { n.as_bytes_mut() }.zeroize();
-        }
-    }
-
-    use base64::Engine;
-    let b64 = base64::engine::general_purpose::STANDARD;
-
-    let backup = VaultBackup {
-        version: 1,
-        created_at: chrono::Utc::now().timestamp(),
-        salt: b64.encode(&salt),
-        kdf_memory: params.m_cost,
-        kdf_iterations: params.t_cost,
-        kdf_parallelism: params.p_cost,
-        nonce: b64.encode(&encrypted.nonce),
-        data: b64.encode(&encrypted.ciphertext),
-    };
-
-    state.touch_activity();
-    Ok(backup)
+fn export_vault(
+    export_password: Zeroizing<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<VaultBackup, VaultError> {
+    service::export_vault(state.inner(), export_password)
 }
 
 #[tauri::command]
-fn import_vault(backup: VaultBackup, mut import_password: String, state: State<'_, Arc<AppState>>) -> Result<ImportResult, VaultError> {
-    if !is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
-
-    if backup.version != 1 {
-        return Err(VaultError::InvalidBackup("Unsupported backup version".to_string()));
-    }
-
-    // Decode salt and nonce from base64
-    use base64::Engine;
-    let b64 = base64::engine::general_purpose::STANDARD;
-
-    let salt = b64.decode(&backup.salt)
-        .map_err(|e| VaultError::InvalidBackup(format!("Invalid salt: {}", e)))?;
-    let nonce_bytes = b64.decode(&backup.nonce)
-        .map_err(|e| VaultError::InvalidBackup(format!("Invalid nonce: {}", e)))?;
-    let ciphertext = b64.decode(&backup.data)
-        .map_err(|e| VaultError::InvalidBackup(format!("Invalid data: {}", e)))?;
-
-    if salt.len() != 16 {
-        return Err(VaultError::InvalidBackup("Invalid salt length".to_string()));
-    }
-
-    // Derive key from import password with stored KDF params
-    let salt_array: [u8; 16] = salt.try_into()
-        .map_err(|_| VaultError::InvalidBackup("Invalid salt".to_string()))?;
-    let (import_key, _params) = crypto::kdf::derive_key_with_params(
-        &import_password,
-        &salt_array,
-        &AdaptiveParams {
-            m_cost: backup.kdf_memory,
-            t_cost: backup.kdf_iterations,
-            p_cost: backup.kdf_parallelism,
-        },
-    )?;
-
-    // Zeroize import password after key derivation
-    import_password.zeroize();
-
-    // Decrypt payload
-    let encrypted_data = EncryptedData {
-        nonce: nonce_bytes,
-        ciphertext,
-    };
-    let mut payload_bytes = decrypt(&import_key, &encrypted_data)
-        .map_err(|_| VaultError::InvalidPassword)?;
-
-    // Parse payload — validate before any destructive operations
-    let payload: BackupPayload = serde_json::from_slice(&payload_bytes)
-        .map_err(|e| VaultError::InvalidBackup(format!("Invalid payload: {}", e)))?;
-
-    // Zeroize decrypted payload bytes
-    payload_bytes.zeroize();
-
-    let db = get_db(&state)?;
-    let key = crypto::get_key()?;
-
-    // Pre-validate and prepare groups (generate new IDs to avoid conflicts)
-    let mut group_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    let mut new_groups = Vec::new();
-    for g in &payload.groups {
-        let new_group = Group::new(g.name.clone());
-        group_id_map.insert(g.id.clone(), new_group.id.clone());
-        new_groups.push(new_group);
-    }
-
-    // Pre-validate and encrypt all entries before any destructive operations
-    let mut new_entries = Vec::new();
-    for export_entry in &payload.entries {
-        let mut entry = PasswordEntry::new(
-            export_entry.title.clone(),
-            export_entry.url.clone(),
-            export_entry.username.clone(),
-        );
-
-        // Encrypt password with current master key
-        let enc_pwd = encrypt(&key, export_entry.password.as_bytes())?;
-        entry.encrypted_password = bincode::serialize(&enc_pwd)
-            .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
-
-        // Encrypt notes
-        entry.encrypted_notes = if let Some(ref notes) = export_entry.notes {
-            let enc = encrypt(&key, notes.as_bytes())?;
-            Some(bincode::serialize(&enc)
-                .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?)
-        } else {
-            None
-        };
-
-        entry.tags = export_entry.tags.clone();
-        // Map old group_id to new group_id
-        entry.group_id = export_entry.group_id.as_ref()
-            .and_then(|gid| group_id_map.get(gid).cloned());
-        entry.created_at = export_entry.created_at;
-        entry.updated_at = export_entry.updated_at;
-
-        new_entries.push(entry);
-    }
-
-    // All validation and encryption succeeded — now perform database mutations
-    // Clear existing entries and groups (propagate errors)
-    let existing_entry_ids = list_entries(&db)?;
-    for id in existing_entry_ids {
-        delete_entry(&db, &id)?;
-    }
-    let existing_group_ids = list_groups(&db)?;
-    for id in existing_group_ids {
-        delete_group(&db, &id)?;
-    }
-
-    // Write new groups
-    for g in &new_groups {
-        save_group(&db, g)?;
-    }
-
-    // Write new entries
-    for entry in &new_entries {
-        save_entry(&db, entry)?;
-    }
-
-    // Apply imported settings
-    save_settings(&db, &payload.settings)?;
-    *state.auto_lock_secs.lock().expect("timeout lock poisoned") = payload.settings.auto_lock_secs;
-
-    let entries_count = payload.entries.len();
-    let groups_count = payload.groups.len();
-
-    state.touch_activity();
-    Ok(ImportResult {
-        entries_imported: entries_count,
-        groups_imported: groups_count,
-    })
+fn import_vault(
+    backup: VaultBackup,
+    import_password: Zeroizing<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<ImportResult, VaultError> {
+    service::import_vault(state.inner(), backup, import_password)
 }
 
 // ============================================================================
@@ -1167,37 +540,7 @@ fn import_vault(backup: VaultBackup, mut import_password: String, state: State<'
 
 #[tauri::command]
 fn setup_vault(state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
-    // Check if database is already loaded in state
-    {
-        let db_guard = state.database.lock().expect("db lock poisoned");
-        if db_guard.is_some() && state.verification_data.lock().expect("verification lock poisoned").is_some() {
-            return Ok(true);
-        }
-    }
-
-    let db_path = get_db_path();
-
-    if !db_path.exists() {
-        return Ok(false);
-    }
-
-    // Initialize database
-    let db = Arc::new(database::init_database(&db_path)?);
-    *state.database.lock().expect("db lock poisoned") = Some(db.clone());
-
-    // Load verification data from database
-    let verification_data = database::load_verification_data(&db)?;
-
-    if let Some(data) = verification_data {
-        *state.verification_data.lock().expect("verification lock poisoned") = Some(data);
-        // Load auto-lock timeout from settings
-        if let Ok(settings) = load_settings(&db) {
-            *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
-        }
-        return Ok(true);
-    }
-
-    Ok(false)
+    service::setup_vault(state.inner())
 }
 
 // ============================================================================
@@ -1205,23 +548,46 @@ fn setup_vault(state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
 // ============================================================================
 
 fn start_auto_lock_thread(state: Arc<AppState>) {
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(AUTO_LOCK_CHECK_INTERVAL_SECS));
+    std::thread::spawn(move || loop {
+        let deadline = {
+            let activity = state.last_activity.lock().expect("activity lock poisoned");
+            let timeout = *state.auto_lock_secs.lock().expect("timeout lock poisoned");
+            activity.map(|t| t + std::time::Duration::from_secs(timeout))
+        };
 
-            let should_lock = {
-                let activity = state.last_activity.lock().expect("activity lock poisoned");
-                let timeout = *state.auto_lock_secs.lock().expect("timeout lock poisoned");
-                if let Some(instant) = *activity {
-                    is_unlocked() && instant.elapsed().as_secs() >= timeout
+        match deadline {
+            Some(d) => {
+                let now = std::time::Instant::now();
+                if d > now {
+                    // Cap the sleep at 5 seconds so the thread re-evaluates
+                    // the deadline periodically. Without this cap, if the user
+                    // shortens auto_lock_secs while the thread is sleeping
+                    // toward the old (longer) deadline, the vault wouldn't
+                    // lock until the original deadline passes.
+                    let sleep_dur = (d - now).min(std::time::Duration::from_secs(5));
+                    std::thread::sleep(sleep_dur);
+                    // After waking, re-check in case activity was updated while sleeping.
+                    let should_lock = {
+                        let activity = state.last_activity.lock().expect("activity lock poisoned");
+                        let timeout = *state.auto_lock_secs.lock().expect("timeout lock poisoned");
+                        state.keystore.is_unlocked()
+                            && activity
+                                .map(|t| t.elapsed().as_secs() >= timeout)
+                                .unwrap_or(false)
+                    };
+                    if should_lock {
+                        state.lock_vault();
+                        state.reload_window();
+                    }
                 } else {
-                    false
+                    // Already past the deadline; lock immediately.
+                    state.lock_vault();
+                    state.reload_window();
                 }
-            };
-
-            if should_lock {
-                state.lock_vault();
-                state.reload_window();
+            }
+            None => {
+                // Vault is locked or not yet initialized; idle until something changes.
+                std::thread::sleep(std::time::Duration::from_secs(5));
             }
         }
     });
@@ -1231,8 +597,6 @@ fn start_auto_lock_thread(state: Arc<AppState>) {
 // Entry Point
 // ============================================================================
 
-const NATIVE_MESSAGING_PORT: u16 = 17429;
-
 /// Locate the bundled native messaging host binary and register it with the
 /// installed browsers. Reads extension IDs from a config file next to the
 /// database; if absent (e.g. dev mode or IDs not yet configured), registration
@@ -1241,7 +605,7 @@ fn register_native_host(app: &tauri::App) {
     let resource_dir = match app.path().resource_dir() {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("native_host_setup: cannot resolve resource dir: {}", e);
+            tracing::error!("native_host_setup: cannot resolve resource dir: {}", e);
             return;
         }
     };
@@ -1312,6 +676,18 @@ fn load_extension_ids() -> Option<native_host_setup::ExtensionIds> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize structured logging to a daily-rotated file under the app data dir.
+    let file_appender = tracing_appender::rolling::daily(&paths::log_dir(), "pwdvault.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("pwdvault=info")),
+        )
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .init();
+
     let state = Arc::new(AppState::default());
 
     tauri::Builder::default()
@@ -1322,10 +698,15 @@ pub fn run() {
         .setup(move |app| {
             // Start native messaging server in background thread
             let state_for_server = state.clone();
+            let app_handle = app.handle().clone();
 
             std::thread::spawn(move || {
-                if let Err(e) = native_messaging::start_server(NATIVE_MESSAGING_PORT, state_for_server) {
-                    eprintln!("Failed to start native messaging server: {}", e);
+                if let Err(e) = native_messaging::start_server(
+                    constants::NATIVE_MESSAGING_PORT,
+                    state_for_server,
+                    Some(app_handle),
+                ) {
+                    tracing::error!("Failed to start native messaging server: {}", e);
                 }
             });
 
@@ -1370,8 +751,8 @@ pub fn run() {
                         }
                     }
                     "lock" => {
-                        if is_unlocked() {
-                            let state = app.state::<Arc<AppState>>();
+                        let state = app.state::<Arc<AppState>>();
+                        if state.keystore.is_unlocked() {
                             state.lock_vault();
                         }
                         if let Some(window) = app.get_webview_window("main") {
@@ -1427,7 +808,8 @@ pub fn run() {
             setup_vault,
             // Entry management
             create_entry,
-            get_entry,
+            get_entry_meta,
+            get_entry_secret,
             list_all_entries,
             update_entry,
             remove_entry,
@@ -1461,9 +843,6 @@ mod tests {
 
     /// Helper: create a test AppState with a temp database
     fn setup_test_state() -> (Arc<AppState>, TempDir) {
-        // Clear any leftover key from previous tests
-        clear_key();
-
         let temp = TempDir::new().expect("create temp dir");
         let db_path = temp.path().join("test_vault.db");
         let db = Arc::new(database::init_database(&db_path).expect("init db"));
@@ -1475,18 +854,20 @@ mod tests {
 
     /// Helper: initialize vault with a password
     fn init_test_vault(state: &Arc<AppState>, password: &str) {
-        // Clear any leftover key from parallel tests sharing global keystore
-        clear_key();
+        state.keystore.clear_key();
+        state.mac_key.lock().expect("mac key lock").take();
 
         let salt = crypto::kdf::generate_salt();
-        let (key, params) = crypto::kdf::derive_key(password, &salt).expect("derive key");
-        let verification = create_verification_header(&key, salt.clone(), params).expect("create verification");
+        let (master_key, params) = crypto::kdf::derive_key(password, &salt).expect("derive key");
+        let verification = create_verification_header(&master_key, salt.clone(), params).expect("create verification");
+        let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &salt);
 
         let db = state.database.lock().expect("db lock").clone().expect("db exists");
         database::save_verification_data(&db, &verification).expect("save verification");
 
         *state.verification_data.lock().expect("v lock") = Some(verification);
-        set_key(key).expect("set key");
+        state.keystore.set_key(enc_key).expect("set key");
+        *state.mac_key.lock().expect("mac key lock") = Some(mac_key);
         state.touch_activity();
     }
 
@@ -1605,7 +986,7 @@ mod tests {
 
     #[test]
     fn test_get_db_path_returns_valid_path() {
-        let path = get_db_path();
+        let path = paths::get_db_path();
         assert!(path.to_string_lossy().ends_with("vault.db"));
         assert!(path.parent().is_some());
     }
@@ -1641,16 +1022,16 @@ mod tests {
         let db = state.database.lock().unwrap().clone().unwrap();
         database::save_verification_data(&db, &verification).unwrap();
         *state.verification_data.lock().unwrap() = Some(verification);
-        set_key(key).unwrap();
+        state.keystore.set_key(key).unwrap();
         state.touch_activity();
 
         // Should be unlocked now
-        assert!(is_unlocked());
+        assert!(state.keystore.is_unlocked());
         assert!(state.last_activity.lock().unwrap().is_some());
 
         // Lock
         state.lock_vault();
-        assert!(!is_unlocked());
+        assert!(!state.keystore.is_unlocked());
         assert!(state.last_activity.lock().unwrap().is_none());
     }
 
@@ -1669,13 +1050,13 @@ mod tests {
         );
 
         // Encrypt password
-        let key = crypto::get_key().unwrap();
+        let key = state.keystore.get_key().unwrap();
         let enc_data = encrypt(&key, b"secret_password").unwrap();
         entry.encrypted_password = bincode::serialize(&enc_data).unwrap();
-        save_entry(&db, &entry).unwrap();
+        save_entry(&db, &key, &entry).unwrap();
 
         // Read entry
-        let loaded = load_entry(&db, &entry.id).unwrap().unwrap();
+        let loaded = load_entry(&db, &key, &entry.id).unwrap().unwrap();
         assert_eq!(loaded.title, "GitHub");
         assert_eq!(loaded.username, "user@example.com");
 
@@ -1704,7 +1085,7 @@ mod tests {
         init_test_vault(&state, "master123");
 
         let db = state.database.lock().unwrap().clone().unwrap();
-        let key = crypto::get_key().unwrap();
+        let key = state.keystore.get_key().unwrap();
 
         let mut entry = PasswordEntry::new(
             "Site".to_string(),
@@ -1715,9 +1096,9 @@ mod tests {
         entry.encrypted_notes = Some(bincode::serialize(&encrypt(&key, b"my notes").unwrap()).unwrap());
         entry.tags = vec!["work".to_string(), "important".to_string()];
 
-        save_entry(&db, &entry).unwrap();
+        save_entry(&db, &key, &entry).unwrap();
 
-        let loaded = load_entry(&db, &entry.id).unwrap().unwrap();
+        let loaded = load_entry(&db, &key, &entry.id).unwrap().unwrap();
         assert_eq!(loaded.tags, vec!["work", "important"]);
 
         // Decrypt notes
@@ -1732,7 +1113,7 @@ mod tests {
         init_test_vault(&state, "master123");
 
         let db = state.database.lock().unwrap().clone().unwrap();
-        let key = crypto::get_key().unwrap();
+        let key = state.keystore.get_key().unwrap();
 
         for i in 0..5 {
             let mut entry = PasswordEntry::new(
@@ -1741,7 +1122,7 @@ mod tests {
                 format!("user{}@test.com", i),
             );
             entry.encrypted_password = bincode::serialize(&encrypt(&key, format!("pass{}", i).as_bytes()).unwrap()).unwrap();
-            save_entry(&db, &entry).unwrap();
+            save_entry(&db, &key, &entry).unwrap();
         }
 
         assert_eq!(count_entries(&db).unwrap(), 5);
@@ -1755,18 +1136,18 @@ mod tests {
     fn test_rate_limit_allows_initial_attempts() {
         let state = AppState::default();
         for _ in 0..4 {
-            record_failed_attempt(&state);
+            service::record_failed_attempt(&state);
         }
-        assert!(check_rate_limit(&state).is_ok());
+        assert!(service::check_rate_limit(&state).is_ok());
     }
 
     #[test]
     fn test_rate_limit_triggers_after_five_failures() {
         let state = AppState::default();
         for _ in 0..5 {
-            record_failed_attempt(&state);
+            service::record_failed_attempt(&state);
         }
-        let result = check_rate_limit(&state);
+        let result = service::check_rate_limit(&state);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), VaultError::RateLimited { .. }));
     }
@@ -1775,10 +1156,10 @@ mod tests {
     fn test_rate_limit_resets_on_success() {
         let state = AppState::default();
         for _ in 0..4 {
-            record_failed_attempt(&state);
+            service::record_failed_attempt(&state);
         }
-        reset_rate_limit(&state);
-        assert!(check_rate_limit(&state).is_ok());
+        service::reset_rate_limit(&state);
+        assert!(service::check_rate_limit(&state).is_ok());
         assert_eq!(*state.failed_unlock_attempts.lock().unwrap(), 0);
     }
 
@@ -1786,9 +1167,9 @@ mod tests {
     fn test_rate_limit_blocks_during_lockout() {
         let state = AppState::default();
         for _ in 0..5 {
-            record_failed_attempt(&state);
+            service::record_failed_attempt(&state);
         }
-        let result = check_rate_limit(&state);
+        let result = service::check_rate_limit(&state);
         assert!(result.is_err());
     }
 
@@ -1799,6 +1180,6 @@ mod tests {
         *state.lockout_until.lock().unwrap() = Some(
             Instant::now() - Duration::from_secs(1),
         );
-        assert!(check_rate_limit(&state).is_ok());
+        assert!(service::check_rate_limit(&state).is_ok());
     }
 }

@@ -41,7 +41,15 @@ vault.db
 /releases/*.app
 /releases/PwdVault.app
 /releases/pwdvault-native*
+/releases/PwdVault-*-Extension-*/
+/releases/pwdvault-native-*/
+/releases/pairing-toast-*.html
 
 # Environment variables
 .env
 .env.*
+
+# IDE / assistant local config
+.claude/
+.vscode/
+src-tauri/icons-backup/

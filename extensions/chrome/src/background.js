@@ -7,9 +7,43 @@
 // registered by the desktop app (native_host_setup.rs).
 const NATIVE_HOST = 'com.pwdvault.app';
 
+// Storage key for persisting the pairing token across service worker
+// restarts. MV3 service workers are killed by Chrome after ~30s idle; if
+// we don't persist the token, the user would be forced to re-pair after
+// every restart.
+const TOKEN_STORAGE_KEY = 'pwdvault_api_token';
+
 let connectionStatus = 'disconnected';
 let requestId = 0;
 let apiToken = null;
+
+// Persist/restore the token via chrome.storage.local. These are no-ops in
+// contexts where the storage API is unavailable (e.g. unit tests).
+function saveToken(token) {
+  apiToken = token;
+  try {
+    if (token) {
+      chrome.storage.local.set({ [TOKEN_STORAGE_KEY]: token });
+    } else {
+      chrome.storage.local.remove(TOKEN_STORAGE_KEY);
+    }
+  } catch (e) {
+    // storage API may be unavailable in some test contexts — ignore.
+  }
+}
+
+async function restoreToken() {
+  try {
+    const result = await chrome.storage.local.get(TOKEN_STORAGE_KEY);
+    if (result && result[TOKEN_STORAGE_KEY]) {
+      apiToken = result[TOKEN_STORAGE_KEY];
+      return true;
+    }
+  } catch (e) {
+    // ignore
+  }
+  return false;
+}
 
 // ============================================================================
 // Native Messaging Communication
@@ -53,11 +87,33 @@ function sendNativeMessageP(message) {
   });
 }
 
+// Pairing flow: pair → desktop app shows 6-digit code → user enters code
+// in popup → pair_confirm → server returns API token.
+// Returns 'paired' | 'needs_code' | 'failed'.
 async function pairWithApp() {
   try {
     const data = await sendNativeMessageP({ id: 0, command: 'pair' });
+    if (data && data.success && data.data) {
+      if (data.data.token) {
+        saveToken(data.data.token);
+        return 'paired';
+      }
+      if (data.data.pending) {
+        return 'needs_code';
+      }
+    }
+    return 'failed';
+  } catch {
+    return 'failed';
+  }
+}
+
+// Submit the user-entered 6-digit code to complete pairing.
+async function pairConfirm(code) {
+  try {
+    const data = await sendNativeMessageP({ id: 0, command: 'pair_confirm', code });
     if (data && data.success && data.data && data.data.token) {
-      apiToken = data.data.token;
+      saveToken(data.data.token);
       return true;
     }
     return false;
@@ -69,9 +125,9 @@ async function pairWithApp() {
 async function sendToApp(command, params = {}) {
   const id = ++requestId;
 
-  // If we don't have a token yet, try to pair first
-  if (!apiToken && command !== 'pair') {
-    await pairWithApp();
+  // Pairing commands bypass auth; all other commands require a token.
+  if (!apiToken && command !== 'pair' && command !== 'pair_confirm') {
+    throw new Error('Not paired with desktop app');
   }
 
   // Native Messaging has no HTTP headers, so the Bearer token travels in the
@@ -103,14 +159,47 @@ async function sendToApp(command, params = {}) {
 }
 
 async function checkConnection() {
-  try {
-    await pairWithApp();
-    await sendToApp('is_vault_initialized');
+  // Ensure the persisted token is restored before evaluating connection
+  // state. The service worker may have just been spun up by Chrome and
+  // `restoreToken()` (called fire-and-forget at SW startup) may not have
+  // completed yet. Without this await, the popup would see `apiToken === null`
+  // and wrongly force the user back into the pairing flow.
+  await restoreToken();
+
+  // If we have a token, verify it still works.
+  if (apiToken) {
+    try {
+      await sendToApp('is_vault_initialized');
+      connectionStatus = 'connected';
+      return connectionStatus;
+    } catch {
+      // Token rejected or app unreachable — clear it so a fresh pairing
+      // can be initiated.
+      saveToken(null);
+    }
+  }
+  // No token — needs pairing. Do NOT call `pair` here: each `pair` call
+  // creates a new session and overwrites the previous code, invalidating
+  // any code the desktop app is currently displaying. The popup must
+  // trigger pairing explicitly via START_PAIRING when the user is ready
+  // to enter the code.
+  connectionStatus = 'needs_pairing';
+  return connectionStatus;
+}
+
+// Explicitly initiate pairing: asks the desktop app to display a 6-digit
+// code. Should be called only when the user is on the pairing screen and
+// ready to enter the code, to avoid creating competing sessions.
+async function startPairing() {
+  const result = await pairWithApp();
+  if (result === 'paired') {
     connectionStatus = 'connected';
-  } catch {
+  } else if (result === 'needs_code') {
+    connectionStatus = 'needs_pairing';
+  } else {
     connectionStatus = 'disconnected';
   }
-  return connectionStatus;
+  return result;
 }
 
 // ============================================================================
@@ -187,7 +276,25 @@ async function getEntries() {
 }
 
 async function getEntry(id) {
-  return sendToApp('get_entry', { id_param: id });
+  // B4 split get_entry into get_entry_meta (no password) and get_entry_secret
+  // (password/notes/last_used_at). Fetch both and merge so callers keep
+  // getting the full entry shape they expect.
+  //
+  // Use allSettled so a secret-fetch failure (e.g. transient backend error)
+  // does not take down the meta fetch — the user still sees title/username/url,
+  // and password simply falls back to empty.
+  const [metaRes, secretRes] = await Promise.allSettled([
+    sendToApp('get_entry_meta', { id_param: id }),
+    sendToApp('get_entry_secret', { id_param: id }),
+  ]);
+  if (metaRes.status !== 'fulfilled' || !metaRes.value) return null;
+  const secret = secretRes.status === 'fulfilled' ? secretRes.value : null;
+  return {
+    ...metaRes.value,
+    password: secret ? secret.password : '',
+    notes: secret ? secret.notes : null,
+    last_used_at: secret ? secret.last_used_at : null,
+  };
 }
 
 async function getEntriesForUrl(url) {
@@ -223,19 +330,33 @@ async function generatePassword(options = {}) {
 // ============================================================================
 
 function setupContextMenu() {
-  chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({
-      id: 'pwdvault-fill',
-      title: 'Fill with PwdVault',
-      contexts: ['editable'],
-    });
+  // Wrap in try/catch: the contextMenus API can throw if the extension
+  // isn't yet fully initialized or if the API is unavailable in a given
+  // context. A thrown error here would abort the entire onInstalled /
+  // onStartup / SW-startup handler, preventing token restoration and
+  // other initialization from running.
+  try {
+    chrome.contextMenus.removeAll(() => {
+      try {
+        chrome.contextMenus.create({
+          id: 'pwdvault-fill',
+          title: 'Fill with PwdVault',
+          contexts: ['editable'],
+        });
 
-    chrome.contextMenus.create({
-      id: 'pwdvault-generate',
-      title: 'Generate Password',
-      contexts: ['editable'],
+        chrome.contextMenus.create({
+          id: 'pwdvault-generate',
+          title: 'Generate Password',
+          contexts: ['editable'],
+        });
+      } catch (e) {
+        // contextMenus.create can throw if an entry already exists or if
+        // the API is temporarily unavailable — non-fatal.
+      }
     });
-  });
+  } catch (e) {
+    // contextMenus API unavailable — non-fatal; the popup still works.
+  }
 }
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
@@ -340,6 +461,17 @@ async function handleMessage(message, sender) {
     case 'CONNECT':
       return { status: await checkConnection() };
 
+    case 'START_PAIRING':
+      const pairResult = await startPairing();
+      return { result: pairResult, status: connectionStatus };
+
+    case 'PAIR_CONFIRM':
+      const ok = await pairConfirm(message.code);
+      if (ok) {
+        return { success: true };
+      }
+      return { success: false, error: 'Invalid or expired code' };
+
     default:
       throw new Error(`Unknown message type: ${message.type}`);
   }
@@ -374,15 +506,34 @@ chrome.commands.onCommand.addListener(async (command) => {
 // Initialization
 // ============================================================================
 
-chrome.runtime.onInstalled.addListener(() => {
+// NOTE: Do NOT call checkConnection() on service worker startup. In MV3 the
+// service worker is terminated and restarted frequently; each restart would
+// trigger `pair` (via checkConnection → pairWithApp), creating a new session
+// and invalidating any code the desktop app is currently displaying. Pairing
+// is initiated explicitly by the popup via START_PAIRING when the user is
+// ready to enter the code.
+
+chrome.runtime.onInstalled.addListener((details) => {
   setupContextMenu();
-  checkConnection();
+  // Only clear the token on a genuine first install. Clearing on every
+  // `onInstalled` (which also fires for updates and Chrome updates) would
+  // force the user to re-pair after every extension upgrade, even though
+  // the persisted token is still valid.
+  if (details.reason === 'install') {
+    saveToken(null);
+  }
 });
 
 chrome.runtime.onStartup.addListener(() => {
   setupContextMenu();
-  checkConnection();
+  // Restore the persisted token when the browser starts so the user does
+  // not have to re-pair every browser launch.
+  restoreToken();
 });
 
+// Service worker startup (including restarts after being killed by Chrome
+// for idleness): restore the token before serving any popup requests.
+// restoreToken is async but we don't await here — the popup will retry
+// CONNECT and checkConnection will handle the not-yet-restored case.
 setupContextMenu();
-checkConnection();
+restoreToken();

@@ -9,8 +9,7 @@ use thiserror::Error;
 use zeroize::Zeroize;
 
 use super::cipher::{self, EncryptedData};
-use super::keystore;
-use super::kdf::{derive_key_with_params, AdaptiveParams};
+use super::kdf::{derive_key_with_params, derive_subkeys, AdaptiveParams};
 use super::{KEY_SIZE, SALT_SIZE, VERIFICATION_HEADER};
 
 /// Error type for verification operations
@@ -21,9 +20,6 @@ pub enum VerificationError {
 
     #[error("Encryption error: {0}")]
     EncryptionError(#[from] cipher::EncryptionError),
-
-    #[error("Key store error: {0}")]
-    KeyStoreError(#[from] keystore::KeyStoreError),
 
     #[error("KDF error: {0}")]
     KdfError(String),
@@ -75,28 +71,28 @@ pub fn verify_password(
     result
 }
 
-/// Verify password and store key in keystore if correct
+/// Verify password and return derived (encryption_key, integrity_mac_key) if correct.
 pub fn unlock_with_password(
     password: &str,
     verification_data: &VerificationData,
-) -> Result<bool, VerificationError> {
-    let (mut key, _) =
+) -> Result<Option<([u8; KEY_SIZE], [u8; KEY_SIZE])>, VerificationError> {
+    let (mut master_key, _) =
         derive_key_with_params(password, &verification_data.salt, &verification_data.params)
             .map_err(|e| VerificationError::KdfError(e.to_string()))?;
 
-    let result = match cipher::decrypt(&key, &verification_data.encrypted_header) {
+    let result = match cipher::decrypt(&master_key, &verification_data.encrypted_header) {
         Ok(decrypted) => {
             if decrypted.as_slice().ct_eq(VERIFICATION_HEADER).into() {
-                let key_copy = key;
-                key.zeroize();
-                keystore::set_key(key_copy)?;
-                return Ok(true);
+                let (enc_key, mac_key) = derive_subkeys(&master_key, &verification_data.salt);
+                master_key.zeroize();
+                Ok(Some((enc_key, mac_key)))
+            } else {
+                Ok(None)
             }
-            Ok(false)
         }
-        Err(_) => Ok(false),
+        Err(_) => Ok(None),
     };
-    key.zeroize();
+    master_key.zeroize();
     result
 }
 
@@ -118,21 +114,18 @@ mod tests {
 
     #[test]
     fn test_unlock_with_password() {
-        keystore::clear_key();
-
         let salt = generate_salt();
-        let (key, params) = derive_key("my_password", &salt).unwrap();
+        let (master_key, params) = derive_key("my_password", &salt).unwrap();
 
-        let verification = create_verification_header(&key, salt, params).unwrap();
+        let verification = create_verification_header(&master_key, salt, params).unwrap();
 
         let result = unlock_with_password("wrong", &verification).unwrap();
-        assert!(!result);
-        assert!(!keystore::is_unlocked());
+        assert!(result.is_none());
 
         let result = unlock_with_password("my_password", &verification).unwrap();
-        assert!(result);
-        assert!(keystore::is_unlocked());
-
-        keystore::clear_key();
+        assert!(result.is_some());
+        let (enc_key, mac_key) = result.unwrap();
+        assert_ne!(enc_key, mac_key);
+        assert_ne!(enc_key, master_key);
     }
 }

@@ -100,8 +100,8 @@ PwdVault/
 ### Key Architectural Decisions
 
 1. **Unified API Client** (`src/api/vault.ts`):
-   - Detects Tauri environment via `window.__TAURI_INTERNALS__`
-   - Falls back to HTTP API (port 17429) for browser extension or dev testing
+   - Tauri IPC only; throws if not in Tauri environment
+   - Browser extension uses its own background.js with Native Messaging + HTTP API
 
 2. **Shared AppState**:
    - Tauri desktop app and HTTP server share the same `Arc<AppState>`
@@ -183,16 +183,17 @@ PwdVault/
 
 | Module | Tests | Command |
 |--------|-------|---------|
-| Rust (total) | 53+ | `cd src-tauri && cargo test -- --test-threads=1` |
+| Rust (total) | 81 | `cd src-tauri && cargo test` |
 | crypto | 10 | cipher (4), kdf (3), keystore (2), verification (2) |
-| database | 5 | init, CRUD, list, count, delete |
+| database | 5 | init, CRUD, list, count, delete, integrity |
 | lib.rs | 18+ | AppState, generate_password, VaultError, vault lifecycle, CRUD, export/import |
 | native_messaging | 20+ | 15 API endpoints + locked state checks + export/import |
-| Frontend (total) | 17 | `pnpm test` |
+| Frontend (total) | 27 | `pnpm test` |
 | passwordStrength | 10 | scoring, penalties, edge cases |
 | vault API client | 7 | HTTP fallback, error handling, request structure |
 
-> **Note**: Rust tests require `-- --test-threads=1` due to global in-memory keystore shared across tests.
+> **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
+> now per-`AppState` (A3), so parallel test execution is safe.
 
 ---
 
@@ -260,8 +261,8 @@ pnpm tauri build
 # Type check
 pnpm tsc --noEmit
 
-# Rust tests (must run single-threaded due to global keystore)
-cd src-tauri && cargo test -- --test-threads=1
+# Rust tests (parallel-safe; keystore is per-AppState)
+cd src-tauri && cargo test
 
 # Frontend tests
 pnpm test
@@ -388,7 +389,7 @@ git tag vX.Y.Z && git push origin main --tags
 - Updated CLAUDE.md with v0.1.3 release information
 
 **Technical Notes:**
-- Rust tests require `-- --test-threads=1` due to global in-memory keystore
+- Rust tests are parallel-safe (keystore is per-AppState, no global statics)
 - Tauri v2 `MenuItem<R: Runtime>` generic prevents direct storage; solved with closure type erasure (`Box<dyn Fn(&str) + Send + Sync>`)
 - Password generator now guarantees 100% coverage of selected character types using shuffle-guarantee algorithm
 
@@ -578,9 +579,8 @@ Format: `{"chrome": "<id>", "firefox": "<id>"}`
   provides the source-locking security benefit.
 - **Extension ID stability**: `allowed_origins` uses the dev extension ID from
   config. After store publication with fixed IDs, update `native_host_setup.rs`.
-- **Pre-existing test failures**: 9-10 unit tests fail due to global-state
-  pollution (keystore/auth token singletons). These are unrelated to the NM
-  change and existed before. Run tests with `--test-threads=1` to avoid.
+- **Pre-existing test failures**: Resolved — the keystore is now per-`AppState`
+  (A3), so tests run in parallel without `--test-threads=1`.
 - **macOS code signing**: The host binary is unsigned in local builds. CI
   release builds may need codesign/notarize steps for distribution.
 - **Tauri resources executable bit**: `bundle.resources` does not preserve +x;

@@ -103,25 +103,17 @@ mod tests {
     }
 
     #[test]
-    fn test_token_consistent() {
+    fn test_token_consistency_and_lifecycle() {
+        // All stateful token tests are combined to avoid races on the global
+        // in-memory token when tests run in parallel.
         let t1 = get_token();
         let t2 = get_token();
         assert_eq!(t1, t2, "token should be consistent within a session");
-    }
 
-    #[test]
-    fn test_regenerate_token() {
-        let t1 = get_token();
-        let t2 = regenerate_token();
-        assert_ne!(t1, t2, "regenerated token should be different");
-        let t3 = get_token();
-        assert_eq!(t2, t3, "after regeneration, get_token should return new token");
-    }
-
-    #[test]
-    fn test_validate_token_success() {
-        let token = get_token();
-        assert!(validate_token(&format!("Bearer {}", token)));
+        let t3 = regenerate_token();
+        assert_ne!(t1, t3, "regenerated token should be different");
+        assert_eq!(t3, get_token(), "after regeneration, get_token should return new token");
+        assert!(validate_token(&format!("Bearer {}", t3)));
     }
 
     #[test]

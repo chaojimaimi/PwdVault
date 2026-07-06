@@ -1,6 +1,6 @@
 [package]
 name = "pwdvault"
-version = "1.0.3"
+version = "1.0.5"
 description = "A secure, local-first password manager"
 authors = ["andylee"]
 edition = "2021"
@@ -27,8 +27,11 @@ base64 = "0.22"
 # Cryptography
 aes-gcm = { version = "0.10", features = ["std"] }
 argon2 = { version = "0.5", features = ["std"] }
+hmac = "0.12"
+hkdf = "0.12"
+sha2 = "0.10"
 rand = "0.8"
-zeroize = { version = "1", features = ["derive"] }
+zeroize = { version = "1", features = ["derive", "serde"] }
 subtle = "2"
 typenum = "1"
 
@@ -49,6 +52,11 @@ tiny_http = "0.12"
 # Update checker
 ureq = { version = "3", features = ["json"] }
 semver = "1"
+
+# Structured logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 
 # Native messaging host registration (Windows registry)
 [target.'cfg(windows)'.dependencies]

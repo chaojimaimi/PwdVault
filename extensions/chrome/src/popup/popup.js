@@ -25,6 +25,8 @@ class PopupApp {
         includeSymbols: true,
       },
       generatorCopied: false,
+      // Pairing state
+      pairingStarted: false,
     };
 
     this.loadTheme();
@@ -68,7 +70,9 @@ class PopupApp {
     try {
       const status = await this.sendMessage({ type: 'GET_STATUS' });
 
-      if (status.unlocked) {
+      if (status.status === 'needs_pairing') {
+        this.state.status = 'pairing';
+      } else if (status.unlocked) {
         this.state.status = 'unlocked';
         this.state.unlocked = true;
         await Promise.all([this.loadEntries(), this.loadGroups()]);
@@ -126,6 +130,12 @@ class PopupApp {
       const entry = await this.sendMessage({ type: 'GET_ENTRY', id });
       if (entry && !entry.error) {
         this.state.entryDetails.set(id, entry);
+        // Re-render so the freshly fetched details appear in the popup.
+        // Without this, the async data lands in state.entryDetails but the
+        // DOM never updates (popup has no reactive subscription layer).
+        if (this.state.expandedEntryId === id) {
+          this.render();
+        }
         return entry;
       }
     } catch (error) {
@@ -323,6 +333,14 @@ class PopupApp {
   render() {
     const app = document.getElementById('app');
 
+    // Preserve scroll position across re-renders. Each render() rebuilds the
+    // DOM via innerHTML, which resets scrollTop to 0 — causing the view to
+    // jump to the top when the user expands an entry or toggles password
+    // visibility in the lower part of the list. The scrollable container is
+    // the .list element (max-height: 280px; overflow-y: auto).
+    const listEl = app.querySelector('.list');
+    const savedScrollTop = listEl ? listEl.scrollTop : 0;
+
     switch (this.state.status) {
       case 'loading':
         app.innerHTML = this.renderLoading();
@@ -350,8 +368,25 @@ class PopupApp {
         app.innerHTML = this.renderDisconnected();
         this.attachDisconnectedEvents();
         break;
+      case 'pairing':
+        app.innerHTML = this.renderPairing();
+        this.attachPairingEvents();
+        // Auto-request a fresh pairing code on first entry to the pairing
+        // screen. The pairingStarted flag prevents repeat calls when the
+        // popup re-renders (e.g. after an error) without the user explicitly
+        // asking for a new code.
+        if (!this.state.pairingStarted) {
+          this.startPairing();
+        }
+        break;
       default:
         app.innerHTML = this.renderError();
+    }
+
+    // Restore scroll position after DOM rebuild (see comment above).
+    const newListEl = app.querySelector('.list');
+    if (newListEl) {
+      newListEl.scrollTop = savedScrollTop;
     }
   }
 
@@ -750,6 +785,96 @@ class PopupApp {
         <button class="btn btn-primary" id="connect-btn">Connect to Desktop App</button>
       </div>
     `;
+  }
+
+  renderPairing() {
+    return `
+      <div class="lock-screen">
+        <div class="lock-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 12l2 2 4-4"/>
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0110 0v4"/>
+          </svg>
+        </div>
+        <h2>Pairing Required</h2>
+        <p>Enter the 6-digit code shown in the PwdVault desktop app</p>
+        ${this.state.error ? `<div class="error-message">${this.escapeHtml(this.state.error)}</div>` : ''}
+        <form id="pairing-form">
+          <div class="form-group">
+            <label for="pairing-code">Pairing Code</label>
+            <input type="text" id="pairing-code" class="form-input" placeholder="000000"
+              maxlength="6" pattern="[0-9]{6}" inputmode="numeric" autofocus
+              style="text-align:center;font-size:1.5em;letter-spacing:0.3em;" />
+          </div>
+          <button type="submit" class="btn btn-primary">Confirm Pairing</button>
+        </form>
+        <button class="btn btn-secondary" id="new-code-btn" style="width:100%;margin-top:8px;">Get New Code</button>
+      </div>
+    `;
+  }
+
+  attachPairingEvents() {
+    const form = document.getElementById('pairing-form');
+    if (form) {
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const code = document.getElementById('pairing-code').value.trim();
+        if (!code || code.length !== 6) {
+          this.state.error = 'Please enter the 6-digit code';
+          this.render();
+          return;
+        }
+
+        const result = await this.sendMessage({ type: 'PAIR_CONFIRM', code });
+        if (result && result.success) {
+          this.state.error = null;
+          this.state.pairingStarted = false;
+          await this.init();
+        } else {
+          this.state.error = (result && result.error) || 'Invalid or expired code';
+          this.state.pairingStarted = false;
+          this.render();
+        }
+      };
+    }
+
+    // "Get new code" button — requests a fresh pairing session from the
+    // desktop app. The new code will be displayed as a toast there.
+    const newCodeBtn = document.getElementById('new-code-btn');
+    if (newCodeBtn) {
+      newCodeBtn.onclick = async () => {
+        this.state.error = null;
+        this.state.pairingStarted = false;
+        // Show a brief loading state on the button
+        newCodeBtn.textContent = 'Requesting...';
+        newCodeBtn.disabled = true;
+        await this.startPairing();
+        newCodeBtn.textContent = 'Get New Code';
+        newCodeBtn.disabled = false;
+      };
+    }
+  }
+
+  // Ask the desktop app to display a new 6-digit pairing code.
+  // Only called once per pairing screen render.
+  async startPairing() {
+    if (this.state.pairingStarted) return;
+    this.state.pairingStarted = true;
+    try {
+      const result = await this.sendMessage({ type: 'START_PAIRING' });
+      if (result && result.result === 'failed') {
+        this.state.status = 'disconnected';
+        this.state.pairingStarted = false;
+        this.render();
+      } else if (result && result.result === 'paired') {
+        // Already paired (token cached) — proceed to normal flow
+        this.state.pairingStarted = false;
+        await this.init();
+      }
+    } catch (e) {
+      this.state.pairingStarted = false;
+    }
   }
 
   renderError() {

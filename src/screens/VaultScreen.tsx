@@ -45,9 +45,9 @@ export function VaultScreen() {
 
   const handleCopyPassword = async (e: React.MouseEvent, entry: EntrySummary) => {
     e.stopPropagation();
-    const fullEntry = await actions.getEntry(entry.id);
-    if (fullEntry?.password) {
-      await copyWithTimeout(fullEntry.password);
+    const secret = await actions.getEntrySecret(entry.id);
+    if (secret?.password) {
+      await copyWithTimeout(secret.password);
       setCopiedId(entry.id);
       showToast('Password copied (auto-clears in 30s)');
       setTimeout(() => setCopiedId(null), 2000);

@@ -1,4 +1,4 @@
-import type { CreateEntryRequest, EntryResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, UpdateInfo, Group } from '../types';
+import type { CreateEntryRequest, EntrySecretResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, UpdateInfo, Group } from '../types';
 
 // Unified invoke function that works in both Tauri and browser environments
 async function invoke<T>(cmd: string, args?: Record<string, any>): Promise<T> {
@@ -57,8 +57,12 @@ export async function createEntry(request: CreateEntryRequest): Promise<EntrySum
   return invoke('create_entry', { request });
 }
 
-export async function getEntry(id: string): Promise<EntryResponse> {
-  return invoke('get_entry', { id });
+export async function getEntryMeta(id: string): Promise<EntrySummary> {
+  return invoke('get_entry_meta', { id });
+}
+
+export async function getEntrySecret(id: string): Promise<EntrySecretResponse> {
+  return invoke('get_entry_secret', { id });
 }
 
 export async function listAllEntries(): Promise<EntrySummary[]> {

@@ -1,9 +1,8 @@
 //! Secure key storage in memory
 //!
-//! The encryption key is stored in a static Mutex and cleared on lock.
+//! The encryption key is stored in a per-AppState Mutex and cleared on lock.
 
 use std::sync::Mutex;
-use once_cell::sync::Lazy;
 use thiserror::Error;
 use zeroize::Zeroize;
 
@@ -19,44 +18,60 @@ pub enum KeyStoreError {
     AlreadyUnlocked,
 }
 
-type EncryptionKey = [u8; KEY_SIZE];
+/// Type alias for the encryption key
+pub type EncryptionKey = [u8; KEY_SIZE];
 
-static KEYSTORE: Lazy<Mutex<Option<EncryptionKey>>> = Lazy::new(|| Mutex::new(None));
+/// In-memory key storage. Owned by AppState so each test/app instance is isolated.
+#[derive(Debug, Default)]
+pub struct KeyStore {
+    key: Mutex<Option<EncryptionKey>>,
+}
 
-/// Set the encryption key in memory
-pub fn set_key(key: [u8; KEY_SIZE]) -> Result<(), KeyStoreError> {
-    let mut keystore = KEYSTORE.lock().expect("keystore lock poisoned");
-
-    // Idempotent: if already unlocked with the same key, succeed silently
-    if let Some(existing) = keystore.as_ref() {
-        if existing == &key {
-            return Ok(());
+impl KeyStore {
+    /// Create a new empty keystore
+    pub fn new() -> Self {
+        Self {
+            key: Mutex::new(None),
         }
-        return Err(KeyStoreError::AlreadyUnlocked);
     }
 
-    *keystore = Some(key);
-    Ok(())
-}
+    /// Set the encryption key in memory
+    pub fn set_key(&self, mut key: EncryptionKey) -> Result<(), KeyStoreError> {
+        let mut keystore = self.key.lock().expect("keystore lock poisoned");
 
-/// Get the encryption key from memory
-pub fn get_key() -> Result<[u8; KEY_SIZE], KeyStoreError> {
-    let keystore = KEYSTORE.lock().expect("keystore lock poisoned");
-    keystore.ok_or(KeyStoreError::VaultLocked)
-}
+        // Idempotent: if already unlocked with the same key, succeed silently
+        if let Some(existing) = keystore.as_ref() {
+            if existing == &key {
+                key.zeroize();
+                return Ok(());
+            }
+            key.zeroize();
+            return Err(KeyStoreError::AlreadyUnlocked);
+        }
 
-/// Check if the vault is unlocked
-pub fn is_unlocked() -> bool {
-    let keystore = KEYSTORE.lock().expect("keystore lock poisoned");
-    keystore.is_some()
-}
+        *keystore = Some(key);
+        Ok(())
+    }
 
-/// Clear the encryption key from memory
-pub fn clear_key() {
-    let mut keystore = KEYSTORE.lock().expect("keystore lock poisoned");
+    /// Get the encryption key from memory
+    pub fn get_key(&self) -> Result<EncryptionKey, KeyStoreError> {
+        let keystore = self.key.lock().expect("keystore lock poisoned");
+        keystore.ok_or(KeyStoreError::VaultLocked)
+    }
 
-    if let Some(mut key) = keystore.take() {
-        key.zeroize();
+    /// Check if the vault is unlocked
+    pub fn is_unlocked(&self) -> bool {
+        let keystore = self.key.lock().expect("keystore lock poisoned");
+        keystore.is_some()
+    }
+
+    /// Clear the encryption key from memory
+    pub fn clear_key(&self) {
+        let mut keystore = self.key.lock().expect("keystore lock poisoned");
+
+        if let Some(mut key) = keystore.take() {
+            key.zeroize();
+        }
     }
 }
 
@@ -64,45 +79,35 @@ pub fn clear_key() {
 mod tests {
     use super::*;
 
-    fn clear_keystore() {
-        let mut keystore = KEYSTORE.lock().unwrap();
-        *keystore = None;
-    }
-
     #[test]
     fn test_set_get_clear_key() {
-        clear_keystore();
-
+        let store = KeyStore::new();
         let test_key = [123u8; KEY_SIZE];
 
-        set_key(test_key).unwrap();
-        let retrieved = get_key().unwrap();
+        store.set_key(test_key).unwrap();
+        let retrieved = store.get_key().unwrap();
         assert_eq!(test_key, retrieved);
 
-        clear_key();
-        assert!(get_key().is_err());
-        assert!(!is_unlocked());
+        store.clear_key();
+        assert!(store.get_key().is_err());
+        assert!(!store.is_unlocked());
     }
 
     #[test]
     fn test_double_set_fails() {
-        clear_keystore();
+        let store = KeyStore::new();
 
-        set_key([1u8; KEY_SIZE]).unwrap();
-        assert!(set_key([2u8; KEY_SIZE]).is_err());
-
-        clear_keystore();
+        store.set_key([1u8; KEY_SIZE]).unwrap();
+        assert!(store.set_key([2u8; KEY_SIZE]).is_err());
     }
 
     #[test]
     fn test_idempotent_set_same_key() {
-        clear_keystore();
+        let store = KeyStore::new();
 
         let key = [42u8; KEY_SIZE];
-        set_key(key).unwrap();
+        store.set_key(key).unwrap();
         // Setting the same key again should succeed (idempotent)
-        assert!(set_key(key).is_ok());
-
-        clear_keystore();
+        assert!(store.set_key(key).is_ok());
     }
 }

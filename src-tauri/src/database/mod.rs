@@ -13,10 +13,14 @@ use super::VerificationData;
 // Constants
 // ============================================================================
 
-const VAULT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vault");
-const ENTRIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("entries");
-const GROUPS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("groups");
-const SETTINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("settings");
+pub(crate) const VAULT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vault");
+pub(crate) const ENTRIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("entries");
+pub(crate) const GROUPS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("groups");
+pub(crate) const SETTINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("settings");
+
+pub mod integrity;
+pub mod entry_codec;
+pub mod group_codec;
 
 // ============================================================================
 // Error Types
@@ -41,6 +45,12 @@ pub enum DatabaseError {
 
     #[error("Serialization error: {0}")]
     SerializationError(String),
+
+    #[error("Encryption error: {0}")]
+    EncryptionError(String),
+
+    #[error("Decryption error: {0}")]
+    DecryptionError(String),
 
     #[error("Entry not found")]
     EntryNotFound,
@@ -79,51 +89,6 @@ pub struct PasswordEntry {
     /// Optional group id this entry belongs to
     #[serde(default)]
     pub group_id: Option<String>,
-}
-
-/// Legacy entry format (before group_id was added) for migration
-#[derive(Debug, Deserialize)]
-struct LegacyPasswordEntry {
-    id: String,
-    title: String,
-    url: Option<String>,
-    username: String,
-    encrypted_password: Vec<u8>,
-    encrypted_notes: Option<Vec<u8>>,
-    tags: Vec<String>,
-    created_at: i64,
-    updated_at: i64,
-    last_used_at: Option<i64>,
-}
-
-impl From<LegacyPasswordEntry> for PasswordEntry {
-    fn from(old: LegacyPasswordEntry) -> Self {
-        Self {
-            id: old.id,
-            title: old.title,
-            url: old.url,
-            username: old.username,
-            encrypted_password: old.encrypted_password,
-            encrypted_notes: old.encrypted_notes,
-            tags: old.tags,
-            created_at: old.created_at,
-            updated_at: old.updated_at,
-            last_used_at: old.last_used_at,
-            group_id: None,
-        }
-    }
-}
-
-/// Deserialize a PasswordEntry, falling back to legacy format if group_id is missing
-fn deserialize_entry(data: &[u8]) -> Result<PasswordEntry, DatabaseError> {
-    // Try current format first
-    if let Ok(entry) = bincode::deserialize::<PasswordEntry>(data) {
-        return Ok(entry);
-    }
-    // Fall back to legacy format (without group_id)
-    bincode::deserialize::<LegacyPasswordEntry>(data)
-        .map(|old| old.into())
-        .map_err(|e| DatabaseError::SerializationError(e.to_string()))
 }
 
 impl PasswordEntry {
@@ -212,6 +177,7 @@ pub fn init_database<P: AsRef<Path>>(path: P) -> Result<Database, DatabaseError>
     write_txn.open_table(ENTRIES_TABLE)?;
     write_txn.open_table(GROUPS_TABLE)?;
     write_txn.open_table(SETTINGS_TABLE)?;
+    write_txn.open_table(integrity::META_TABLE)?;
     write_txn.commit()?;
 
     Ok(db)
@@ -250,10 +216,13 @@ pub fn load_verification_data(db: &Database) -> Result<Option<VerificationData>,
     }
 }
 
-/// Save a password entry to the database
-pub fn save_entry(db: &Database, entry: &PasswordEntry) -> Result<(), DatabaseError> {
-    let encoded = bincode::serialize(entry)
-        .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
+/// Save a password entry to the database (entry is encrypted as a whole blob)
+pub fn save_entry(
+    db: &Database,
+    key: &[u8; 32],
+    entry: &PasswordEntry,
+) -> Result<(), DatabaseError> {
+    let encoded = entry_codec::seal_entry(entry, key)?;
 
     let write_txn = db.begin_write()?;
     {
@@ -265,14 +234,18 @@ pub fn save_entry(db: &Database, entry: &PasswordEntry) -> Result<(), DatabaseEr
     Ok(())
 }
 
-/// Load a password entry from the database
-pub fn load_entry(db: &Database, id: &str) -> Result<Option<PasswordEntry>, DatabaseError> {
+/// Load a password entry from the database (decrypts the stored blob)
+pub fn load_entry(
+    db: &Database,
+    key: &[u8; 32],
+    id: &str,
+) -> Result<Option<PasswordEntry>, DatabaseError> {
     let read_txn = db.begin_read()?;
     let table = read_txn.open_table(ENTRIES_TABLE)?;
 
     match table.get(id)? {
         Some(value) => {
-            let entry = deserialize_entry(value.value())?;
+            let entry = entry_codec::open_entry(value.value(), key)?;
             Ok(Some(entry))
         }
         None => Ok(None),
@@ -312,10 +285,13 @@ pub fn count_entries(db: &Database) -> Result<usize, DatabaseError> {
     Ok(table.len()? as usize)
 }
 
-/// Save a group to the database
-pub fn save_group(db: &Database, group: &Group) -> Result<(), DatabaseError> {
-    let encoded = bincode::serialize(group)
-        .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
+/// Save a group to the database (group is encrypted as a whole blob)
+pub fn save_group(
+    db: &Database,
+    key: &[u8; 32],
+    group: &Group,
+) -> Result<(), DatabaseError> {
+    let encoded = group_codec::seal_group(group, key)?;
 
     let write_txn = db.begin_write()?;
     {
@@ -327,15 +303,18 @@ pub fn save_group(db: &Database, group: &Group) -> Result<(), DatabaseError> {
     Ok(())
 }
 
-/// Load a group from the database
-pub fn load_group(db: &Database, id: &str) -> Result<Option<Group>, DatabaseError> {
+/// Load a group from the database (decrypts the stored blob)
+pub fn load_group(
+    db: &Database,
+    key: &[u8; 32],
+    id: &str,
+) -> Result<Option<Group>, DatabaseError> {
     let read_txn = db.begin_read()?;
     let table = read_txn.open_table(GROUPS_TABLE)?;
 
     match table.get(id)? {
         Some(value) => {
-            let g: Group = bincode::deserialize(value.value())
-                .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
+            let g = group_codec::open_group(value.value(), key)?;
             Ok(Some(g))
         }
         None => Ok(None),
@@ -413,6 +392,8 @@ mod tests {
     use super::*;
     use tempfile::NamedTempFile;
 
+    const TEST_KEY: [u8; 32] = [1u8; 32];
+
     fn get_test_db() -> (Database, NamedTempFile) {
         let temp = NamedTempFile::new().unwrap();
         let db = init_database(temp.path()).unwrap();
@@ -437,8 +418,8 @@ mod tests {
         );
         entry.encrypted_password = vec![1, 2, 3, 4];
 
-        save_entry(&db, &entry).unwrap();
-        let loaded = load_entry(&db, &entry.id).unwrap();
+        save_entry(&db, &TEST_KEY, &entry).unwrap();
+        let loaded = load_entry(&db, &TEST_KEY, &entry.id).unwrap();
 
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
@@ -457,12 +438,12 @@ mod tests {
             "user".to_string(),
         );
 
-        save_entry(&db, &entry).unwrap();
-        assert!(load_entry(&db, &entry.id).unwrap().is_some());
+        save_entry(&db, &TEST_KEY, &entry).unwrap();
+        assert!(load_entry(&db, &TEST_KEY, &entry.id).unwrap().is_some());
 
         let deleted = delete_entry(&db, &entry.id).unwrap();
         assert!(deleted);
-        assert!(load_entry(&db, &entry.id).unwrap().is_none());
+        assert!(load_entry(&db, &TEST_KEY, &entry.id).unwrap().is_none());
     }
 
     #[test]
@@ -472,8 +453,8 @@ mod tests {
         let entry1 = PasswordEntry::new("Site 1".to_string(), None, "user1".to_string());
         let entry2 = PasswordEntry::new("Site 2".to_string(), None, "user2".to_string());
 
-        save_entry(&db, &entry1).unwrap();
-        save_entry(&db, &entry2).unwrap();
+        save_entry(&db, &TEST_KEY, &entry1).unwrap();
+        save_entry(&db, &TEST_KEY, &entry2).unwrap();
 
         let ids = list_entries(&db).unwrap();
         assert_eq!(ids.len(), 2);
@@ -488,7 +469,7 @@ mod tests {
         assert_eq!(count_entries(&db).unwrap(), 0);
 
         let entry = PasswordEntry::new("Test".to_string(), None, "user".to_string());
-        save_entry(&db, &entry).unwrap();
+        save_entry(&db, &TEST_KEY, &entry).unwrap();
 
         assert_eq!(count_entries(&db).unwrap(), 1);
     }
@@ -498,9 +479,9 @@ mod tests {
         let (db, _temp) = get_test_db();
 
         let group = Group::new("Personal".to_string());
-        save_group(&db, &group).unwrap();
+        save_group(&db, &TEST_KEY, &group).unwrap();
 
-        let loaded = load_group(&db, &group.id).unwrap();
+        let loaded = load_group(&db, &TEST_KEY, &group.id).unwrap();
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
         assert_eq!(group.id, loaded.id);
@@ -512,12 +493,12 @@ mod tests {
         let (db, _temp) = get_test_db();
 
         let group = Group::new("Work".to_string());
-        save_group(&db, &group).unwrap();
-        assert!(load_group(&db, &group.id).unwrap().is_some());
+        save_group(&db, &TEST_KEY, &group).unwrap();
+        assert!(load_group(&db, &TEST_KEY, &group.id).unwrap().is_some());
 
         let deleted = delete_group(&db, &group.id).unwrap();
         assert!(deleted);
-        assert!(load_group(&db, &group.id).unwrap().is_none());
+        assert!(load_group(&db, &TEST_KEY, &group.id).unwrap().is_none());
     }
 
     #[test]
@@ -527,8 +508,8 @@ mod tests {
         let g1 = Group::new("A".to_string());
         let g2 = Group::new("B".to_string());
 
-        save_group(&db, &g1).unwrap();
-        save_group(&db, &g2).unwrap();
+        save_group(&db, &TEST_KEY, &g1).unwrap();
+        save_group(&db, &TEST_KEY, &g2).unwrap();
 
         let ids = list_groups(&db).unwrap();
         assert_eq!(ids.len(), 2);
@@ -543,7 +524,7 @@ mod tests {
         assert_eq!(count_groups(&db).unwrap(), 0);
 
         let g = Group::new("X".to_string());
-        save_group(&db, &g).unwrap();
+        save_group(&db, &TEST_KEY, &g).unwrap();
 
         assert_eq!(count_groups(&db).unwrap(), 1);
     }

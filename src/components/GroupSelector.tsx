@@ -44,7 +44,7 @@ export default function GroupSelector({ value, onChange }: Props) {
   return (
     <div className="group-selector">
       {isCreating ? (
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <div className="group-selector-row">
           <input
             type="text"
             className="form-input"
@@ -58,7 +58,7 @@ export default function GroupSelector({ value, onChange }: Props) {
           <button className="btn btn-secondary" onClick={() => { setIsCreating(false); setNewGroupName(''); setError(null); }} type="button">Cancel</button>
         </div>
       ) : (
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <div className="group-selector-row">
           <select value={value || ''} onChange={(e) => onChange(e.target.value || null)}>
             <option value="">(No group)</option>
             {groups.map((g) => (
@@ -68,7 +68,7 @@ export default function GroupSelector({ value, onChange }: Props) {
           <button className="btn btn-link" onClick={() => setIsCreating(true)} type="button">New</button>
         </div>
       )}
-      {error && <div className="error-message" style={{ marginTop: '0.25rem' }}>{error}</div>}
+      {error && <div className="error-message group-selector-error">{error}</div>}
     </div>
   );
 }

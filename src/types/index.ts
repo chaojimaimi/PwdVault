@@ -15,17 +15,9 @@ export interface CreateEntryRequest {
   group_id?: string | null;
 }
 
-export interface EntryResponse {
-  id: string;
-  title: string;
-  url?: string;
-  username: string;
+export interface EntrySecretResponse {
   password: string;
   notes?: string;
-  tags: string[];
-  group_id?: string | null;
-  created_at: number;
-  updated_at: number;
   last_used_at?: number;
 }
 
@@ -65,7 +57,7 @@ export interface VaultState {
   isInitialized: boolean;
   isUnlocked: boolean;
   entries: EntrySummary[];
-  selectedEntry: EntryResponse | null;
+  selectedEntry: EntrySummary | null;
   searchQuery: string;
   groups: Group[];
   selectedGroupId?: string | null;

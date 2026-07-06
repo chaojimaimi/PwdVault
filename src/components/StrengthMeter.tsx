@@ -13,9 +13,15 @@ export function StrengthMeter({ password }: StrengthMeterProps) {
     <div className="strength-meter">
       <div
         className="strength-bar"
-        style={{ width: `${strength.score}%`, backgroundColor: strength.color }}
+        style={{
+          '--strength-fill': `${strength.score}%`,
+          '--strength-color': strength.color,
+        } as React.CSSProperties}
       />
-      <span className="strength-label" style={{ color: strength.color }}>
+      <span
+        className="strength-label"
+        style={{ '--strength-color': strength.color } as React.CSSProperties}
+      >
         {strength.label}
       </span>
     </div>

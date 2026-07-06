@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { AppProvider, useApp } from './context/AppContext';
 import { SetupScreen } from './screens/SetupScreen';
 import { UnlockScreen } from './screens/UnlockScreen';
@@ -8,6 +10,7 @@ import GroupManager from './screens/GroupManager';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { ImportExportScreen } from './screens/ImportExportScreen';
 import { ThemeProvider } from './components/ThemeProvider';
+import { showPairingCodeToast } from './utils/toast';
 import './styles/themes.css';
 import './styles/base.css';
 import './styles/components.css';
@@ -53,6 +56,23 @@ function AppContent() {
 }
 
 function App() {
+  useEffect(() => {
+    // Show the pairing code as a non-blocking toast. A modal dialog would
+    // block subsequent pair-request events (each one creates a new session
+    // and overwrites the previous code), making "Get New Code" in the
+    // extension appear to do nothing until the user dismisses the dialog.
+    // Toasts let multiple updates show in sequence without blocking.
+    const unlisten = listen('pair-request', (event) => {
+      const code = event.payload as string;
+      // V4 双主题配对码 toast：30s 与后端 SESSION_TTL 保持一致，
+      // 确保用户看到的码在有效期内。
+      showPairingCodeToast(code, 30000);
+    });
+    return () => {
+      unlisten.then((u) => u());
+    };
+  }, []);
+
   return (
     <ThemeProvider>
       <AppProvider>

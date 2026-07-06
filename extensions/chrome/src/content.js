@@ -740,7 +740,6 @@
       });
 
       // Copy button
-      const copyBtn = item.querySelector('[data-action="copy"]');
       copyBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         await copyEntryPassword(entry.id);

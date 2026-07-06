@@ -6,38 +6,35 @@ use std::io::Read;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 use tiny_http::{Request, Response, Server};
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
-use crate::AppState;
+use crate::{AppState, CreateEntryRequest, VaultBackup, VaultError};
 use crate::auth;
-use crate::crypto;
+use crate::constants;
 use crate::database;
-use crate::paths;
-
-/// Maximum request body size (10 MB)
-const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
-
-/// Maximum length for text fields
-const MAX_FIELD_LENGTH: usize = 4096;
-
-/// Maximum length for password fields
-const MAX_PASSWORD_LENGTH: usize = 1024;
-
-/// Maximum length for notes field
-const MAX_NOTES_LENGTH: usize = 65536;
+use crate::service;
 
 /// Native messaging request
+///
+/// Sensitive fields (`password`, `code`, `export_password`, `import_password`)
+/// are wrapped in `Zeroizing<String>` so they are wiped from memory when the
+/// request is dropped — including on error paths that never reach the service
+/// layer (e.g. a missing `title` causing early return before `password` is
+/// consumed).
 #[derive(Debug, Deserialize)]
 pub struct NativeRequest {
     pub id: u32,
     pub command: String,
     #[serde(default)]
-    pub password: Option<String>,
+    pub password: Option<Zeroizing<String>>,
     #[serde(default)]
     pub url: Option<String>,
     #[serde(default)]
     pub id_param: Option<String>,
+    #[serde(default)]
+    pub code: Option<Zeroizing<String>>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -57,9 +54,9 @@ pub struct NativeRequest {
     #[serde(default)]
     pub settings: Option<serde_json::Value>,
     #[serde(default)]
-    pub export_password: Option<String>,
+    pub export_password: Option<Zeroizing<String>>,
     #[serde(default)]
-    pub import_password: Option<String>,
+    pub import_password: Option<Zeroizing<String>>,
     #[serde(default)]
     pub backup: Option<serde_json::Value>,
 }
@@ -93,16 +90,29 @@ pub struct NativeResponse {
 }
 
 /// Start the native messaging HTTP server
-pub fn start_server(port: u16, state: Arc<AppState>) -> Result<(), String> {
+///
+/// Each incoming request is handled on its own thread so that a slow
+/// command (e.g. Argon2 key derivation during unlock) cannot stall
+/// connection acceptance or pairing flow for other concurrent clients.
+/// Vault-mutating commands are serialized via `AppState::op_lock` inside
+/// `execute_command`, so multi-threading here only parallelizes
+/// connection/parsing/auth — mutation correctness is preserved.
+pub fn start_server(
+    port: u16,
+    state: Arc<AppState>,
+    app_handle: Option<tauri::AppHandle>,
+) -> Result<(), String> {
     let addr = format!("127.0.0.1:{}", port);
 
     let server = Server::http(&addr)
         .map_err(|_| "Server error".to_string())?;
 
-    println!("Native messaging server listening on {}", addr);
+    tracing::info!(port = port, "native messaging server started");
 
     for request in server.incoming_requests() {
-        handle_request(request, state.clone());
+        let state = state.clone();
+        let app_handle = app_handle.clone();
+        std::thread::spawn(move || handle_request(request, state, app_handle));
     }
 
     Ok(())
@@ -134,7 +144,11 @@ fn add_cors_headers<T: std::io::Read>(response: &mut Response<T>, origin: Option
     );
 }
 
-fn handle_request(mut request: Request, state: Arc<AppState>) {
+fn handle_request(
+    mut request: Request,
+    state: Arc<AppState>,
+    app_handle: Option<tauri::AppHandle>,
+) {
     let origin: Option<String> = request.headers()
         .iter()
         .find(|h| h.field.equiv("Origin"))
@@ -155,7 +169,7 @@ fn handle_request(mut request: Request, state: Arc<AppState>) {
         .and_then(|h| h.value.as_str().parse().ok())
         .unwrap_or(0);
 
-    if content_length > MAX_BODY_SIZE {
+    if content_length > constants::MAX_BODY_SIZE {
         let response = create_error_response(0, "Request too large".to_string(), origin.as_deref());
         let _ = request.respond(response);
         return;
@@ -164,7 +178,9 @@ fn handle_request(mut request: Request, state: Arc<AppState>) {
     let mut body = String::new();
     // Limit the reader to the declared Content-Length so read_to_string
     // returns promptly instead of blocking for MAX_BODY_SIZE bytes.
-    let mut reader = request.as_reader().take(content_length.min(MAX_BODY_SIZE) as u64);
+    let mut reader = request
+        .as_reader()
+        .take(content_length.min(constants::MAX_BODY_SIZE) as u64);
     if let Err(_) = reader.read_to_string(&mut body) {
         let response = create_error_response(0, "Request failed".to_string(), origin.as_deref());
         let _ = request.respond(response);
@@ -184,9 +200,21 @@ fn handle_request(mut request: Request, state: Arc<AppState>) {
     let id = native_req.id;
     let command = native_req.command.clone();
 
-    // Authentication: /api/pair is unauthenticated (extension pairing),
-    // all other endpoints require Bearer token
-    if command != "pair" {
+    // Origin check (defense in depth): every request must come from a browser
+    // extension origin. CORS alone is browser-enforced and trivially bypassed
+    // by non-browser clients; requiring an extension origin server-side
+    // prevents any non-extension context (even one that stole a token) from
+    // invoking the API.
+    if !auth::is_extension_origin(origin.as_deref()) {
+        let response = create_error_response(id, "Forbidden".to_string(), origin.as_deref());
+        let _ = request.respond(response);
+        return;
+    }
+
+    // Authentication: /api/pair and /api/pair_confirm are unauthenticated
+    // (extension pairing flow — no token exists yet). All other endpoints
+    // require Bearer token.
+    if command != "pair" && command != "pair_confirm" {
         let auth_header = request.headers()
             .iter()
             .find(|h| h.field.equiv("Authorization"))
@@ -198,17 +226,10 @@ fn handle_request(mut request: Request, state: Arc<AppState>) {
             let _ = request.respond(response);
             return;
         }
-    } else {
-        // /api/pair only responds to browser extension origins
-        if !auth::is_extension_origin(origin.as_deref()) {
-            let response = create_error_response(id, "Forbidden".to_string(), origin.as_deref());
-            let _ = request.respond(response);
-            return;
-        }
     }
 
     // Execute command
-    let result = execute_command(native_req, state);
+    let result = execute_command(native_req, state, app_handle, origin.clone());
 
     // Send response
     let response = match result {
@@ -249,7 +270,30 @@ fn create_error_response(id: u32, error: String, origin: Option<&str>) -> Respon
     create_json_response(&response, origin)
 }
 
-fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_json::Value, String> {
+/// Convert a `VaultError` into a sanitized user-facing error message for HTTP
+/// responses. Internal details (paths, serialization errors, etc.) are stripped.
+fn vault_error_to_message(err: VaultError) -> String {
+    err.public_message()
+}
+
+fn execute_command(
+    req: NativeRequest,
+    state: Arc<AppState>,
+    app_handle: Option<tauri::AppHandle>,
+    origin: Option<String>,
+) -> Result<serde_json::Value, String> {
+    // Serialization lock: every command that touches the vault database
+    // (everything except `pair` / `pair_confirm`, which only manipulate
+    // in-memory pairing state) runs under `op_lock` so that concurrent
+    // requests from the multi-threaded HTTP server cannot interleave a
+    // read-modify-write cycle with another command and produce a lost
+    // update or a stale integrity digest.
+    let _op_guard = if req.command == "pair" || req.command == "pair_confirm" {
+        None
+    } else {
+        Some(state.op_lock.lock().expect("op lock poisoned"))
+    };
+
     match req.command.as_str() {
         // Extension pairing — returns API token (no auth required, origin checked in handle_request)
         // Rate limited to prevent token enumeration attacks
@@ -277,324 +321,113 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                     *pair_count = 0;
                 }
 
-                // Rate limit: max 10 pair requests per minute
-                if *pair_count >= 10 {
+                // Rate limit: max MAX_PAIR_REQUESTS_PER_MIN pair requests per minute
+                if *pair_count >= constants::MAX_PAIR_REQUESTS_PER_MIN {
                     return Err("Too many pair requests. Please try again later.".to_string());
                 }
 
                 *pair_count += 1;
             }
 
-            let token = auth::get_token();
-            Ok(serde_json::json!({ "token": token }))
+            let code = crate::pairing::create_session(origin.clone());
+            // Notify desktop UI to display the pairing code.
+            if let Some(handle) = app_handle {
+                let _ = handle.emit("pair-request", &code);
+            }
+            Ok(serde_json::json!({ "pending": true }))
+        }
+
+        "pair_confirm" => {
+            let user_code = req.code.ok_or("Code required")?;
+            if crate::pairing::verify(user_code.as_str()) {
+                let token = auth::get_token();
+                Ok(serde_json::json!({ "token": token }))
+            } else {
+                Err("Invalid or expired code".to_string())
+            }
         }
 
         "is_vault_initialized" => {
-            let initialized = state.verification_data.lock().expect("verification lock poisoned").is_some();
-            Ok(serde_json::json!(initialized))
+            Ok(serde_json::to_value(service::is_initialized(&state)).expect("bool serializable"))
         }
 
         "is_vault_unlocked" => {
-            Ok(serde_json::json!(crypto::is_unlocked()))
+            Ok(serde_json::to_value(service::is_unlocked(&state)).expect("bool serializable"))
         }
 
         "setup_vault" => {
-            // Check if database is already loaded in state
-            {
-                let db_guard = state.database.lock().expect("db lock poisoned");
-                if db_guard.is_some() && state.verification_data.lock().expect("verification lock poisoned").is_some() {
-                    return Ok(serde_json::json!(true));
-                }
-            }
-
-            let db_path = paths::get_db_path();
-
-            if !db_path.exists() {
-                return Ok(serde_json::json!(false));
-            }
-
-            // Initialize database
-            let db = std::sync::Arc::new(database::init_database(&db_path).map_err(|_| "Database error".to_string())?);
-
-            // Load verification data from database
-            let verification_data = database::load_verification_data(&db).map_err(|_| "Database error".to_string())?;
-
-            if let Some(data) = verification_data {
-                *state.verification_data.lock().expect("verification lock poisoned") = Some(data);
-                *state.database.lock().expect("db lock poisoned") = Some(db);
-                return Ok(serde_json::json!(true));
-            }
-
-            Ok(serde_json::json!(false))
+            service::setup_vault(&state)
+                .map(|ok| serde_json::to_value(ok).expect("bool serializable"))
+                .map_err(vault_error_to_message)
         }
 
         "init_vault" => {
-            let mut password = req.password.ok_or("Password required")?;
-
-            // Check if already initialized
-            if state.verification_data.lock().expect("verification lock poisoned").is_some() {
-                password.zeroize();
-                return Err("Vault already initialized".to_string());
-            }
-
-            // Generate salt and derive key
-            let salt = crypto::kdf::generate_salt();
-            let (key, params) = crypto::kdf::derive_key(&password, &salt)
-                .map_err(|_| "Key derivation failed".to_string())?;
-
-            // Zeroize password immediately after key derivation
-            password.zeroize();
-
-            // Create verification data
-            let verification_data = crypto::create_verification_header(&key, salt, params)
-                .map_err(|_| "Verification failed".to_string())?;
-
-            // Initialize database
-            let db_path = paths::ensure_db_dir().map_err(|_| "Database path error".to_string())?;
-            let db = database::init_database(&db_path)
-                .map_err(|_| "Database error".to_string())?;
-
-            // Save verification data
-            database::save_verification_data(&db, &verification_data)
-                .map_err(|_| "Database error".to_string())?;
-
-            // Save default settings
-            let default_settings = database::Settings::default();
-            database::save_settings(&db, &default_settings)
-                .map_err(|_| "Database error".to_string())?;
-
-            // Update state
-            *state.verification_data.lock().expect("verification lock poisoned") = Some(verification_data);
-            *state.database.lock().expect("db lock poisoned") = Some(std::sync::Arc::new(db));
-
-            // Set key in memory
-            crypto::set_key(key).map_err(|_| "Key store error".to_string())?;
-
-            // Update activity and lock menu
-            state.touch_activity();
-            state.update_lock_menu("Lock Vault");
-
-            Ok(serde_json::json!(true))
+            let password = req.password.ok_or("Password required".to_string())?;
+            service::init_vault(&state, password)
+                .map(|()| serde_json::json!(true))
+                .map_err(vault_error_to_message)
         }
 
         "unlock_vault" => {
-            crate::check_rate_limit(&state).map_err(|_| "Rate limited".to_string())?;
-
-            let mut password = req.password.ok_or("Password required")?;
-            let verification_data = state.verification_data.lock().expect("verification lock poisoned");
-            let data = verification_data.as_ref().ok_or("Vault not initialized")?;
-            let success = crypto::unlock_with_password(&password, data)
-                .map_err(|_| "Unlock failed".to_string())?;
-
-            // Zeroize password after use
-            password.zeroize();
-
-            if success {
-                crate::reset_rate_limit(&state);
-                // Load settings from database (e.g. auto-lock timeout)
-                let db_guard = state.database.lock().expect("db lock poisoned");
-                if let Some(db) = db_guard.as_ref() {
-                    if let Ok(settings) = database::load_settings(db) {
-                        *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
-                    }
-                }
-                state.touch_activity();
-                state.update_lock_menu("Lock Vault");
-            } else {
-                crate::record_failed_attempt(&state);
-            }
-            Ok(serde_json::json!(success))
+            let password = req.password.ok_or("Password required".to_string())?;
+            service::unlock_vault(&state, password)
+                .map(|ok| serde_json::to_value(ok).expect("bool serializable"))
+                .map_err(vault_error_to_message)
         }
 
         "lock_vault" => {
-            state.lock_vault();
+            service::lock_vault(&state);
             Ok(serde_json::json!(null))
         }
 
         "get_settings" => {
-            if !crypto::is_unlocked() {
-                return Err("Vault locked".to_string());
-            }
-            let db_guard = state.database.lock().expect("db lock poisoned");
-            let db = db_guard.as_ref().ok_or("Database not initialized")?;
-            let settings = database::load_settings(db).map_err(|_| "Database error".to_string())?;
-            state.touch_activity();
-            Ok(serde_json::to_value(settings).expect("settings serializable"))
+            service::get_settings(&state)
+                .map(|settings| serde_json::to_value(settings).expect("settings serializable"))
+                .map_err(vault_error_to_message)
         }
 
         "update_settings" => {
-            if !crypto::is_unlocked() {
-                return Err("Vault locked".to_string());
-            }
-            let settings_json = req.settings.ok_or("Settings required")?;
+            let settings_json = req.settings.ok_or("Settings required".to_string())?;
             let settings: database::Settings = serde_json::from_value(settings_json)
                 .map_err(|_| "Invalid settings".to_string())?;
-            if settings.auto_lock_secs < 30 || settings.auto_lock_secs > 3600 {
-                return Err("Auto-lock timeout must be between 30 and 3600 seconds".to_string());
-            }
-            if settings.default_length < 4 || settings.default_length > 128 {
-                return Err("Password length must be between 4 and 128".to_string());
-            }
-            let db_guard = state.database.lock().expect("db lock poisoned");
-            let db = db_guard.as_ref().ok_or("Database not initialized")?;
-            database::save_settings(db, &settings).map_err(|_| "Database error".to_string())?;
-            *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
-            state.touch_activity();
-            Ok(serde_json::to_value(settings).expect("settings serializable"))
+            service::update_settings(&state, settings)
+                .map(|s| serde_json::to_value(s).expect("settings serializable"))
+                .map_err(vault_error_to_message)
         }
 
         "create_entry" => {
-            if !crypto::is_unlocked() {
-                return Err("Vault locked".to_string());
-            }
-
-            let title = req.title.ok_or("Title required")?;
-            let username = req.username.ok_or("Username required")?;
-            let password = req.password.ok_or("Password required")?;
-
-            validate_field_length(&title, MAX_FIELD_LENGTH, "Title")?;
-            validate_field_length(&username, MAX_FIELD_LENGTH, "Username")?;
-            validate_field_length(&password, MAX_PASSWORD_LENGTH, "Password")?;
-            if let Some(ref notes) = req.notes {
-                validate_field_length(notes, MAX_NOTES_LENGTH, "Notes")?;
-            }
-            if let Some(ref url) = req.url {
-                validate_field_length(url, MAX_FIELD_LENGTH, "URL")?;
-            }
-
-            let db_guard = state.database.lock().expect("db lock poisoned");
-            let db = db_guard.as_ref().ok_or("Database not initialized")?;
-
-            let key = crypto::get_key().map_err(|_| "Internal error".to_string())?;
-
-            // Encrypt password
-            let encrypted_password = crypto::encrypt(&key, password.as_bytes())
-                .map_err(|_| "Encryption failed".to_string())?;
-            let encrypted_password_bytes = bincode::serialize(&encrypted_password)
-                .map_err(|_| "Serialization failed".to_string())?;
-
-            // Encrypt notes if present
-            let encrypted_notes = if let Some(notes) = &req.notes {
-                let encrypted = crypto::encrypt(&key, notes.as_bytes())
-                    .map_err(|_| "Encryption failed".to_string())?;
-                Some(bincode::serialize(&encrypted).map_err(|_| "Serialization failed".to_string())?)
-            } else {
-                None
+            let request = CreateEntryRequest {
+                title: req.title.ok_or("Title required".to_string())?,
+                username: req.username.ok_or("Username required".to_string())?,
+                password: req.password.ok_or("Password required".to_string())?,
+                url: req.url,
+                notes: req.notes,
+                tags: req.tags.unwrap_or_default(),
+                group_id: req.group_id,
             };
-
-            let mut entry = database::PasswordEntry::new(title, req.url.clone(), username);
-            entry.encrypted_password = encrypted_password_bytes;
-            entry.encrypted_notes = encrypted_notes;
-            entry.tags = req.tags.unwrap_or_default();
-            entry.group_id = req.group_id;
-
-            database::save_entry(db, &entry).map_err(|_| "Database error".to_string())?;
-
-            state.touch_activity();
-
-            Ok(serde_json::json!({
-                "id": entry.id,
-                "title": entry.title,
-                "url": entry.url,
-                "username": entry.username,
-                "tags": entry.tags,
-                "group_id": entry.group_id,
-                "created_at": entry.created_at,
-                "updated_at": entry.updated_at,
-            }))
+            service::create_entry(&state, request)
+                .map(|summary| serde_json::to_value(summary).expect("entry serializable"))
+                .map_err(vault_error_to_message)
         }
 
         "list_all_entries" => {
-            if !crypto::is_unlocked() {
-                return Err("Vault locked".to_string());
-            }
-
-            let db_guard = state.database.lock().expect("db lock poisoned");
-            let db = db_guard.as_ref().ok_or("Database not initialized")?;
-
-            let ids = database::list_entries(db).map_err(|_| "Internal error".to_string())?;
-            let mut entries = Vec::new();
-
-            for id in ids {
-                if let Some(entry) = database::load_entry(db, &id).map_err(|_| "Internal error".to_string())? {
-                    // Return only safe summary fields (no encrypted data)
-                    entries.push(serde_json::json!({
-                        "id": entry.id,
-                        "title": entry.title,
-                        "url": entry.url,
-                        "username": entry.username,
-                        "tags": entry.tags,
-                        "group_id": entry.group_id,
-                        "created_at": entry.created_at,
-                        "updated_at": entry.updated_at,
-                    }));
-                }
-            }
-
-            state.touch_activity();
-
-            Ok(serde_json::json!(entries))
+            service::list_all_entries(&state)
+                .map(|entries| serde_json::to_value(entries).expect("entries serializable"))
+                .map_err(vault_error_to_message)
         }
 
-        "get_entry" => {
-            if !crypto::is_unlocked() {
-                return Err("Vault locked".to_string());
-            }
+        "get_entry_meta" => {
+            let id = req.id_param.ok_or("Entry ID required".to_string())?;
+            service::get_entry_meta(&state, id)
+                .map(|entry| serde_json::to_value(entry).expect("entry serializable"))
+                .map_err(vault_error_to_message)
+        }
 
-            let id = req.id_param.ok_or("Entry ID required")?;
-            let db_guard = state.database.lock().expect("db lock poisoned");
-            let db = db_guard.as_ref().ok_or("Database not initialized")?;
-
-            let entry = database::load_entry(db, &id)
-                .map_err(|_| "Database error".to_string())?
-                .ok_or("Entry not found")?;
-
-            // Decrypt password
-            let key = crypto::get_key().map_err(|_| "Internal error".to_string())?;
-            let encrypted: crypto::EncryptedData = bincode::deserialize(&entry.encrypted_password)
-                .map_err(|_| "Decryption failed".to_string())?;
-            let mut password_bytes = crypto::decrypt(&key, &encrypted)
-                .map_err(|_| "Decryption failed".to_string())?;
-            let mut password = String::from_utf8(password_bytes.clone())
-                .map_err(|_| "Decryption failed".to_string())?;
-
-            // Decrypt notes
-            let mut notes = if let Some(ref encrypted_notes) = entry.encrypted_notes {
-                let encrypted: crypto::EncryptedData = bincode::deserialize(encrypted_notes)
-                    .map_err(|_| "Decryption failed".to_string())?;
-                let mut notes_bytes = crypto::decrypt(&key, &encrypted)
-                    .map_err(|_| "Decryption failed".to_string())?;
-                let notes_str = String::from_utf8(notes_bytes.clone())
-                    .map_err(|_| "Decryption failed".to_string())?;
-                notes_bytes.zeroize();
-                Some(notes_str)
-            } else {
-                None
-            };
-
-            state.touch_activity();
-
-            let result = serde_json::json!({
-                "id": entry.id,
-                "title": entry.title,
-                "url": entry.url,
-                "username": entry.username,
-                "password": password,
-                "notes": notes,
-                "tags": entry.tags,
-                "group_id": entry.group_id,
-                "created_at": entry.created_at,
-                "updated_at": entry.updated_at,
-            });
-
-            // Zeroize plaintext password and notes after building response
-            password.zeroize();
-            password_bytes.zeroize();
-            if let Some(ref mut n) = notes {
-                n.zeroize();
-            }
-
-            Ok(result)
+        "get_entry_secret" => {
+            let id = req.id_param.ok_or("Entry ID required".to_string())?;
+            service::get_entry_secret(&state, id)
+                .map(|secret| serde_json::to_value(secret).expect("secret serializable"))
+                .map_err(vault_error_to_message)
         }
 
         "generate_password" => {
@@ -605,498 +438,92 @@ fn execute_command(req: NativeRequest, state: Arc<AppState>) -> Result<serde_jso
                 include_numbers: true,
                 include_symbols: true,
             });
-
-            use rand::{rngs::OsRng, Rng};
-
-            let mut charset = String::new();
-            let mut required_chars = Vec::new();
-
-            // Collect all available character classes and their representatives
-            if options.include_uppercase {
-                charset.push_str("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-                required_chars.push('A');
-            }
-            if options.include_lowercase {
-                charset.push_str("abcdefghijklmnopqrstuvwxyz");
-                required_chars.push('a');
-            }
-            if options.include_numbers {
-                charset.push_str("0123456789");
-                required_chars.push('0');
-            }
-            if options.include_symbols {
-                charset.push_str("!@#$%^&*()_+-=[]{}|;:,.<>?");
-                required_chars.push('!');
-            }
-
-            if charset.is_empty() {
-                return Err("At least one character type must be selected".to_string());
-            }
-
-            let mut rng = OsRng; // Use OS entropy source for better security
-            let bytes: Vec<u8> = charset.bytes().collect();
-
-            let num_required = required_chars.len();
-            let mut password_chars: Vec<char> = required_chars;
-
-            // Fill remaining positions with random characters from full charset
-            for _ in 0..(options.length.saturating_sub(num_required)) {
-                let idx = rng.gen_range(0..bytes.len());
-                password_chars.push(bytes[idx] as char);
-            }
-
-            // Fisher-Yates shuffle to avoid predictable patterns (e.g., always starting with uppercase)
-            let len = password_chars.len();
-            for i in 0..len {
-                let j = rng.gen_range(i..len);
-                password_chars.swap(i, j);
-            }
-
-            let password: String = password_chars.into_iter().collect();
-
-            Ok(serde_json::json!(password))
+            service::generate_password(
+                options.length,
+                options.include_uppercase,
+                options.include_lowercase,
+                options.include_numbers,
+                options.include_symbols,
+            )
+            .map(|password| serde_json::to_value(password).expect("password serializable"))
+            .map_err(vault_error_to_message)
         }
 
         "update_entry" => {
-            if !crypto::is_unlocked() {
-                return Err("Vault locked".to_string());
-            }
-
-            let id = req.id_param.ok_or("Entry ID required")?;
-            let title = req.title.ok_or("Title required")?;
-            let username = req.username.ok_or("Username required")?;
-            let password = req.password.ok_or("Password required")?;
-
-            validate_field_length(&title, MAX_FIELD_LENGTH, "Title")?;
-            validate_field_length(&username, MAX_FIELD_LENGTH, "Username")?;
-            validate_field_length(&password, MAX_PASSWORD_LENGTH, "Password")?;
-            if let Some(ref notes) = req.notes {
-                validate_field_length(notes, MAX_NOTES_LENGTH, "Notes")?;
-            }
-
-            let db_guard = state.database.lock().expect("db lock poisoned");
-            let db = db_guard.as_ref().ok_or("Database not initialized")?;
-            let key = crypto::get_key().map_err(|_| "Internal error".to_string())?;
-
-            let mut entry = database::load_entry(db, &id)
-                .map_err(|_| "Database error".to_string())?
-                .ok_or("Entry not found")?;
-
-            entry.title = title;
-            entry.url = req.url;
-            entry.username = username;
-            entry.tags = req.tags.unwrap_or_default();
-            entry.group_id = req.group_id;
-            entry.updated_at = chrono::Utc::now().timestamp();
-
-            let encrypted_password = crypto::encrypt(&key, password.as_bytes())
-                .map_err(|_| "Encryption failed".to_string())?;
-            entry.encrypted_password = bincode::serialize(&encrypted_password)
-                .map_err(|_| "Serialization failed".to_string())?;
-
-            entry.encrypted_notes = if let Some(notes) = &req.notes {
-                let encrypted = crypto::encrypt(&key, notes.as_bytes())
-                    .map_err(|_| "Encryption failed".to_string())?;
-                Some(bincode::serialize(&encrypted).map_err(|_| "Serialization failed".to_string())?)
-            } else {
-                None
+            let id = req.id_param.ok_or("Entry ID required".to_string())?;
+            let request = CreateEntryRequest {
+                title: req.title.ok_or("Title required".to_string())?,
+                username: req.username.ok_or("Username required".to_string())?,
+                password: req.password.ok_or("Password required".to_string())?,
+                url: req.url,
+                notes: req.notes,
+                tags: req.tags.unwrap_or_default(),
+                group_id: req.group_id,
             };
-
-            database::save_entry(db, &entry).map_err(|_| "Database error".to_string())?;
-
-            state.touch_activity();
-
-            Ok(serde_json::json!({
-                "id": entry.id,
-                "title": entry.title,
-                "url": entry.url,
-                "username": entry.username,
-                "tags": entry.tags,
-                "created_at": entry.created_at,
-                "updated_at": entry.updated_at,
-            }))
+            service::update_entry(&state, id, request)
+                .map(|summary| serde_json::to_value(summary).expect("entry serializable"))
+                .map_err(vault_error_to_message)
         }
 
         "remove_entry" => {
-            if !crypto::is_unlocked() {
-                return Err("Vault locked".to_string());
-            }
-
-            let id = req.id_param.ok_or("Entry ID required")?;
-            let db_guard = state.database.lock().expect("db lock poisoned");
-            let db = db_guard.as_ref().ok_or("Database not initialized")?;
-
-            let existed = database::delete_entry(db, &id).map_err(|_| "Internal error".to_string())?;
-
-            state.touch_activity();
-
-            Ok(serde_json::json!(existed))
+            let id = req.id_param.ok_or("Entry ID required".to_string())?;
+            service::remove_entry(&state, id)
+                .map(|ok| serde_json::to_value(ok).expect("bool serializable"))
+                .map_err(vault_error_to_message)
         }
 
         "get_entry_count" => {
-            if !crypto::is_unlocked() {
-                return Err("Vault locked".to_string());
-            }
-
-            let db_guard = state.database.lock().expect("db lock poisoned");
-            let db = db_guard.as_ref().ok_or("Database not initialized")?;
-
-            let count = database::count_entries(db).map_err(|_| "Internal error".to_string())?;
-
-            state.touch_activity();
-
-            Ok(serde_json::json!(count))
+            service::get_entry_count(&state)
+                .map(|count| serde_json::to_value(count).expect("count serializable"))
+                .map_err(vault_error_to_message)
         }
 
         "create_group" => {
-            if !crypto::is_unlocked() {
-                return Err("Vault locked".to_string());
-            }
-
-            let name = req.name.ok_or("Group name required")?;
-            let db_guard = state.database.lock().expect("db lock poisoned");
-            let db = db_guard.as_ref().ok_or("Database not initialized")?;
-
-            let group = database::Group::new(name);
-            database::save_group(db, &group).map_err(|_| "Internal error".to_string())?;
-
-            state.touch_activity();
-
-            Ok(serde_json::json!({
-                "id": group.id,
-                "name": group.name,
-                "created_at": group.created_at,
-                "updated_at": group.updated_at,
-            }))
+            let name = req.name.ok_or("Group name required".to_string())?;
+            service::create_group(&state, name)
+                .map(|group| serde_json::to_value(group).expect("group serializable"))
+                .map_err(vault_error_to_message)
         }
 
         "list_all_groups" => {
-            if !crypto::is_unlocked() {
-                return Err("Vault locked".to_string());
-            }
-
-            let db_guard = state.database.lock().expect("db lock poisoned");
-            let db = db_guard.as_ref().ok_or("Database not initialized")?;
-
-            let ids = database::list_groups(db).map_err(|_| "Internal error".to_string())?;
-            let mut groups = Vec::new();
-            for id in ids {
-                if let Some(g) = database::load_group(db, &id).map_err(|_| "Internal error".to_string())? {
-                    groups.push(serde_json::json!({
-                        "id": g.id,
-                        "name": g.name,
-                        "created_at": g.created_at,
-                        "updated_at": g.updated_at,
-                    }));
-                }
-            }
-
-            state.touch_activity();
-
-            Ok(serde_json::json!(groups))
+            service::list_all_groups(&state)
+                .map(|groups| serde_json::to_value(groups).expect("groups serializable"))
+                .map_err(vault_error_to_message)
         }
 
         "update_group" => {
-            if !crypto::is_unlocked() {
-                return Err("Vault locked".to_string());
-            }
-
-            let id = req.id_param.ok_or("Group ID required")?;
-            let name = req.name.ok_or("Group name required")?;
-            let db_guard = state.database.lock().expect("db lock poisoned");
-            let db = db_guard.as_ref().ok_or("Database not initialized")?;
-
-            let mut group = database::load_group(db, &id)
-                .map_err(|_| "Internal error".to_string())?
-                .ok_or("Group not found")?;
-            group.name = name;
-            group.updated_at = chrono::Utc::now().timestamp();
-            database::save_group(db, &group).map_err(|_| "Internal error".to_string())?;
-
-            state.touch_activity();
-
-            Ok(serde_json::json!({
-                "id": group.id,
-                "name": group.name,
-                "created_at": group.created_at,
-                "updated_at": group.updated_at,
-            }))
+            let id = req.id_param.ok_or("Group ID required".to_string())?;
+            let name = req.name.ok_or("Group name required".to_string())?;
+            service::update_group(&state, id, name)
+                .map(|group| serde_json::to_value(group).expect("group serializable"))
+                .map_err(vault_error_to_message)
         }
 
         "remove_group" => {
-            if !crypto::is_unlocked() {
-                return Err("Vault locked".to_string());
-            }
-
-            let id = req.id_param.ok_or("Group ID required")?;
-            let db_guard = state.database.lock().expect("db lock poisoned");
-            let db = db_guard.as_ref().ok_or("Database not initialized")?;
-
-            let existed = database::delete_group(db, &id).map_err(|_| "Internal error".to_string())?;
-
-            // Cascade: clear group_id on entries that referenced the deleted group
-            if existed {
-                let entry_ids = database::list_entries(db).map_err(|_| "Internal error".to_string())?;
-                for entry_id in entry_ids {
-                    if let Some(mut entry) = database::load_entry(db, &entry_id).map_err(|_| "Internal error".to_string())? {
-                        if entry.group_id.as_deref() == Some(id.as_str()) {
-                            entry.group_id = None;
-                            database::save_entry(db, &entry).map_err(|_| "Internal error".to_string())?;
-                        }
-                    }
-                }
-            }
-
-            state.touch_activity();
-
-            Ok(serde_json::json!(existed))
+            let id = req.id_param.ok_or("Group ID required".to_string())?;
+            service::remove_group(&state, id)
+                .map(|ok| serde_json::to_value(ok).expect("bool serializable"))
+                .map_err(vault_error_to_message)
         }
 
         "export_vault" => {
-            if !crypto::is_unlocked() {
-                return Err("Vault locked".to_string());
-            }
-            let mut export_password = req.export_password.ok_or("Export password required")?;
-            let db_guard = state.database.lock().expect("db lock poisoned");
-            let db = db_guard.as_ref().ok_or("Database not initialized")?;
-            let key = crypto::get_key().map_err(|_| "Internal error".to_string())?;
-
-            // Load all entries and decrypt
-            let entry_ids = database::list_entries(db).map_err(|_| "Internal error".to_string())?;
-            let mut export_entries = Vec::new();
-            for id in entry_ids {
-                if let Some(entry) = database::load_entry(db, &id).map_err(|_| "Internal error".to_string())? {
-                    let enc_pwd: crypto::EncryptedData = bincode::deserialize(&entry.encrypted_password)
-                        .map_err(|_| "Internal error".to_string())?;
-                    let pwd_bytes = crypto::decrypt(&key, &enc_pwd).map_err(|_| "Internal error".to_string())?;
-                    let password = String::from_utf8(pwd_bytes).map_err(|_| "Internal error".to_string())?;
-
-                    let notes = if let Some(ref enc_notes_bytes) = entry.encrypted_notes {
-                        let enc: crypto::EncryptedData = bincode::deserialize(enc_notes_bytes)
-                            .map_err(|_| "Internal error".to_string())?;
-                        let notes_bytes = crypto::decrypt(&key, &enc).map_err(|_| "Internal error".to_string())?;
-                        Some(String::from_utf8(notes_bytes).map_err(|_| "Internal error".to_string())?)
-                    } else {
-                        None
-                    };
-
-                    export_entries.push(serde_json::json!({
-                        "id": entry.id,
-                        "title": entry.title,
-                        "url": entry.url,
-                        "username": entry.username,
-                        "password": password,
-                        "notes": notes,
-                        "tags": entry.tags,
-                        "group_id": entry.group_id,
-                        "created_at": entry.created_at,
-                        "updated_at": entry.updated_at,
-                    }));
-                }
-            }
-
-            // Load groups
-            let group_ids = database::list_groups(db).map_err(|_| "Internal error".to_string())?;
-            let mut groups = Vec::new();
-            for id in group_ids {
-                if let Some(g) = database::load_group(db, &id).map_err(|_| "Internal error".to_string())? {
-                    groups.push(serde_json::json!({
-                        "id": g.id,
-                        "name": g.name,
-                        "created_at": g.created_at,
-                        "updated_at": g.updated_at,
-                    }));
-                }
-            }
-
-            // Load settings
-            let settings = database::load_settings(db).map_err(|_| "Internal error".to_string())?;
-
-            let payload = serde_json::json!({
-                "entries": export_entries,
-                "groups": groups,
-                "settings": settings,
-            });
-            let payload_bytes = serde_json::to_vec(&payload)
-                .map_err(|_| "Internal error".to_string())?;
-
-            // Derive export key
-            let salt = crypto::kdf::generate_salt();
-            let (export_key, params) = crypto::kdf::derive_key(&export_password, &salt)
-                .map_err(|_| "Internal error".to_string())?;
-
-            // Zeroize export password after key derivation
-            export_password.zeroize();
-
-            let encrypted = crypto::encrypt(&export_key, &payload_bytes)
-                .map_err(|_| "Internal error".to_string())?;
-
-            use base64::Engine;
-            let b64 = base64::engine::general_purpose::STANDARD;
-
-            state.touch_activity();
-            Ok(serde_json::json!({
-                "version": 1,
-                "created_at": chrono::Utc::now().timestamp(),
-                "salt": b64.encode(&salt),
-                "kdf_memory": params.m_cost,
-                "kdf_iterations": params.t_cost,
-                "kdf_parallelism": params.p_cost,
-                "nonce": b64.encode(&encrypted.nonce),
-                "data": b64.encode(&encrypted.ciphertext),
-            }))
+            let export_password = req.export_password.ok_or("Export password required".to_string())?;
+            service::export_vault(&state, export_password)
+                .map(|backup| serde_json::to_value(backup).expect("backup serializable"))
+                .map_err(vault_error_to_message)
         }
 
         "import_vault" => {
-            if !crypto::is_unlocked() {
-                return Err("Vault locked".to_string());
-            }
-            let backup_json = req.backup.ok_or("Backup data required")?;
-            let mut import_password = req.import_password.ok_or("Import password required")?;
-
-            let version = backup_json.get("version")
-                .and_then(|v| v.as_u64())
-                .ok_or("Missing version in backup")?;
-            if version != 1 {
-                return Err("Unsupported backup version".to_string());
-            }
-
-            use base64::Engine;
-            let b64 = base64::engine::general_purpose::STANDARD;
-
-            let salt_str = backup_json.get("salt").and_then(|v| v.as_str()).ok_or("Missing salt")?;
-            let nonce_str = backup_json.get("nonce").and_then(|v| v.as_str()).ok_or("Missing nonce")?;
-            let data_str = backup_json.get("data").and_then(|v| v.as_str()).ok_or("Missing data")?;
-            let kdf_memory = backup_json.get("kdf_memory").and_then(|v| v.as_u64()).ok_or("Missing kdf_memory")? as u32;
-            let kdf_iterations = backup_json.get("kdf_iterations").and_then(|v| v.as_u64()).ok_or("Missing kdf_iterations")? as u32;
-            let kdf_parallelism = backup_json.get("kdf_parallelism").and_then(|v| v.as_u64()).unwrap_or(4) as u32;
-
-            let salt = b64.decode(salt_str).map_err(|_| "Invalid backup".to_string())?;
-            let nonce_bytes = b64.decode(nonce_str).map_err(|_| "Invalid backup".to_string())?;
-            let ciphertext = b64.decode(data_str).map_err(|_| "Invalid backup".to_string())?;
-
-            if salt.len() != 16 {
-                return Err("Invalid salt length".to_string());
-            }
-
-            let salt_array: [u8; 16] = salt.try_into().map_err(|_| "Invalid salt")?;
-            let (import_key, _) = crypto::kdf::derive_key_with_params(
-                &import_password,
-                &salt_array,
-                &crypto::kdf::AdaptiveParams {
-                    m_cost: kdf_memory,
-                    t_cost: kdf_iterations,
-                    p_cost: kdf_parallelism,
-                },
-            ).map_err(|_| "Internal error".to_string())?;
-
-            // Zeroize import password after key derivation
-            import_password.zeroize();
-
-            let encrypted_data = crypto::EncryptedData {
-                nonce: nonce_bytes,
-                ciphertext,
-            };
-            let payload_bytes = crypto::decrypt(&import_key, &encrypted_data)
-                .map_err(|_| "Invalid password or corrupted backup".to_string())?;
-
-            let payload: serde_json::Value = serde_json::from_slice(&payload_bytes)
+            let backup_json = req.backup.ok_or("Backup data required".to_string())?;
+            let backup: VaultBackup = serde_json::from_value(backup_json)
                 .map_err(|_| "Invalid backup".to_string())?;
-
-            let db_guard = state.database.lock().expect("db lock poisoned");
-            let db = db_guard.as_ref().ok_or("Database not initialized")?;
-            let key = crypto::get_key().map_err(|_| "Internal error".to_string())?;
-
-            // Pre-validate and parse all groups before mutating database
-            let groups = payload.get("groups").and_then(|v| v.as_array()).ok_or("Missing groups")?;
-            let mut group_id_map = std::collections::HashMap::new();
-            let mut new_groups = Vec::new();
-            for g in groups {
-                let old_id = g.get("id").and_then(|v| v.as_str()).ok_or("Missing group id")?;
-                let name = g.get("name").and_then(|v| v.as_str()).ok_or("Missing group name")?;
-                let new_group = database::Group::new(name.to_string());
-                group_id_map.insert(old_id.to_string(), new_group.id.clone());
-                new_groups.push(new_group);
-            }
-
-            // Pre-validate and encrypt all entries before mutating database
-            let entries = payload.get("entries").and_then(|v| v.as_array()).ok_or("Missing entries")?;
-            let mut new_entries = Vec::new();
-            for e in entries {
-                let title = e.get("title").and_then(|v| v.as_str()).ok_or("Missing title")?;
-                let username = e.get("username").and_then(|v| v.as_str()).ok_or("Missing username")?;
-                let password = e.get("password").and_then(|v| v.as_str()).ok_or("Missing password")?;
-                let url = e.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let notes = e.get("notes").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let tags = e.get("tags").and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|t| t.as_str().map(String::from)).collect())
-                    .unwrap_or_default();
-                let group_id = e.get("group_id").and_then(|v| v.as_str())
-                    .and_then(|gid| group_id_map.get(gid).cloned());
-
-                let mut entry = database::PasswordEntry::new(title.to_string(), url, username.to_string());
-                let enc_pwd = crypto::encrypt(&key, password.as_bytes()).map_err(|_| "Internal error".to_string())?;
-                entry.encrypted_password = bincode::serialize(&enc_pwd).map_err(|_| "Internal error".to_string())?;
-                entry.encrypted_notes = if let Some(ref n) = notes {
-                    let enc = crypto::encrypt(&key, n.as_bytes()).map_err(|_| "Internal error".to_string())?;
-                    Some(bincode::serialize(&enc).map_err(|_| "Internal error".to_string())?)
-                } else {
-                    None
-                };
-                entry.tags = tags;
-                entry.group_id = group_id;
-                entry.created_at = e.get("created_at").and_then(|v| v.as_i64()).unwrap_or(entry.created_at);
-                entry.updated_at = e.get("updated_at").and_then(|v| v.as_i64()).unwrap_or(entry.updated_at);
-
-                new_entries.push(entry);
-            }
-
-            // All validation and encryption succeeded — now perform database mutations
-            // Clear existing data
-            let existing_ids = database::list_entries(db).map_err(|_| "Internal error".to_string())?;
-            for id in existing_ids {
-                database::delete_entry(db, &id).map_err(|_| "Internal error".to_string())?;
-            }
-            let existing_groups = database::list_groups(db).map_err(|_| "Internal error".to_string())?;
-            for id in existing_groups {
-                database::delete_group(db, &id).map_err(|_| "Internal error".to_string())?;
-            }
-
-            // Write new groups
-            for g in &new_groups {
-                database::save_group(db, g).map_err(|_| "Internal error".to_string())?;
-            }
-
-            // Write new entries
-            for entry in &new_entries {
-                database::save_entry(db, entry).map_err(|_| "Internal error".to_string())?;
-            }
-
-            // Apply imported settings if present
-            if let Some(settings_val) = payload.get("settings") {
-                if let Ok(settings) = serde_json::from_value::<database::Settings>(settings_val.clone()) {
-                    let _ = database::save_settings(db, &settings);
-                    *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
-                }
-            }
-
-            state.touch_activity();
-            Ok(serde_json::json!({
-                "entries_imported": new_entries.len(),
-                "groups_imported": new_groups.len(),
-            }))
+            let import_password = req.import_password.ok_or("Import password required".to_string())?;
+            service::import_vault(&state, backup, import_password)
+                .map(|result| serde_json::to_value(result).expect("result serializable"))
+                .map_err(vault_error_to_message)
         }
 
         _ => Err("Unknown command".to_string())
-    }
-}
-
-/// Validate that a field does not exceed the maximum length
-fn validate_field_length(value: &str, max: usize, field_name: &str) -> Result<(), String> {
-    if value.len() > max {
-        Err(format!("{} too long (max {} chars)", field_name, max))
-    } else {
-        Ok(())
     }
 }
 
@@ -1112,8 +539,6 @@ mod tests {
 
     /// Helper: create a test AppState with a temp database
     fn setup_test_state() -> (Arc<AppState>, TempDir) {
-        crypto::clear_key();
-
         let temp = TempDir::new().expect("create temp dir");
         let db_path = temp.path().join("test_vault.db");
         let db = Arc::new(database::init_database(&db_path).expect("init db"));
@@ -1125,18 +550,20 @@ mod tests {
 
     /// Helper: initialize vault with a password in the given state
     fn init_test_vault(state: &Arc<AppState>, password: &str) {
-        // Clear any leftover key from parallel tests sharing global keystore
-        crypto::clear_key();
+        state.keystore.clear_key();
+        state.mac_key.lock().expect("mac key lock").take();
 
         let salt = crypto::kdf::generate_salt();
-        let (key, params) = crypto::kdf::derive_key(password, &salt).expect("derive key");
-        let verification = crypto::create_verification_header(&key, salt.clone(), params).expect("create verification");
+        let (master_key, params) = crypto::kdf::derive_key(password, &salt).expect("derive key");
+        let verification = crypto::create_verification_header(&master_key, salt.clone(), params).expect("create verification");
+        let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &salt);
 
         let db = state.database.lock().expect("db lock").clone().expect("db exists");
         database::save_verification_data(&db, &verification).expect("save verification");
 
         *state.verification_data.lock().expect("v lock") = Some(verification);
-        crypto::set_key(key).expect("set key");
+        state.keystore.set_key(enc_key).expect("set key");
+        *state.mac_key.lock().expect("mac key lock") = Some(mac_key);
         state.touch_activity();
     }
 
@@ -1147,6 +574,7 @@ mod tests {
             password: None,
             url: None,
             id_param: None,
+            code: None,
             title: None,
             username: None,
             notes: None,
@@ -1168,7 +596,7 @@ mod tests {
     fn test_is_vault_initialized_false() {
         let (state, _temp) = setup_test_state();
         let req = make_request("is_vault_initialized", 1);
-        let result = execute_command(req, state).unwrap();
+        let result = execute_command(req, state, None, None).unwrap();
         assert_eq!(result, serde_json::json!(false));
     }
 
@@ -1178,7 +606,7 @@ mod tests {
         init_test_vault(&state, "master123");
 
         let req = make_request("is_vault_initialized", 1);
-        let result = execute_command(req, state).unwrap();
+        let result = execute_command(req, state, None, None).unwrap();
         assert_eq!(result, serde_json::json!(true));
     }
 
@@ -1189,7 +617,7 @@ mod tests {
         let (state, _temp) = setup_test_state();
         let req = make_request("is_vault_unlocked", 1);
         // Not unlocked initially
-        let result = execute_command(req, state).unwrap();
+        let result = execute_command(req, state, None, None).unwrap();
         assert_eq!(result, serde_json::json!(false));
     }
 
@@ -1200,13 +628,64 @@ mod tests {
         let (state, _temp) = setup_test_state();
         init_test_vault(&state, "master123");
 
-        assert!(crypto::is_unlocked());
+        assert!(state.keystore.is_unlocked());
 
         let req = make_request("lock_vault", 1);
-        let result = execute_command(req, state).unwrap();
+        let result = execute_command(req, state.clone(), None, None).unwrap();
         assert_eq!(result, serde_json::json!(null));
 
-        assert!(!crypto::is_unlocked());
+        assert!(!state.keystore.is_unlocked());
+    }
+
+    // ---- pair / pair_confirm ----
+
+    #[test]
+    fn test_pair_returns_pending() {
+        let (state, _temp) = setup_test_state();
+        let req = make_request("pair", 1);
+        let result = execute_command(req, state, None, None).unwrap();
+        assert_eq!(result["pending"], true);
+    }
+
+    #[test]
+    fn test_pair_confirm_success() {
+        let (state, _temp) = setup_test_state();
+        let code = crate::pairing::create_session(None);
+        let confirm_req = NativeRequest {
+            id: 1,
+            command: "pair_confirm".to_string(),
+            code: Some(Zeroizing::new(code)),
+            ..make_request("pair_confirm", 1)
+        };
+        let result = execute_command(confirm_req, state, None, None).unwrap();
+        assert!(result["token"].as_str().unwrap().len() >= 32);
+    }
+
+    #[test]
+    fn test_pair_confirm_wrong_code_fails() {
+        let (state, _temp) = setup_test_state();
+        let _ = crate::pairing::create_session(None);
+        let req = NativeRequest {
+            id: 1,
+            command: "pair_confirm".to_string(),
+            code: Some(Zeroizing::new("000000".to_string())),
+            ..make_request("pair_confirm", 1)
+        };
+        let result = execute_command(req, state, None, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_pair_confirm_without_session_fails() {
+        let (state, _temp) = setup_test_state();
+        let req = NativeRequest {
+            id: 1,
+            command: "pair_confirm".to_string(),
+            code: Some(Zeroizing::new("123456".to_string())),
+            ..make_request("pair_confirm", 1)
+        };
+        let result = execute_command(req, state, None, None);
+        assert!(result.is_err());
     }
 
     // ---- create_entry ----
@@ -1219,9 +698,10 @@ mod tests {
         let req = NativeRequest {
             id: 1,
             command: "create_entry".to_string(),
-            password: Some("secret123".to_string()),
+            password: Some(Zeroizing::new("secret123".to_string())),
             url: Some("https://github.com".to_string()),
             id_param: None,
+            code: None,
             title: Some("GitHub".to_string()),
             username: Some("user@example.com".to_string()),
             notes: Some("My GitHub account".to_string()),
@@ -1236,7 +716,7 @@ mod tests {
             backup: None,
         };
 
-        let result = execute_command(req, state.clone()).unwrap();
+        let result = execute_command(req, state.clone(), None, None).unwrap();
         assert_eq!(result["title"], "GitHub");
         assert_eq!(result["username"], "user@example.com");
         assert_eq!(result["url"], "https://github.com");
@@ -1252,9 +732,10 @@ mod tests {
         let req = NativeRequest {
             id: 1,
             command: "create_entry".to_string(),
-            password: Some("secret".to_string()),
+            password: Some(Zeroizing::new("secret".to_string())),
             url: None,
             id_param: None,
+            code: None,
             title: Some("Test".to_string()),
             username: Some("user".to_string()),
             notes: None,
@@ -1269,15 +750,15 @@ mod tests {
             backup: None,
         };
 
-        let result = execute_command(req, state);
+        let result = execute_command(req, state, None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("locked"));
     }
 
-    // ---- get_entry ----
+    // ---- get_entry_meta / get_entry_secret ----
 
     #[test]
-    fn test_get_entry() {
+    fn test_get_entry_meta_and_secret() {
         let (state, _temp) = setup_test_state();
         init_test_vault(&state, "master123");
 
@@ -1285,9 +766,10 @@ mod tests {
         let create_req = NativeRequest {
             id: 1,
             command: "create_entry".to_string(),
-            password: Some("my_password".to_string()),
+            password: Some(Zeroizing::new("my_password".to_string())),
             url: None,
             id_param: None,
+            code: None,
             title: Some("Site".to_string()),
             username: Some("user".to_string()),
             notes: Some("some notes".to_string()),
@@ -1301,33 +783,33 @@ mod tests {
             import_password: None,
             backup: None,
         };
-        let created = execute_command(create_req, state.clone()).unwrap();
+        let created = execute_command(create_req, state.clone(), None, None).unwrap();
         let entry_id = created["id"].as_str().unwrap().to_string();
 
-        // Get the entry
-        let get_req = NativeRequest {
+        // Meta endpoint returns public fields without secrets
+        let meta_req = NativeRequest {
             id: 2,
-            command: "get_entry".to_string(),
-            password: None,
-            url: None,
-            id_param: Some(entry_id),
-            title: None,
-            username: None,
-            notes: None,
-            tags: None,
-            request: None,
-            options: None,
-            name: None,
-            group_id: None,
-            settings: None,
-            export_password: None,
-            import_password: None,
-            backup: None,
+            command: "get_entry_meta".to_string(),
+            id_param: Some(entry_id.clone()),
+            ..make_request("get_entry_meta", 2)
         };
-        let result = execute_command(get_req, state).unwrap();
-        assert_eq!(result["password"], "my_password");
-        assert_eq!(result["notes"], "some notes");
-        assert_eq!(result["title"], "Site");
+        let meta = execute_command(meta_req, state.clone(), None, None).unwrap();
+        assert_eq!(meta["title"], "Site");
+        assert_eq!(meta["username"], "user");
+        assert!(meta["password"].is_null());
+        assert!(meta["notes"].is_null());
+
+        // Secret endpoint returns decrypted password/notes and updates last_used_at
+        let secret_req = NativeRequest {
+            id: 3,
+            command: "get_entry_secret".to_string(),
+            id_param: Some(entry_id),
+            ..make_request("get_entry_secret", 3)
+        };
+        let secret = execute_command(secret_req, state, None, None).unwrap();
+        assert_eq!(secret["password"], "my_password");
+        assert_eq!(secret["notes"], "some notes");
+        assert!(!secret["last_used_at"].is_null());
     }
 
     // ---- list_all_entries ----
@@ -1342,9 +824,10 @@ mod tests {
             let req = NativeRequest {
                 id: i,
                 command: "create_entry".to_string(),
-                password: Some(format!("pass{}", i)),
+                password: Some(Zeroizing::new(format!("pass{}", i))),
                 url: None,
                 id_param: None,
+                code: None,
                 title: Some(format!("Site {}", i)),
                 username: Some(format!("user{}@test.com", i)),
                 notes: None,
@@ -1358,11 +841,11 @@ mod tests {
                 import_password: None,
                 backup: None,
             };
-            execute_command(req, state.clone()).unwrap();
+            execute_command(req, state.clone(), None, None).unwrap();
         }
 
         let list_req = make_request("list_all_entries", 10);
-        let result = execute_command(list_req, state).unwrap();
+        let result = execute_command(list_req, state, None, None).unwrap();
         let entries = result.as_array().unwrap();
         assert_eq!(entries.len(), 3);
     }
@@ -1378,9 +861,10 @@ mod tests {
         let create_req = NativeRequest {
             id: 1,
             command: "create_entry".to_string(),
-            password: Some("old_pass".to_string()),
+            password: Some(Zeroizing::new("old_pass".to_string())),
             url: Some("https://old.com".to_string()),
             id_param: None,
+            code: None,
             title: Some("Old Title".to_string()),
             username: Some("old_user".to_string()),
             notes: None,
@@ -1394,16 +878,17 @@ mod tests {
             import_password: None,
             backup: None,
         };
-        let created = execute_command(create_req, state.clone()).unwrap();
+        let created = execute_command(create_req, state.clone(), None, None).unwrap();
         let entry_id = created["id"].as_str().unwrap().to_string();
 
         // Update the entry
         let update_req = NativeRequest {
             id: 2,
             command: "update_entry".to_string(),
-            password: Some("new_pass".to_string()),
+            password: Some(Zeroizing::new("new_pass".to_string())),
             url: Some("https://new.com".to_string()),
             id_param: Some(entry_id),
+            code: None,
             title: Some("New Title".to_string()),
             username: Some("new_user".to_string()),
             notes: Some("updated notes".to_string()),
@@ -1417,15 +902,15 @@ mod tests {
             import_password: None,
             backup: None,
         };
-        let result = execute_command(update_req, state.clone()).unwrap();
+        let result = execute_command(update_req, state.clone(), None, None).unwrap();
         assert_eq!(result["title"], "New Title");
         assert_eq!(result["username"], "new_user");
         assert_eq!(result["tags"], serde_json::json!(["updated"]));
 
         // Verify password was re-encrypted
         let db = state.database.lock().expect("db lock").clone().expect("db");
-        let entry = database::load_entry(&db, &result["id"].as_str().unwrap()).unwrap().unwrap();
-        let key = crypto::get_key().unwrap();
+        let key = state.keystore.get_key().unwrap();
+        let entry = database::load_entry(&db, &key, &result["id"].as_str().unwrap()).unwrap().unwrap();
         let enc: crypto::EncryptedData = bincode::deserialize(&entry.encrypted_password).unwrap();
         let decrypted = crypto::decrypt(&key, &enc).unwrap();
         assert_eq!(String::from_utf8(decrypted).unwrap(), "new_pass");
@@ -1442,9 +927,10 @@ mod tests {
         let create_req = NativeRequest {
             id: 1,
             command: "create_entry".to_string(),
-            password: Some("pass".to_string()),
+            password: Some(Zeroizing::new("pass".to_string())),
             url: None,
             id_param: None,
+            code: None,
             title: Some("To Delete".to_string()),
             username: Some("user".to_string()),
             notes: None,
@@ -1458,7 +944,7 @@ mod tests {
             import_password: None,
             backup: None,
         };
-        let created = execute_command(create_req, state.clone()).unwrap();
+        let created = execute_command(create_req, state.clone(), None, None).unwrap();
         let entry_id = created["id"].as_str().unwrap().to_string();
 
         // Remove it
@@ -1468,6 +954,7 @@ mod tests {
             password: None,
             url: None,
             id_param: Some(entry_id),
+            code: None,
             title: None,
             username: None,
             notes: None,
@@ -1481,12 +968,12 @@ mod tests {
             import_password: None,
             backup: None,
         };
-        let result = execute_command(remove_req, state.clone()).unwrap();
+        let result = execute_command(remove_req, state.clone(), None, None).unwrap();
         assert_eq!(result, serde_json::json!(true));
 
         // Verify count is 0
         let count_req = make_request("get_entry_count", 3);
-        let count = execute_command(count_req, state).unwrap();
+        let count = execute_command(count_req, state, None, None).unwrap();
         assert_eq!(count, serde_json::json!(0));
     }
 
@@ -1498,16 +985,17 @@ mod tests {
         init_test_vault(&state, "master123");
 
         let req = make_request("get_entry_count", 1);
-        let result = execute_command(req, state.clone()).unwrap();
+        let result = execute_command(req, state.clone(), None, None).unwrap();
         assert_eq!(result, serde_json::json!(0));
 
         // Create an entry
         let create_req = NativeRequest {
             id: 2,
             command: "create_entry".to_string(),
-            password: Some("pass".to_string()),
+            password: Some(Zeroizing::new("pass".to_string())),
             url: None,
             id_param: None,
+            code: None,
             title: Some("Test".to_string()),
             username: Some("u".to_string()),
             notes: None,
@@ -1521,10 +1009,10 @@ mod tests {
             import_password: None,
             backup: None,
         };
-        execute_command(create_req, state.clone()).unwrap();
+        execute_command(create_req, state.clone(), None, None).unwrap();
 
         let count_req = make_request("get_entry_count", 3);
-        let count = execute_command(count_req, state).unwrap();
+        let count = execute_command(count_req, state, None, None).unwrap();
         assert_eq!(count, serde_json::json!(1));
     }
 
@@ -1534,7 +1022,7 @@ mod tests {
     fn test_generate_password_default() {
         let (state, _temp) = setup_test_state();
         let req = make_request("generate_password", 1);
-        let result = execute_command(req, state).unwrap();
+        let result = execute_command(req, state, None, None).unwrap();
         let password = result.as_str().unwrap();
         assert_eq!(password.len(), 16);
     }
@@ -1548,6 +1036,7 @@ mod tests {
             password: None,
             url: None,
             id_param: None,
+            code: None,
             title: None,
             username: None,
             notes: None,
@@ -1567,7 +1056,7 @@ mod tests {
             import_password: None,
             backup: None,
         };
-        let result = execute_command(req, state).unwrap();
+        let result = execute_command(req, state, None, None).unwrap();
         let password = result.as_str().unwrap();
         assert_eq!(password.len(), 32);
     }
@@ -1581,6 +1070,7 @@ mod tests {
             password: None,
             url: None,
             id_param: None,
+            code: None,
             title: None,
             username: None,
             notes: None,
@@ -1600,7 +1090,7 @@ mod tests {
             import_password: None,
             backup: None,
         };
-        let result = execute_command(req, state).unwrap();
+        let result = execute_command(req, state, None, None).unwrap();
         let password = result.as_str().unwrap();
 
         let has_upper = password.chars().any(|c| c.is_ascii_uppercase());
@@ -1625,6 +1115,7 @@ mod tests {
                 password: None,
                 url: None,
                 id_param: None,
+                code: None,
                 title: None,
                 username: None,
                 notes: None,
@@ -1644,7 +1135,7 @@ mod tests {
                 import_password: None,
                 backup: None,
             };
-            let result = execute_command(req, state.clone()).unwrap();
+            let result = execute_command(req, state.clone(), None, None).unwrap();
             let password = result.as_str().unwrap();
             assert_eq!(password.len(), 4);
 
@@ -1667,7 +1158,7 @@ mod tests {
     fn test_unknown_command() {
         let (state, _temp) = setup_test_state();
         let req = make_request("nonexistent", 1);
-        let result = execute_command(req, state);
+        let result = execute_command(req, state, None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown command"));
     }
@@ -1675,15 +1166,15 @@ mod tests {
     // ---- operations when locked ----
 
     #[test]
-    fn test_get_entry_locked() {
+    fn test_get_entry_meta_locked() {
         let (state, _temp) = setup_test_state();
         let req = NativeRequest {
             id: 1,
-            command: "get_entry".to_string(),
+            command: "get_entry_meta".to_string(),
             id_param: Some("some-id".to_string()),
-            ..make_request("get_entry", 1)
+            ..make_request("get_entry_meta", 1)
         };
-        let result = execute_command(req, state);
+        let result = execute_command(req, state, None, None);
         assert!(result.is_err());
     }
 
@@ -1691,7 +1182,7 @@ mod tests {
     fn test_list_entries_locked() {
         let (state, _temp) = setup_test_state();
         let req = make_request("list_all_entries", 1);
-        let result = execute_command(req, state);
+        let result = execute_command(req, state, None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("locked"));
     }
@@ -1705,10 +1196,10 @@ mod tests {
             id_param: Some("id".to_string()),
             title: Some("t".to_string()),
             username: Some("u".to_string()),
-            password: Some("p".to_string()),
+            password: Some(Zeroizing::new("p".to_string())),
             ..make_request("update_entry", 1)
         };
-        let result = execute_command(req, state);
+        let result = execute_command(req, state, None, None);
         assert!(result.is_err());
     }
 
@@ -1721,7 +1212,7 @@ mod tests {
             id_param: Some("id".to_string()),
             ..make_request("remove_entry", 1)
         };
-        let result = execute_command(req, state);
+        let result = execute_command(req, state, None, None);
         assert!(result.is_err());
     }
 
@@ -1729,7 +1220,7 @@ mod tests {
     fn test_entry_count_locked() {
         let (state, _temp) = setup_test_state();
         let req = make_request("get_entry_count", 1);
-        let result = execute_command(req, state);
+        let result = execute_command(req, state, None, None);
         assert!(result.is_err());
     }
 }

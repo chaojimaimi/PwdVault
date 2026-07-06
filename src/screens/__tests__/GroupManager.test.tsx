@@ -42,7 +42,7 @@ describe('GroupManager', () => {
         error: null,
       },
       dispatch: () => {},
-      actions: { loadGroups, createGroup, updateGroup, deleteGroup, initialize: async () => {}, unlock: async () => true, lock: () => {}, loadEntries: async () => {}, updateEntry: async () => ({} as any), selectGroup: () => {}, selectEntry: async () => {}, getEntry: async () => null, createEntry: async () => ({} as any), deleteEntry: async () => {}, navigate: () => {}, setSearchQuery: () => {} },
+      actions: { loadGroups, createGroup, updateGroup, deleteGroup, initialize: async () => {}, unlock: async () => true, lock: () => {}, loadEntries: async () => {}, updateEntry: async () => ({} as any), selectGroup: () => {}, selectEntry: async () => {}, getEntrySecret: async () => null, createEntry: async () => ({} as any), deleteEntry: async () => {}, navigate: () => {}, setSearchQuery: () => {} },
     } as any;
 
     currentAppValue = appValue;
@@ -90,7 +90,7 @@ describe('GroupManager', () => {
         error: null,
       },
       dispatch: () => {},
-      actions: { loadGroups, createGroup, updateGroup, deleteGroup, initialize: async () => {}, unlock: async () => true, lock: () => {}, loadEntries: async () => {}, updateEntry: async () => ({} as any), selectGroup: () => {}, selectEntry: async () => {}, getEntry: async () => null, createEntry: async () => ({} as any), deleteEntry: async () => {}, navigate: () => {}, setSearchQuery: () => {} },
+      actions: { loadGroups, createGroup, updateGroup, deleteGroup, initialize: async () => {}, unlock: async () => true, lock: () => {}, loadEntries: async () => {}, updateEntry: async () => ({} as any), selectGroup: () => {}, selectEntry: async () => {}, getEntrySecret: async () => null, createEntry: async () => ({} as any), deleteEntry: async () => {}, navigate: () => {}, setSearchQuery: () => {} },
     } as any;
 
     currentAppValue = appValue;
@@ -135,7 +135,7 @@ describe('GroupManager', () => {
         error: null,
       },
       dispatch: () => {},
-      actions: { loadGroups, createGroup, updateGroup, deleteGroup, initialize: async () => {}, unlock: async () => true, lock: () => {}, loadEntries: async () => {}, updateEntry: async () => ({} as any), selectGroup: () => {}, selectEntry: async () => {}, getEntry: async () => null, createEntry: async () => ({} as any), deleteEntry: async () => {}, navigate: () => {}, setSearchQuery: () => {} },
+      actions: { loadGroups, createGroup, updateGroup, deleteGroup, initialize: async () => {}, unlock: async () => true, lock: () => {}, loadEntries: async () => {}, updateEntry: async () => ({} as any), selectGroup: () => {}, selectEntry: async () => {}, getEntrySecret: async () => null, createEntry: async () => ({} as any), deleteEntry: async () => {}, navigate: () => {}, setSearchQuery: () => {} },
     } as any;
 
     currentAppValue = appValue2;
