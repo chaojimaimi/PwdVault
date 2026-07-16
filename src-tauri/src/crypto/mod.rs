@@ -22,8 +22,44 @@ pub use verification::{
     VerificationError,
 };
 
+use zeroize::Zeroizing;
+
 /// Size of the encryption key in bytes (256 bits)
 pub const KEY_SIZE: usize = 32;
+
+/// A secret key wrapper that zeroizes on drop and cannot be Copy'd.
+///
+/// (§5.1.5) Wraps bare `[u8; 32]` key material in `Zeroizing<[u8; KEY_SIZE]>`
+/// so the key bytes are wiped from memory when the value goes out of scope.
+/// The type does NOT implement Copy or Clone, preventing accidental key
+/// duplication. Use `as_ref()` to get a `&[u8; KEY_SIZE]` for crypto operations.
+pub struct SecretKey(Zeroizing<[u8; KEY_SIZE]>);
+
+impl SecretKey {
+    /// Create a SecretKey from raw bytes (takes ownership).
+    pub fn new(bytes: [u8; KEY_SIZE]) -> Self {
+        Self(Zeroizing::new(bytes))
+    }
+
+    /// Borrow the key bytes for cryptographic operations.
+    pub fn as_ref(&self) -> &[u8; KEY_SIZE] {
+        &self.0
+    }
+
+    /// Consume into raw bytes (caller responsible for zeroization).
+    pub fn into_bytes(self) -> [u8; KEY_SIZE] {
+        // Zeroizing derefs to the inner value; we extract via Deref.
+        let tmp = self.0;
+        *tmp
+    }
+}
+
+impl std::fmt::Debug for SecretKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never log key material (§5.1.5: logs must not contain keys)
+        write!(f, "SecretKey([REDACTED])")
+    }
+}
 
 /// Size of the salt in bytes
 pub const SALT_SIZE: usize = 16;

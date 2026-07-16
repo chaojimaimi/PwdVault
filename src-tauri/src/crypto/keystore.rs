@@ -53,10 +53,26 @@ impl KeyStore {
         Ok(())
     }
 
-    /// Get the encryption key from memory
+    /// Get the encryption key from memory.
+    ///
+    /// Returns an owned copy of the key. Prefer `with_key` to avoid
+    /// unnecessary copies (§5.1.5).
     pub fn get_key(&self) -> Result<EncryptionKey, KeyStoreError> {
         let keystore = self.key.lock().expect("keystore lock poisoned");
         keystore.ok_or(KeyStoreError::VaultLocked)
+    }
+
+    /// Borrow the key for the duration of a closure, without copying (§5.1.5).
+    ///
+    /// This is the preferred way to access the key: it holds the mutex only
+    /// for the closure's lifetime and does not return an owned copy.
+    pub fn with_key<F, R>(&self, f: F) -> Result<R, KeyStoreError>
+    where
+        F: FnOnce(&EncryptionKey) -> R,
+    {
+        let keystore = self.key.lock().expect("keystore lock poisoned");
+        let key = keystore.as_ref().ok_or(KeyStoreError::VaultLocked)?;
+        Ok(f(key))
     }
 
     /// Check if the vault is unlocked
