@@ -130,6 +130,11 @@ pub fn unlock_vault(
     state: &Arc<AppState>,
     password: Zeroizing<String>,
 ) -> Result<bool, VaultError> {
+    // §5.1.3: Two-phase unlock — keys are NOT published until ALL
+    // verification completes. Any error before step 8 leaves the vault
+    // in the Locked state.
+
+    // Step 1: Check rate limit
     check_rate_limit(state)?;
 
     let verification_data = state
@@ -140,71 +145,71 @@ pub fn unlock_vault(
         .ok_or(VaultError::VaultLocked)?
         .clone();
 
+    // Step 2: Verify password and derive keys in local variables.
+    // The keys stay in local scope — they are NOT published to the session yet.
     let keys = unlock_with_password(password.as_str(), &verification_data)?;
 
     // `password` zeroizes on drop here.
 
-    if let Some((enc_key, mac_key)) = keys {
-        // NOTE: This still publishes keys before integrity verification —
-        // the full two-phase unlock fix is §5.1.3 (Step 3). For now we use
-        // the session API to keep the code compiling.
-        state.session.unlock(enc_key, mac_key);
-
-        // Verify database integrity before exposing unlocked vault.
-        // For databases created before v1.0.5 (no stored digest), run a
-        // one-time migration: re-encrypt entries/groups with the new codecs
-        // and establish the integrity digest baseline.
-        //
-        // If a digest exists but its computation version is stale (computed
-        // by an earlier v1.0.5 build with a different digest algorithm or
-        // before inner-field re-encryption), re-run migration to re-encrypt
-        // the inner encrypted_password/encrypted_notes fields from the v1.0.4
-        // master_key to the v1.0.5 enc_key.
-        if let Ok(db) = get_db(state) {
-            if database::integrity::has_digest(&db)? {
-                if database::integrity::needs_digest_rebuild(&db)? {
-                    tracing::info!("rebuilding integrity baseline (digest version mismatch)");
-                    // Re-derive master_key to decrypt v1.0.4-era inner fields.
-                    let (mut master_key, _) = crypto::kdf::derive_key_with_params(
-                        password.as_str(),
-                        &verification_data.salt,
-                        &verification_data.params,
-                    )?;
-                    migrate_database(&db, &master_key, &enc_key, &mac_key)?;
-                    master_key.zeroize();
-                } else if !database::integrity::verify_integrity(&db, &mac_key)? {
-                    state.lock_vault();
-                    return Err(VaultError::InvalidBackup(
-                        "Database integrity check failed".to_string(),
-                    ));
-                }
-            } else {
-                tracing::info!("migrating database from pre-v1.0.5 format");
-                let (mut master_key, _) = crypto::kdf::derive_key_with_params(
-                    password.as_str(),
-                    &verification_data.salt,
-                    &verification_data.params,
-                )?;
-                migrate_database(&db, &master_key, &enc_key, &mac_key)?;
-                master_key.zeroize();
-            }
+    let (enc_key, mac_key) = match keys {
+        Some(k) => k,
+        None => {
+            record_failed_attempt(state);
+            return Ok(false);
         }
+    };
 
-        reset_rate_limit(state);
-        // Load settings (e.g. auto-lock timeout) from database
-        if let Ok(db) = get_db(state) {
-            if let Ok(settings) = load_settings(&db) {
-                *state.auto_lock_secs.lock().expect("timeout lock poisoned") =
-                    settings.auto_lock_secs;
-            }
+    // Step 3: Acquire database handle
+    let db = get_db(state)?;
+
+    // Step 4-5: Verify integrity (vault header verification is §5.1.4, not yet)
+    // For now, check the existing digest/migration logic, but WITHOUT
+    // publishing keys first.
+    if database::integrity::has_digest(&db)? {
+        if database::integrity::needs_digest_rebuild(&db)? {
+            // Step 6: Migration needed (stale digest version)
+            tracing::info!("rebuilding integrity baseline (digest version mismatch)");
+            let (mut master_key, _) = crypto::kdf::derive_key_with_params(
+                password.as_str(),
+                &verification_data.salt,
+                &verification_data.params,
+            )?;
+            let migrate_result = migrate_database(&db, &master_key, &enc_key, &mac_key);
+            master_key.zeroize();
+            migrate_result?; // Error here = stay Locked, keys never published
+        } else if !database::integrity::verify_integrity(&db, &mac_key)? {
+            // Integrity check failed — stay Locked, do NOT publish keys
+            return Err(VaultError::InvalidBackup(
+                "Database integrity check failed".to_string(),
+            ));
         }
-        state.touch_activity();
-        state.update_lock_menu("Lock Vault");
     } else {
-        record_failed_attempt(state);
+        // Step 6: Pre-v1.0.5 database — run migration
+        tracing::info!("migrating database from pre-v1.0.5 format");
+        let (mut master_key, _) = crypto::kdf::derive_key_with_params(
+            password.as_str(),
+            &verification_data.salt,
+            &verification_data.params,
+        )?;
+        let migrate_result = migrate_database(&db, &master_key, &enc_key, &mac_key);
+        master_key.zeroize();
+        migrate_result?; // Error = stay Locked
     }
 
-    Ok(keys.is_some())
+    // Step 7: Load and validate settings
+    let settings = load_settings(&db)?;
+
+    // Step 8: Atomically publish UnlockedSession — THE LAST STEP.
+    // Only now are the keys exposed to other threads.
+    state.session.unlock(enc_key, mac_key);
+
+    // Step 9: Reset rate limit and start activity timer
+    reset_rate_limit(state);
+    *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
+    state.touch_activity();
+    state.update_lock_menu("Lock Vault");
+
+    Ok(true)
 }
 
 pub fn lock_vault(state: &Arc<AppState>) {
