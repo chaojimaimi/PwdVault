@@ -27,11 +27,14 @@ pub const SCHEMA_VERSION_LATEST: u32 = 1;
 ///     master_key to the v1.0.5 enc_key (HKDF-derived subkey). Databases
 ///     tagged with v1/v2 have inner fields still encrypted with master_key
 ///     and must be migrated.
+/// v4: same coverage as v3, but entry/group records now use AES-GCM AAD
+///     (record format v2). Records sealed with AAD cannot be swapped between
+///     tables or ids. (§5.1.4)
 ///
 /// When the stored version does not match `DB_DIGEST_VERSION`, the digest was
 /// computed by an incompatible older build and must be re-established rather
 /// than treated as a tampering detection.
-const DB_DIGEST_VERSION: u32 = 3;
+const DB_DIGEST_VERSION: u32 = 4;
 
 type HmacSha256 = Hmac<Sha256>;
 

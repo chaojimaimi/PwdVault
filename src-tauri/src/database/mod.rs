@@ -47,6 +47,9 @@ pub enum DatabaseError {
     #[error("Serialization error: {0}")]
     SerializationError(String),
 
+    #[error("Deserialization error: {0}")]
+    DeserializationError(String),
+
     #[error("Encryption error: {0}")]
     EncryptionError(String),
 
@@ -243,7 +246,7 @@ pub fn load_entry(
 
     match table.get(id)? {
         Some(value) => {
-            let entry = entry_codec::open_entry(value.value(), key)?;
+            let entry = entry_codec::open_entry(value.value(), key, id)?;
             Ok(Some(entry))
         }
         None => Ok(None),
@@ -304,7 +307,7 @@ pub fn load_group(db: &Database, key: &[u8; 32], id: &str) -> Result<Option<Grou
 
     match table.get(id)? {
         Some(value) => {
-            let g = group_codec::open_group(value.value(), key)?;
+            let g = group_codec::open_group(value.value(), key, id)?;
             Ok(Some(g))
         }
         None => Ok(None),

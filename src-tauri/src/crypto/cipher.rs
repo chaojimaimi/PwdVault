@@ -3,7 +3,7 @@
 //! Provides authenticated encryption with associated data (AEAD).
 
 use aes_gcm::{
-    aead::{Aead, KeyInit},
+    aead::{Aead, KeyInit, Payload},
     Aes256Gcm, Key, Nonce,
 };
 use rand::rngs::OsRng;
@@ -101,6 +101,64 @@ pub fn decrypt(
 
     cipher
         .decrypt(nonce, encrypted.ciphertext.as_slice())
+        .map_err(|e| EncryptionError::DecryptionFailed(e.to_string()))
+}
+
+/// Encrypt plaintext with associated data (AAD) using AES-256-GCM.
+///
+/// The AAD is authenticated but not encrypted. This binds each record to
+/// its context (table name, record id, format version) so that a blob
+/// moved between tables or records fails decryption. (§5.1.4)
+pub fn encrypt_with_aad(
+    key: &[u8; KEY_SIZE],
+    plaintext: &[u8],
+    aad: &[u8],
+) -> Result<EncryptedData, EncryptionError> {
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+
+    let nonce_bytes = generate_nonce();
+    let nonce = Nonce::<U12>::from_slice(&nonce_bytes);
+
+    let payload = Payload {
+        msg: plaintext,
+        aad,
+    };
+
+    let ciphertext = cipher
+        .encrypt(nonce, payload)
+        .map_err(|e| EncryptionError::EncryptionFailed(e.to_string()))?;
+
+    Ok(EncryptedData {
+        nonce: nonce_bytes.to_vec(),
+        ciphertext,
+    })
+}
+
+/// Decrypt ciphertext with associated data (AAD) using AES-256-GCM.
+///
+/// Decryption fails if the AAD does not match what was used during
+/// encryption, providing cryptographic binding to the record context.
+pub fn decrypt_with_aad(
+    key: &[u8; KEY_SIZE],
+    encrypted: &EncryptedData,
+    aad: &[u8],
+) -> Result<Vec<u8>, EncryptionError> {
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+
+    if encrypted.nonce.len() != NONCE_SIZE {
+        return Err(EncryptionError::InvalidCiphertext(
+            "Invalid nonce length".to_string(),
+        ));
+    }
+
+    let nonce = Nonce::<U12>::from_slice(&encrypted.nonce);
+    let payload = Payload {
+        msg: encrypted.ciphertext.as_slice(),
+        aad,
+    };
+
+    cipher
+        .decrypt(nonce, payload)
         .map_err(|e| EncryptionError::DecryptionFailed(e.to_string()))
 }
 

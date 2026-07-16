@@ -16,6 +16,7 @@ pub mod service;
 pub mod session;
 #[cfg(test)]
 pub mod test_infra;
+pub mod vault_header;
 
 use redb::Database;
 use serde::{Deserialize, Serialize};

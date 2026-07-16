@@ -12,7 +12,9 @@ pub mod keystore;
 pub mod verification;
 
 // Re-export commonly used types and functions
-pub use cipher::{decrypt, encrypt, EncryptedData, EncryptionError};
+pub use cipher::{
+    decrypt, decrypt_with_aad, encrypt, encrypt_with_aad, EncryptedData, EncryptionError,
+};
 pub use kdf::{derive_key, derive_key_with_params, generate_salt, AdaptiveParams, KdfError};
 pub use keystore::{KeyStore, KeyStoreError};
 pub use verification::{

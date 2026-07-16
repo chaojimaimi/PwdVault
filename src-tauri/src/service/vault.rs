@@ -103,12 +103,14 @@ pub fn init_vault(state: &Arc<AppState>, password: Zeroizing<String>) -> Result<
 
     let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &verification_data.salt);
 
-    // Single transaction: verification data + settings + digest (§5.1.2)
+    // Single transaction: verification data + header + settings + digest (§5.1.2, §5.1.4)
     let default_settings = Settings::default();
+    let header = crate::vault_header::VaultHeader::new_initial();
     {
         let store = database::vault_store::VaultStore::new(&db);
         store.write(&mac_key, |txn| {
             database::vault_store::save_verification_data_in_txn(txn, &verification_data)?;
+            crate::vault_header::save_header_in_txn(txn, &header, &enc_key)?;
             database::vault_store::save_settings_in_txn(txn, &default_settings)?;
             Ok(())
         })?;
@@ -162,30 +164,39 @@ pub fn unlock_vault(
     // Step 3: Acquire database handle
     let db = get_db(state)?;
 
-    // Step 4-5: Verify integrity (vault header verification is §5.1.4, not yet)
-    // For now, check the existing digest/migration logic, but WITHOUT
-    // publishing keys first.
-    if database::integrity::has_digest(&db)? {
+    // Step 4: Read and verify the AEAD-authenticated vault header (§5.1.4).
+    // The header determines whether this is a legacy DB that needs migration,
+    // or a modern DB that must fail-closed on integrity issues.
+    let header = crate::vault_header::load_header(&db, &enc_key)?;
+    let integrity_required = crate::vault_header::is_integrity_required(header.as_ref());
+
+    // Step 5-6: Verify integrity and migrate if needed.
+    if integrity_required {
+        // Modern database with integrity_required=true.
+        // §5.1.4: Missing or unknown digest → REJECT (no auto-migration).
+        if !database::integrity::has_digest(&db)? {
+            tracing::error!("integrity_required but digest missing — possible tampering");
+            return Err(VaultError::InvalidBackup(
+                "Database integrity check failed".to_string(),
+            ));
+        }
         if database::integrity::needs_digest_rebuild(&db)? {
-            // Step 6: Migration needed (stale digest version)
-            tracing::info!("rebuilding integrity baseline (digest version mismatch)");
-            let (mut master_key, _) = crypto::kdf::derive_key_with_params(
-                password.as_str(),
-                &verification_data.salt,
-                &verification_data.params,
-            )?;
-            let migrate_result = migrate_database(&db, &master_key, &enc_key, &mac_key);
-            master_key.zeroize();
-            migrate_result?; // Error here = stay Locked, keys never published
-        } else if !database::integrity::verify_integrity(&db, &mac_key)? {
-            // Integrity check failed — stay Locked, do NOT publish keys
+            // Unknown digest version → REJECT (not auto-rebuild)
+            tracing::error!("integrity_required but digest version unknown — possible downgrade");
+            return Err(VaultError::InvalidBackup(
+                "Database integrity check failed".to_string(),
+            ));
+        }
+        if !database::integrity::verify_integrity(&db, &mac_key)? {
+            // Digest mismatch → tampering detected → REJECT
             return Err(VaultError::InvalidBackup(
                 "Database integrity check failed".to_string(),
             ));
         }
     } else {
-        // Step 6: Pre-v1.0.5 database — run migration
-        tracing::info!("migrating database from pre-v1.0.5 format");
+        // Legacy database (no header, or header with integrity_required=false).
+        // Migration is triggered by the explicit absence of integrity protection.
+        tracing::info!("migrating database from legacy format");
         let (mut master_key, _) = crypto::kdf::derive_key_with_params(
             password.as_str(),
             &verification_data.salt,
@@ -216,19 +227,20 @@ pub fn lock_vault(state: &Arc<AppState>) {
     state.lock_vault();
 }
 
-/// One-time migration for databases created before v1.0.5 (or with an
-/// earlier v1.0.5 build that did not re-encrypt inner fields).
+/// One-time migration for databases created before the current format.
 ///
-/// Performs two layers of re-encryption:
-/// 1. **Inner fields**: `encrypted_password` and `encrypted_notes` were
-///    encrypted with `master_key` in v1.0.4. Decrypt with `master_key`,
-///    re-encrypt with `enc_key` (the HKDF-derived subkey used by v1.0.5).
-/// 2. **Outer blob**: v1.0.4 stored plaintext `bincode::serialize(entry)`.
-///    v1.0.5 wraps it via `seal_entry` (encrypt the serialized entry).
-///    `open_entry` handles both formats on read, but we re-seal so future
-///    reads don't rely on the fallback.
+/// Performs:
+/// 1. **Pre-migration backup**: copies the original DB file to
+///    `vault.db.{timestamp}.bak` (non-overwriting) before any modification (§5.1.4).
+/// 2. **Inner field re-encryption**: `encrypted_password`/`encrypted_notes`
+///    encrypted with `master_key` in v1.0.4 are re-encrypted with `enc_key`.
+/// 3. **Outer blob re-seal with AAD**: all entries/groups are re-sealed
+///    using record format v2 (AAD-bound) (§5.1.4).
+/// 4. **Vault header**: writes an AEAD-authenticated header with
+///    `integrity_required = true` so future unlock cannot be downgraded.
+/// 5. **Digest baseline**: establishes the v4 integrity digest.
 ///
-/// After migration, establishes the integrity digest baseline.
+/// All writes (steps 2-5) happen in a single VaultStore transaction (§5.1.2).
 fn migrate_database(
     db: &Arc<redb::Database>,
     master_key: &[u8; 32],
@@ -237,8 +249,24 @@ fn migrate_database(
 ) -> Result<(), VaultError> {
     use crate::crypto::{decrypt, encrypt, EncryptedData};
 
+    // §5.1.4: Create non-overwriting backup before migration.
+    let db_path = paths::get_db_path();
+    if db_path.exists() {
+        let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S");
+        let backup_path = db_path.with_extension(format!("db.{}.bak", timestamp));
+        if !backup_path.exists() {
+            if let Err(e) = std::fs::copy(&db_path, &backup_path) {
+                tracing::warn!("failed to create pre-migration backup: {}", e);
+            } else {
+                tracing::info!("pre-migration backup created");
+            }
+        }
+    }
+
+    // Pre-process entries: decrypt inner fields and re-seal with AAD.
     let entry_ids = database::list_entries(db)?;
     let entry_count = entry_ids.len();
+    let mut sealed_entries: Vec<(String, Vec<u8>)> = Vec::with_capacity(entry_count);
     for id in &entry_ids {
         if let Some(mut entry) = database::load_entry(db, enc_key, id)? {
             // Re-encrypt encrypted_password: master_key → enc_key
@@ -246,14 +274,12 @@ fn migrate_database(
                 let old_enc: EncryptedData = bincode::deserialize(&entry.encrypted_password)
                     .or_else(|_| EncryptedData::from_bytes(&entry.encrypted_password))?;
                 if let Ok(plain) = decrypt(master_key, &old_enc) {
-                    // Successfully decrypted with master_key → re-encrypt with enc_key
                     let new_enc = encrypt(enc_key, &plain)?;
                     entry.encrypted_password = bincode::serialize(&new_enc)
                         .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
-                } else {
-                    // Already encrypted with enc_key (or format unknown) — leave as-is
-                    tracing::warn!(entry_id = %id, "could not decrypt password with master_key, leaving as-is");
                 }
+                // If decrypt with master_key fails, the field is already
+                // enc_key-encrypted; seal_entry will re-seal it with AAD.
             }
 
             // Re-encrypt encrypted_notes: master_key → enc_key
@@ -267,33 +293,60 @@ fn migrate_database(
                             .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?,
                     );
                 } else {
-                    // Already encrypted with enc_key — put it back
                     entry.encrypted_notes = Some(old_notes_bytes);
-                    tracing::warn!(entry_id = %id, "could not decrypt notes with master_key, leaving as-is");
                 }
             }
 
-            // Re-seal the outer blob with enc_key (v1.0.5 format)
-            database::save_entry(db, enc_key, &entry)?;
+            // Pre-seal with AAD (record format v2)
+            let blob = database::entry_codec::seal_entry(&entry, enc_key)?;
+            sealed_entries.push((entry.id.clone(), blob));
         }
     }
 
-    // Migrate groups (outer blob only — no inner encrypted fields)
+    // Pre-process groups
     let group_ids = database::list_groups(db)?;
     let group_count = group_ids.len();
+    let mut sealed_groups: Vec<(String, Vec<u8>)> = Vec::with_capacity(group_count);
     for id in &group_ids {
         if let Some(group) = database::load_group(db, enc_key, id)? {
-            database::save_group(db, enc_key, &group)?;
+            let blob = database::group_codec::seal_group(&group, enc_key)?;
+            sealed_groups.push((group.id.clone(), blob));
         }
     }
 
-    // Establish integrity digest baseline
-    database::integrity::refresh_digest(db, mac_key)?;
+    // Single transaction: replace all records + write header + digest (§5.1.2, §5.1.4)
+    let header = crate::vault_header::VaultHeader::new_migrated();
+    let store = database::vault_store::VaultStore::new(db);
+    store.write(mac_key, |txn| {
+        // Replace entries
+        {
+            let mut t = txn.open_table(database::ENTRIES_TABLE)?;
+            for id in &entry_ids {
+                t.remove(id.as_str())?;
+            }
+            for (id, blob) in &sealed_entries {
+                t.insert(id.as_str(), blob.as_slice())?;
+            }
+        }
+        // Replace groups
+        {
+            let mut t = txn.open_table(database::GROUPS_TABLE)?;
+            for id in &group_ids {
+                t.remove(id.as_str())?;
+            }
+            for (id, blob) in &sealed_groups {
+                t.insert(id.as_str(), blob.as_slice())?;
+            }
+        }
+        // Write vault header (integrity_required = true)
+        crate::vault_header::save_header_in_txn(txn, &header, enc_key)?;
+        Ok(())
+    })?;
 
     tracing::info!(
         entries = entry_count,
         groups = group_count,
-        "database migration complete (inner fields re-encrypted)"
+        "database migration complete (AAD records + header + digest v4)"
     );
 
     Ok(())
