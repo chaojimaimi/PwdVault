@@ -2,9 +2,7 @@ use std::sync::Arc;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::{decrypt, encrypt, EncryptedData};
-use crate::database::{
-    self, count_entries, delete_entry, list_entries, load_entry, save_entry, PasswordEntry,
-};
+use crate::database::{count_entries, list_entries, load_entry, vault_store, PasswordEntry};
 use crate::service::vault::{get_db, get_mac_key};
 use crate::{
     constants, AppState, CreateEntryRequest, EntrySecretResponse, EntrySummary, VaultError,
@@ -55,13 +53,14 @@ pub fn create_entry(
 
     let db = get_db(state)?;
     let key = state.session.get_enc_key()?;
+    let mac_key = get_mac_key(state)?;
 
-    // Encrypt password. request.password is Zeroizing<String>; deref to &str.
+    // Encrypt password and notes BEFORE opening the write transaction,
+    // so crypto failures roll back cleanly without holding the write lock.
     let encrypted_password = encrypt(&key, request.password.as_bytes())?;
     let encrypted_password_bytes = bincode::serialize(&encrypted_password)
         .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
 
-    // Encrypt notes if present
     let encrypted_notes = if let Some(notes) = &request.notes {
         let encrypted = encrypt(&key, notes.as_bytes())?;
         let bytes = bincode::serialize(&encrypted)
@@ -77,10 +76,12 @@ pub fn create_entry(
     entry.tags = request.tags;
     entry.group_id = request.group_id;
 
-    save_entry(&db, &key, &entry)?;
-
-    let mac_key = get_mac_key(state)?;
-    database::integrity::refresh_digest(&db, &mac_key)?;
+    // Single transaction: business write + digest refresh (§5.1.2)
+    let store = vault_store::VaultStore::new(&db);
+    store.write(&mac_key, |txn| {
+        vault_store::save_entry_in_txn(txn, &key, &entry)?;
+        Ok(())
+    })?;
 
     state.touch_activity();
 
@@ -111,17 +112,13 @@ pub fn get_entry_secret(
 
     let db = get_db(state)?;
     let key = state.session.get_enc_key()?;
-    let mut entry = load_entry(&db, &key, &id)?.ok_or(VaultError::EntryNotFound)?;
+    let entry = load_entry(&db, &key, &id)?.ok_or(VaultError::EntryNotFound)?;
 
     // Decrypt password. Try bincode format first (v1.0.5+ and v1.0.4 both use
     // bincode::serialize(EncryptedData)), then fall back to raw bytes
     // (nonce||ciphertext) just in case an older build used to_bytes().
     let encrypted_password: EncryptedData = bincode::deserialize(&entry.encrypted_password)
         .or_else(|e| {
-            tracing::warn!(
-                "bincode deserialize failed ({}), trying raw bytes fallback",
-                e
-            );
             EncryptedData::from_bytes(&entry.encrypted_password)
                 .map_err(|e2| VaultError::DecryptionFailed(format!("bincode: {} / raw: {}", e, e2)))
         })?;
@@ -135,7 +132,6 @@ pub fn get_entry_secret(
     let notes = if let Some(encrypted_notes_bytes) = &entry.encrypted_notes {
         let encrypted: EncryptedData =
             bincode::deserialize(encrypted_notes_bytes).or_else(|e| {
-                tracing::warn!("notes bincode deserialize failed ({}), trying raw bytes", e);
                 EncryptedData::from_bytes(encrypted_notes_bytes).map_err(|e2| {
                     VaultError::DecryptionFailed(format!("bincode: {} / raw: {}", e, e2))
                 })
@@ -151,22 +147,14 @@ pub fn get_entry_secret(
         None
     };
 
-    // Zeroize intermediate password bytes; Zeroizing<String> handles the string on drop
+    // Zeroize intermediate password bytes
     password_bytes.zeroize();
 
-    // Record that the secret was accessed and persist the updated metadata.
-    // These are side effects — if they fail, we still return the decrypted
-    // secret so the user can see their password. The failure is logged.
-    entry.last_used_at = Some(chrono::Utc::now().timestamp());
-    if let Err(e) = save_entry(&db, &key, &entry) {
-        tracing::warn!("failed to persist last_used_at: {}", e);
-    }
-
-    if let Ok(mac_key) = get_mac_key(state) {
-        if let Err(e) = database::integrity::refresh_digest(&db, &mac_key) {
-            tracing::warn!("failed to refresh digest after secret access: {}", e);
-        }
-    }
+    // §5.1.2: Removed last_used_at persistence side-effect.
+    // The frontend does not use this field, and persisting it caused
+    // write amplification (entry re-seal + full digest refresh) on every
+    // secret read. last_used_at is now only returned from the in-memory
+    // entry without being written back.
 
     state.touch_activity();
 
@@ -211,6 +199,8 @@ pub fn update_entry(
 
     let db = get_db(state)?;
     let key = state.session.get_enc_key()?;
+    let mac_key = get_mac_key(state)?;
+
     let mut entry = load_entry(&db, &key, &id)?.ok_or(VaultError::EntryNotFound)?;
 
     // Update fields
@@ -237,10 +227,12 @@ pub fn update_entry(
         None
     };
 
-    save_entry(&db, &key, &entry)?;
-
-    let mac_key = get_mac_key(state)?;
-    database::integrity::refresh_digest(&db, &mac_key)?;
+    // Single transaction: business write + digest refresh (§5.1.2)
+    let store = vault_store::VaultStore::new(&db);
+    store.write(&mac_key, |txn| {
+        vault_store::save_entry_in_txn(txn, &key, &entry)?;
+        Ok(())
+    })?;
 
     state.touch_activity();
 
@@ -253,10 +245,14 @@ pub fn remove_entry(state: &Arc<AppState>, id: String) -> Result<bool, VaultErro
     }
 
     let db = get_db(state)?;
-    let existed = delete_entry(&db, &id)?;
-
     let mac_key = get_mac_key(state)?;
-    database::integrity::refresh_digest(&db, &mac_key)?;
+
+    // Single transaction: delete + digest refresh (§5.1.2)
+    let store = vault_store::VaultStore::new(&db);
+    let existed = store.write(&mac_key, |txn| {
+        let existed = vault_store::delete_entry_in_txn(txn, &id)?;
+        Ok(existed)
+    })?;
 
     state.touch_activity();
 

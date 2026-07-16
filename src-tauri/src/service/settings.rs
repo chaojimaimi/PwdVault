@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::database::{integrity, load_settings, save_settings, Settings};
+use crate::database::{load_settings, vault_store, Settings};
 use crate::service::vault::{get_db, get_mac_key};
 use crate::{AppState, VaultError};
 
@@ -29,12 +29,15 @@ pub fn update_settings(state: &Arc<AppState>, settings: Settings) -> Result<Sett
         ));
     }
     let db = get_db(state)?;
-    save_settings(&db, &settings)?;
-    // Refresh integrity digest so the new settings are part of the protected
-    // state. Without this, settings tampering would not be detected on next
-    // unlock because the digest still covers the old settings blob.
     let mac_key = get_mac_key(state)?;
-    integrity::refresh_digest(&db, &mac_key)?;
+
+    // Single transaction: settings write + digest refresh (§5.1.2)
+    let store = vault_store::VaultStore::new(&db);
+    store.write(&mac_key, |txn| {
+        vault_store::save_settings_in_txn(txn, &settings)?;
+        Ok(())
+    })?;
+
     // Apply auto-lock timeout immediately
     *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
     state.touch_activity();

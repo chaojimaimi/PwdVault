@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::database::{self, delete_group, list_groups, load_group, save_group, Group};
+use crate::database::{self, list_groups, load_group, vault_store, Group};
 use crate::service::vault::{get_db, get_mac_key};
 use crate::{AppState, VaultError};
 
@@ -11,11 +11,15 @@ pub fn create_group(state: &Arc<AppState>, name: String) -> Result<Group, VaultE
 
     let db = get_db(state)?;
     let key = state.session.get_enc_key()?;
-    let group = Group::new(name);
-    save_group(&db, &key, &group)?;
-
     let mac_key = get_mac_key(state)?;
-    database::integrity::refresh_digest(&db, &mac_key)?;
+    let group = Group::new(name);
+
+    // Single transaction: business write + digest refresh (§5.1.2)
+    let store = vault_store::VaultStore::new(&db);
+    store.write(&mac_key, |txn| {
+        vault_store::save_group_in_txn(txn, &key, &group)?;
+        Ok(())
+    })?;
 
     state.touch_activity();
     Ok(group)
@@ -47,14 +51,18 @@ pub fn update_group(state: &Arc<AppState>, id: String, name: String) -> Result<G
 
     let db = get_db(state)?;
     let key = state.session.get_enc_key()?;
+    let mac_key = get_mac_key(state)?;
     let mut group = load_group(&db, &key, &id)?
         .ok_or(VaultError::InternalError("Group not found".to_string()))?;
     group.name = name;
     group.updated_at = chrono::Utc::now().timestamp();
-    save_group(&db, &key, &group)?;
 
-    let mac_key = get_mac_key(state)?;
-    database::integrity::refresh_digest(&db, &mac_key)?;
+    // Single transaction: business write + digest refresh (§5.1.2)
+    let store = vault_store::VaultStore::new(&db);
+    store.write(&mac_key, |txn| {
+        vault_store::save_group_in_txn(txn, &key, &group)?;
+        Ok(())
+    })?;
 
     state.touch_activity();
     Ok(group)
@@ -67,23 +75,30 @@ pub fn remove_group(state: &Arc<AppState>, id: String) -> Result<bool, VaultErro
 
     let db = get_db(state)?;
     let key = state.session.get_enc_key()?;
-    let existed = delete_group(&db, &id)?;
+    let mac_key = get_mac_key(state)?;
 
-    // Cascade: clear group_id on entries that referenced the deleted group
-    if existed {
-        let entry_ids = database::list_entries(&db)?;
-        for entry_id in entry_ids {
-            if let Some(mut entry) = database::load_entry(&db, &key, &entry_id)? {
-                if entry.group_id.as_deref() == Some(id.as_str()) {
-                    entry.group_id = None;
-                    database::save_entry(&db, &key, &entry)?;
-                }
+    // Pre-load entries that reference this group for cascade clearing.
+    let entry_ids = database::list_entries(&db)?;
+    let mut entries_to_update = Vec::new();
+    for entry_id in &entry_ids {
+        if let Some(mut entry) = database::load_entry(&db, &key, entry_id)? {
+            if entry.group_id.as_deref() == Some(id.as_str()) {
+                entry.group_id = None;
+                entries_to_update.push(entry);
             }
         }
     }
 
-    let mac_key = get_mac_key(state)?;
-    database::integrity::refresh_digest(&db, &mac_key)?;
+    // Single transaction: delete group + cascade clear entries + digest (§5.1.2)
+    let store = vault_store::VaultStore::new(&db);
+    let existed = store.write(&mac_key, |txn| {
+        let existed = vault_store::delete_group_in_txn(txn, &id)?;
+        // Cascade: clear group_id on entries that referenced the deleted group
+        for entry in &entries_to_update {
+            vault_store::save_entry_in_txn(txn, &key, entry)?;
+        }
+        Ok(existed)
+    })?;
 
     state.touch_activity();
     Ok(existed)

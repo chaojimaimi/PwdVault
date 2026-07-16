@@ -242,6 +242,81 @@ pub fn refresh_digest(db: &Database, mac_key: &[u8; 32]) -> Result<(), DatabaseE
     Ok(())
 }
 
+/// Compute the HMAC digest using an existing `WriteTransaction`.
+///
+/// This is the core digest computation extracted from `refresh_digest` so it
+/// can be called within a caller-owned transaction (§5.1.2 VaultWriteTxn).
+/// The caller is responsible for committing the transaction afterward.
+pub fn compute_digest_from_txn(
+    txn: &redb::WriteTransaction,
+    mac_key: &[u8; 32],
+) -> Result<[u8; 32], DatabaseError> {
+    let mut mac = HmacSha256::new_from_slice(mac_key).expect("HMAC key length is valid");
+
+    {
+        let table = txn.open_table(ENTRIES_TABLE)?;
+        for result in table.iter()? {
+            let (k, v) = result?;
+            mac.update(b"entry:");
+            mac.update(k.value().as_bytes());
+            mac.update(v.value());
+        }
+    }
+    {
+        let table = txn.open_table(GROUPS_TABLE)?;
+        for result in table.iter()? {
+            let (k, v) = result?;
+            mac.update(b"group:");
+            mac.update(k.value().as_bytes());
+            mac.update(v.value());
+        }
+    }
+    {
+        let table = txn.open_table(SETTINGS_TABLE)?;
+        for result in table.iter()? {
+            let (k, v) = result?;
+            mac.update(b"settings:");
+            mac.update(k.value().as_bytes());
+            mac.update(v.value());
+        }
+    }
+    {
+        let table = txn.open_table(VAULT_TABLE)?;
+        for result in table.iter()? {
+            let (k, v) = result?;
+            mac.update(b"vault:");
+            mac.update(k.value().as_bytes());
+            mac.update(v.value());
+        }
+    }
+
+    let mut digest = [0u8; 32];
+    digest.copy_from_slice(&mac.finalize().into_bytes());
+    Ok(digest)
+}
+
+/// Recompute and store the digest within a caller-owned `WriteTransaction`.
+///
+/// Unlike `refresh_digest`, this does NOT open its own transaction or commit.
+/// The caller must commit the transaction afterward. This allows business
+/// writes and the digest update to be in the SAME transaction (§5.1.2).
+pub fn refresh_digest_in_txn(
+    txn: &redb::WriteTransaction,
+    mac_key: &[u8; 32],
+) -> Result<(), DatabaseError> {
+    let digest = compute_digest_from_txn(txn, mac_key)?;
+
+    {
+        let mut table = txn.open_table(META_TABLE)?;
+        table.insert(DB_DIGEST_KEY, digest.as_slice())?;
+        table.insert(
+            DB_DIGEST_VERSION_KEY,
+            DB_DIGEST_VERSION.to_le_bytes().as_slice(),
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

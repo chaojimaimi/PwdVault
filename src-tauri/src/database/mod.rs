@@ -21,6 +21,7 @@ pub(crate) const SETTINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition:
 pub mod entry_codec;
 pub mod group_codec;
 pub mod integrity;
+pub mod vault_store;
 
 // ============================================================================
 // Error Types

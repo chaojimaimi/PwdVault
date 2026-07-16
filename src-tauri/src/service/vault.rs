@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::{self, create_verification_header, unlock_with_password};
-use crate::database::{self, load_settings, save_settings, Settings};
+use crate::database::{self, load_settings, Settings};
 use crate::paths;
 use crate::{constants, AppState, VaultError};
 
@@ -103,18 +103,22 @@ pub fn init_vault(state: &Arc<AppState>, password: Zeroizing<String>) -> Result<
 
     let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &verification_data.salt);
 
-    database::save_verification_data(&db, &verification_data)?;
+    // Single transaction: verification data + settings + digest (§5.1.2)
+    let default_settings = Settings::default();
+    {
+        let store = database::vault_store::VaultStore::new(&db);
+        store.write(&mac_key, |txn| {
+            database::vault_store::save_verification_data_in_txn(txn, &verification_data)?;
+            database::vault_store::save_settings_in_txn(txn, &default_settings)?;
+            Ok(())
+        })?;
+    }
 
     *state
         .verification_data
         .lock()
         .expect("verification lock poisoned") = Some(verification_data);
     state.session.unlock(enc_key, mac_key);
-
-    let default_settings = Settings::default();
-    save_settings(&db, &default_settings)?;
-
-    database::integrity::refresh_digest(&db, &mac_key)?;
 
     state.touch_activity();
     state.update_lock_menu("Lock Vault");

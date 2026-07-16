@@ -251,11 +251,10 @@ pub fn import_vault(
     let existing_entry_ids = list_entries(&db)?;
     let existing_group_ids = list_groups(&db)?;
 
-    // Apply all mutations in a single write transaction. Wrapped in an
-    // inner closure returning DatabaseError so the redb error types
-    // (TableError, StorageError, CommitError) convert via the existing
-    // From impls on DatabaseError; the outer ? then lifts DatabaseError
-    // into VaultError.
+    // Apply all mutations AND digest refresh in a single write transaction
+    // (§5.1.2). Wrapped in an inner closure returning DatabaseError so the
+    // redb error types convert via the existing From impls on DatabaseError.
+    let mac_key = get_mac_key(state)?;
     let apply_txn = || -> Result<(), database::DatabaseError> {
         let txn = db.begin_write()?;
         {
@@ -280,15 +279,14 @@ pub fn import_vault(
             let mut t = txn.open_table(database::SETTINGS_TABLE)?;
             t.insert("current", settings_bytes.as_slice())?;
         }
+        // Refresh digest within the SAME transaction (§5.1.2)
+        database::integrity::refresh_digest_in_txn(&txn, &mac_key)?;
         txn.commit()?;
         Ok(())
     };
     apply_txn()?;
 
     *state.auto_lock_secs.lock().expect("timeout lock poisoned") = payload.settings.auto_lock_secs;
-
-    let mac_key = get_mac_key(state)?;
-    database::integrity::refresh_digest(&db, &mac_key)?;
 
     let entries_count = payload.entries.len();
     let groups_count = payload.groups.len();

@@ -841,7 +841,9 @@ mod tests {
         let secret = execute_command(secret_req, state, None, None).unwrap();
         assert_eq!(secret["password"], "my_password");
         assert_eq!(secret["notes"], "some notes");
-        assert!(!secret["last_used_at"].is_null());
+        // §5.1.2: last_used_at is no longer persisted on secret access.
+        // It returns the value from the stored entry (None for new entries).
+        assert!(secret["last_used_at"].is_null());
     }
 
     // ---- list_all_entries ----
