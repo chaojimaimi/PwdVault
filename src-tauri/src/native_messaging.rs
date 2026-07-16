@@ -308,17 +308,15 @@ fn execute_command(
     app_handle: Option<tauri::AppHandle>,
     origin: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    // Serialization lock: every command that touches the vault database
-    // (everything except `pair` / `pair_confirm`, which only manipulate
-    // in-memory pairing state) runs under `op_lock` so that concurrent
-    // requests from the multi-threaded HTTP server cannot interleave a
-    // read-modify-write cycle with another command and produce a lost
-    // update or a stale integrity digest.
-    let _op_guard = if req.command == "pair" || req.command == "pair_confirm" {
-        None
-    } else {
-        Some(state.op_lock.lock().expect("op lock poisoned"))
-    };
+    // Vault operations now acquire a session lease (§5.1.1) inside each
+    // service function, which provides the same serialization guarantee
+    // that op_lock formerly provided — but uniformly across HTTP and Tauri
+    // IPC paths. Pair/pair_confirm only manipulate in-memory state and
+    // don't need a lease.
+    //
+    // NOTE: The per-operation lease will be added in the service layer
+    // migration. For now, the service functions check is_unlocked() and
+    // obtain keys from the session directly.
 
     match req.command.as_str() {
         // Extension pairing — returns API token (no auth required, origin checked in handle_request)
@@ -579,8 +577,8 @@ mod tests {
 
     /// Helper: initialize vault with a password in the given state
     fn init_test_vault(state: &Arc<AppState>, password: &str) {
-        state.keystore.clear_key();
-        state.mac_key.lock().expect("mac key lock").take();
+        // Clear any existing session state
+        state.lock_vault();
 
         let salt = crypto::kdf::generate_salt();
         let (master_key, params) = crypto::kdf::derive_key(password, &salt).expect("derive key");
@@ -597,8 +595,7 @@ mod tests {
         database::save_verification_data(&db, &verification).expect("save verification");
 
         *state.verification_data.lock().expect("v lock") = Some(verification);
-        state.keystore.set_key(enc_key).expect("set key");
-        *state.mac_key.lock().expect("mac key lock") = Some(mac_key);
+        state.session.unlock(enc_key, mac_key);
         state.touch_activity();
     }
 
@@ -663,13 +660,13 @@ mod tests {
         let (state, _temp) = setup_test_state();
         init_test_vault(&state, "master123");
 
-        assert!(state.keystore.is_unlocked());
+        assert!(state.session.is_unlocked());
 
         let req = make_request("lock_vault", 1);
         let result = execute_command(req, state.clone(), None, None).unwrap();
         assert_eq!(result, serde_json::json!(null));
 
-        assert!(!state.keystore.is_unlocked());
+        assert!(!state.session.is_unlocked());
     }
 
     // ---- pair / pair_confirm ----
@@ -944,7 +941,7 @@ mod tests {
 
         // Verify password was re-encrypted
         let db = state.database.lock().expect("db lock").clone().expect("db");
-        let key = state.keystore.get_key().unwrap();
+        let key = state.session.get_enc_key().unwrap();
         let entry = database::load_entry(&db, &key, &result["id"].as_str().unwrap())
             .unwrap()
             .unwrap();

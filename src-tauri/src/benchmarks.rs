@@ -52,8 +52,7 @@ fn setup_vault_with_entries(count: usize) -> (Arc<crate::AppState>, tempfile::Te
 
     database::save_verification_data(&db, &verification).expect("save verification");
     *state.verification_data.lock().expect("v lock") = Some(verification);
-    state.keystore.set_key(enc_key).expect("set key");
-    *state.mac_key.lock().expect("mac key lock") = Some(mac_key);
+    state.session.unlock(enc_key, mac_key);
     state.touch_activity();
 
     // Bulk insert entries directly (bypass service layer for speed)

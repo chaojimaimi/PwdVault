@@ -14,12 +14,12 @@ pub fn export_vault(
     state: &Arc<AppState>,
     export_password: Zeroizing<String>,
 ) -> Result<VaultBackup, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
 
     let db = get_db(state)?;
-    let key = state.keystore.get_key()?;
+    let key = state.session.get_enc_key()?;
 
     // Load all entries and decrypt passwords/notes
     let entry_ids = list_entries(&db)?;
@@ -117,7 +117,7 @@ pub fn import_vault(
     backup: VaultBackup,
     import_password: Zeroizing<String>,
 ) -> Result<ImportResult, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
 
@@ -179,7 +179,7 @@ pub fn import_vault(
     payload_bytes.zeroize();
 
     let db = get_db(state)?;
-    let key = state.keystore.get_key()?;
+    let key = state.session.get_enc_key()?;
 
     // Pre-validate and prepare groups (generate new IDs to avoid conflicts)
     let mut group_id_map: std::collections::HashMap<String, String> =

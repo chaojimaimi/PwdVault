@@ -5,7 +5,7 @@ use crate::service::vault::{get_db, get_mac_key};
 use crate::{AppState, VaultError};
 
 pub fn get_settings(state: &Arc<AppState>) -> Result<Settings, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
     let db = get_db(state)?;
@@ -15,7 +15,7 @@ pub fn get_settings(state: &Arc<AppState>) -> Result<Settings, VaultError> {
 }
 
 pub fn update_settings(state: &Arc<AppState>, settings: Settings) -> Result<Settings, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
     if settings.auto_lock_secs < 30 || settings.auto_lock_secs > 3600 {

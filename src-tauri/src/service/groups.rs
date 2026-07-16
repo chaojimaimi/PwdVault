@@ -5,12 +5,12 @@ use crate::service::vault::{get_db, get_mac_key};
 use crate::{AppState, VaultError};
 
 pub fn create_group(state: &Arc<AppState>, name: String) -> Result<Group, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
 
     let db = get_db(state)?;
-    let key = state.keystore.get_key()?;
+    let key = state.session.get_enc_key()?;
     let group = Group::new(name);
     save_group(&db, &key, &group)?;
 
@@ -22,12 +22,12 @@ pub fn create_group(state: &Arc<AppState>, name: String) -> Result<Group, VaultE
 }
 
 pub fn list_all_groups(state: &Arc<AppState>) -> Result<Vec<Group>, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
 
     let db = get_db(state)?;
-    let key = state.keystore.get_key()?;
+    let key = state.session.get_enc_key()?;
     let ids = list_groups(&db)?;
     let mut groups = Vec::new();
     for id in ids {
@@ -41,12 +41,12 @@ pub fn list_all_groups(state: &Arc<AppState>) -> Result<Vec<Group>, VaultError> 
 }
 
 pub fn update_group(state: &Arc<AppState>, id: String, name: String) -> Result<Group, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
 
     let db = get_db(state)?;
-    let key = state.keystore.get_key()?;
+    let key = state.session.get_enc_key()?;
     let mut group = load_group(&db, &key, &id)?
         .ok_or(VaultError::InternalError("Group not found".to_string()))?;
     group.name = name;
@@ -61,12 +61,12 @@ pub fn update_group(state: &Arc<AppState>, id: String, name: String) -> Result<G
 }
 
 pub fn remove_group(state: &Arc<AppState>, id: String) -> Result<bool, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
 
     let db = get_db(state)?;
-    let key = state.keystore.get_key()?;
+    let key = state.session.get_enc_key()?;
     let existed = delete_group(&db, &id)?;
 
     // Cascade: clear group_id on entries that referenced the deleted group

@@ -47,14 +47,14 @@ pub fn create_entry(
     state: &Arc<AppState>,
     request: CreateEntryRequest,
 ) -> Result<EntrySummary, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
 
     validate_entry_request(&request)?;
 
     let db = get_db(state)?;
-    let key = state.keystore.get_key()?;
+    let key = state.session.get_enc_key()?;
 
     // Encrypt password. request.password is Zeroizing<String>; deref to &str.
     let encrypted_password = encrypt(&key, request.password.as_bytes())?;
@@ -88,12 +88,12 @@ pub fn create_entry(
 }
 
 pub fn get_entry_meta(state: &Arc<AppState>, id: String) -> Result<EntrySummary, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
 
     let db = get_db(state)?;
-    let key = state.keystore.get_key()?;
+    let key = state.session.get_enc_key()?;
     let entry = load_entry(&db, &key, &id)?.ok_or(VaultError::EntryNotFound)?;
 
     state.touch_activity();
@@ -105,12 +105,12 @@ pub fn get_entry_secret(
     state: &Arc<AppState>,
     id: String,
 ) -> Result<EntrySecretResponse, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
 
     let db = get_db(state)?;
-    let key = state.keystore.get_key()?;
+    let key = state.session.get_enc_key()?;
     let mut entry = load_entry(&db, &key, &id)?.ok_or(VaultError::EntryNotFound)?;
 
     // Decrypt password. Try bincode format first (v1.0.5+ and v1.0.4 both use
@@ -178,12 +178,12 @@ pub fn get_entry_secret(
 }
 
 pub fn list_all_entries(state: &Arc<AppState>) -> Result<Vec<EntrySummary>, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
 
     let db = get_db(state)?;
-    let key = state.keystore.get_key()?;
+    let key = state.session.get_enc_key()?;
     let ids = list_entries(&db)?;
     let mut summaries = Vec::new();
 
@@ -203,14 +203,14 @@ pub fn update_entry(
     id: String,
     request: CreateEntryRequest,
 ) -> Result<EntrySummary, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
 
     validate_entry_request(&request)?;
 
     let db = get_db(state)?;
-    let key = state.keystore.get_key()?;
+    let key = state.session.get_enc_key()?;
     let mut entry = load_entry(&db, &key, &id)?.ok_or(VaultError::EntryNotFound)?;
 
     // Update fields
@@ -248,7 +248,7 @@ pub fn update_entry(
 }
 
 pub fn remove_entry(state: &Arc<AppState>, id: String) -> Result<bool, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
 
@@ -264,7 +264,7 @@ pub fn remove_entry(state: &Arc<AppState>, id: String) -> Result<bool, VaultErro
 }
 
 pub fn get_entry_count(state: &Arc<AppState>) -> Result<usize, VaultError> {
-    if !state.keystore.is_unlocked() {
+    if !state.session.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
 

@@ -53,13 +53,14 @@ pub fn get_db(state: &Arc<AppState>) -> Result<Arc<redb::Database>, VaultError> 
         .ok_or_else(|| VaultError::InternalError("Database not initialized".to_string()))
 }
 
-/// Get the MAC key from state.
+/// Get the MAC key from the vault session.
 pub fn get_mac_key(state: &Arc<AppState>) -> Result<[u8; 32], VaultError> {
-    state
-        .mac_key
-        .lock()
-        .expect("mac key lock poisoned")
-        .ok_or(VaultError::VaultLocked)
+    state.session.get_mac_key()
+}
+
+/// Get the encryption key from the vault session.
+pub fn get_enc_key(state: &Arc<AppState>) -> Result<[u8; 32], VaultError> {
+    state.session.get_enc_key()
 }
 
 fn ensure_db_dir() -> Result<std::path::PathBuf, VaultError> {
@@ -75,7 +76,7 @@ pub fn is_initialized(state: &Arc<AppState>) -> bool {
 }
 
 pub fn is_unlocked(state: &Arc<AppState>) -> bool {
-    state.keystore.is_unlocked()
+    state.session.is_unlocked()
 }
 
 pub fn init_vault(state: &Arc<AppState>, password: Zeroizing<String>) -> Result<(), VaultError> {
@@ -108,8 +109,7 @@ pub fn init_vault(state: &Arc<AppState>, password: Zeroizing<String>) -> Result<
         .verification_data
         .lock()
         .expect("verification lock poisoned") = Some(verification_data);
-    state.keystore.set_key(enc_key)?;
-    *state.mac_key.lock().expect("mac key lock poisoned") = Some(mac_key);
+    state.session.unlock(enc_key, mac_key);
 
     let default_settings = Settings::default();
     save_settings(&db, &default_settings)?;
@@ -141,8 +141,10 @@ pub fn unlock_vault(
     // `password` zeroizes on drop here.
 
     if let Some((enc_key, mac_key)) = keys {
-        state.keystore.set_key(enc_key)?;
-        *state.mac_key.lock().expect("mac key lock poisoned") = Some(mac_key);
+        // NOTE: This still publishes keys before integrity verification —
+        // the full two-phase unlock fix is §5.1.3 (Step 3). For now we use
+        // the session API to keep the code compiling.
+        state.session.unlock(enc_key, mac_key);
 
         // Verify database integrity before exposing unlocked vault.
         // For databases created before v1.0.5 (no stored digest), run a

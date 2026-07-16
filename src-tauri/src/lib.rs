@@ -13,6 +13,7 @@ pub mod native_messaging;
 pub mod pairing;
 pub mod paths;
 pub mod service;
+pub mod session;
 #[cfg(test)]
 pub mod test_infra;
 
@@ -27,9 +28,8 @@ use tauri::{
     tray::TrayIconBuilder,
     Manager, State,
 };
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
-use crypto::keystore::KeyStore;
 use crypto::{EncryptionError, KdfError, KeyStoreError, VerificationData};
 
 #[cfg(test)]
@@ -46,7 +46,12 @@ use database::{count_entries, delete_entry, list_entries, load_entry, save_entry
 pub struct AppState {
     pub verification_data: Mutex<Option<VerificationData>>,
     pub database: Mutex<Option<Arc<Database>>>,
-    pub last_activity: Mutex<Option<Instant>>,
+    /// Unified vault session — holds enc_key, mac_key, last_activity, and
+    /// session_generation. Replaces the former keystore, mac_key,
+    /// last_activity, and op_lock fields with a single state machine that
+    /// provides a consistent concurrency model across Tauri IPC, HTTP, and
+    /// auto-lock. (§5.1.1)
+    pub session: session::VaultSession,
     /// Closure to update the tray lock/unlock menu item text
     pub update_lock_menu_fn: Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>>,
     /// Closure to reload the main window (for auto-lock)
@@ -60,25 +65,12 @@ pub struct AppState {
     /// Rate limiting for pair endpoint (requests per minute)
     pub pair_request_count: Mutex<u32>,
     pub pair_last_reset: Mutex<Option<Instant>>,
-    /// In-memory encryption key storage (isolated per AppState)
-    pub keystore: KeyStore,
-    /// In-memory integrity/MAC key (isolated per AppState)
-    pub mac_key: Mutex<Option<[u8; 32]>>,
-    /// Serialization lock for vault-mutating operations.
-    ///
-    /// The HTTP server handles requests on multiple threads; without
-    /// serialization, two concurrent operations (e.g. `update_entry` and
-    /// `import_vault`) could interleave their read-modify-write cycles and
-    /// produce a lost update or a stale integrity digest. Holding this lock
-    /// for the duration of each mutating business operation keeps the
-    /// load-modify-save-digest sequence atomic from the caller's perspective.
-    pub op_lock: Mutex<()>,
 }
 
 impl AppState {
     /// Reset the auto-lock activity timer (called on vault operations)
     pub fn touch_activity(&self) {
-        *self.last_activity.lock().expect("activity lock poisoned") = Some(Instant::now());
+        self.session.touch_activity();
     }
 
     /// Update the tray menu item text for lock/unlock
@@ -97,17 +89,22 @@ impl AppState {
         }
     }
 
-    /// Atomic lock: clear key, reset activity, and update tray menu text
+    /// Check if the vault is unlocked.
+    pub fn is_unlocked(&self) -> bool {
+        self.session.is_unlocked()
+    }
+
+    /// Obtain an operation lease on the vault session. While held, auto-lock
+    /// cannot clear the session keys. All service operations should acquire
+    /// a lease at the start. (§5.1.1)
+    pub fn lease(&self) -> Result<session::SessionLease<'_>, VaultError> {
+        self.session.lease()
+    }
+
+    /// Lock the vault: obtain exclusive access, wait for in-flight operations
+    /// to drain, then atomically clear keys. Used by auto-lock and manual lock.
     pub fn lock_vault(&self) {
-        {
-            let mut activity = self.last_activity.lock().expect("activity lock poisoned");
-            self.keystore.clear_key();
-            // Zeroize the MAC key before dropping so it does not linger in memory.
-            if let Some(mut mac) = self.mac_key.lock().expect("mac key lock poisoned").take() {
-                mac.zeroize();
-            }
-            *activity = None;
-        }
+        self.session.exclusive_lock_and_clear();
         self.update_lock_menu("Unlock Vault");
     }
 }
@@ -117,7 +114,7 @@ impl Default for AppState {
         Self {
             verification_data: Mutex::new(None),
             database: Mutex::new(None),
-            last_activity: Mutex::new(None),
+            session: session::VaultSession::new(),
             update_lock_menu_fn: Mutex::new(None),
             reload_window_fn: Mutex::new(None),
             auto_lock_secs: Mutex::new(constants::AUTO_LOCK_SECS),
@@ -125,9 +122,6 @@ impl Default for AppState {
             lockout_until: Mutex::new(None),
             pair_request_count: Mutex::new(0),
             pair_last_reset: Mutex::new(None),
-            keystore: KeyStore::new(),
-            mac_key: Mutex::new(None),
-            op_lock: Mutex::new(()),
         }
     }
 }
@@ -563,9 +557,8 @@ fn setup_vault(state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
 fn start_auto_lock_thread(state: Arc<AppState>) {
     std::thread::spawn(move || loop {
         let deadline = {
-            let activity = state.last_activity.lock().expect("activity lock poisoned");
             let timeout = *state.auto_lock_secs.lock().expect("timeout lock poisoned");
-            activity.map(|t| t + std::time::Duration::from_secs(timeout))
+            state.session.auto_lock_deadline(timeout)
         };
 
         match deadline {
@@ -581,12 +574,8 @@ fn start_auto_lock_thread(state: Arc<AppState>) {
                     std::thread::sleep(sleep_dur);
                     // After waking, re-check in case activity was updated while sleeping.
                     let should_lock = {
-                        let activity = state.last_activity.lock().expect("activity lock poisoned");
                         let timeout = *state.auto_lock_secs.lock().expect("timeout lock poisoned");
-                        state.keystore.is_unlocked()
-                            && activity
-                                .map(|t| t.elapsed().as_secs() >= timeout)
-                                .unwrap_or(false)
+                        state.session.should_auto_lock(timeout)
                     };
                     if should_lock {
                         state.lock_vault();
@@ -767,7 +756,7 @@ pub fn run() {
                     }
                     "lock" => {
                         let state = app.state::<Arc<AppState>>();
-                        if state.keystore.is_unlocked() {
+                        if state.is_unlocked() {
                             state.lock_vault();
                         }
                         if let Some(window) = app.get_webview_window("main") {
@@ -869,8 +858,8 @@ mod tests {
 
     /// Helper: initialize vault with a password
     fn init_test_vault(state: &Arc<AppState>, password: &str) {
-        state.keystore.clear_key();
-        state.mac_key.lock().expect("mac key lock").take();
+        // Clear any existing session state
+        state.lock_vault();
 
         let salt = crypto::kdf::generate_salt();
         let (master_key, params) = crypto::kdf::derive_key(password, &salt).expect("derive key");
@@ -887,8 +876,7 @@ mod tests {
         database::save_verification_data(&db, &verification).expect("save verification");
 
         *state.verification_data.lock().expect("v lock") = Some(verification);
-        state.keystore.set_key(enc_key).expect("set key");
-        *state.mac_key.lock().expect("mac key lock") = Some(mac_key);
+        state.session.unlock(enc_key, mac_key);
         state.touch_activity();
     }
 
@@ -899,19 +887,21 @@ mod tests {
         let state = AppState::default();
         assert!(state.verification_data.lock().unwrap().is_none());
         assert!(state.database.lock().unwrap().is_none());
-        assert!(state.last_activity.lock().unwrap().is_none());
+        assert!(!state.is_unlocked());
     }
 
     #[test]
     fn test_touch_and_lock_vault() {
         let state = Arc::new(AppState::default());
-        assert!(state.last_activity.lock().unwrap().is_none());
+        assert!(!state.is_unlocked());
 
+        // touch_activity only works when unlocked (session is Locked by default)
         state.touch_activity();
-        assert!(state.last_activity.lock().unwrap().is_some());
+        // Still locked since we never unlocked
+        assert!(!state.is_unlocked());
 
         state.lock_vault();
-        assert!(state.last_activity.lock().unwrap().is_none());
+        assert!(!state.is_unlocked());
     }
 
     // ---- generate_password tests ----
@@ -1053,20 +1043,19 @@ mod tests {
         let (key, params) = crypto::kdf::derive_key("TestPassword123", &salt).unwrap();
         let verification = create_verification_header(&key, salt, params).unwrap();
 
+        let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&key, &salt);
         let db = state.database.lock().unwrap().clone().unwrap();
         database::save_verification_data(&db, &verification).unwrap();
         *state.verification_data.lock().unwrap() = Some(verification);
-        state.keystore.set_key(key).unwrap();
+        state.session.unlock(enc_key, mac_key);
         state.touch_activity();
 
         // Should be unlocked now
-        assert!(state.keystore.is_unlocked());
-        assert!(state.last_activity.lock().unwrap().is_some());
+        assert!(state.is_unlocked());
 
         // Lock
         state.lock_vault();
-        assert!(!state.keystore.is_unlocked());
-        assert!(state.last_activity.lock().unwrap().is_none());
+        assert!(!state.is_unlocked());
     }
 
     #[test]
@@ -1084,7 +1073,7 @@ mod tests {
         );
 
         // Encrypt password
-        let key = state.keystore.get_key().unwrap();
+        let key = state.session.get_enc_key().unwrap();
         let enc_data = encrypt(&key, b"secret_password").unwrap();
         entry.encrypted_password = bincode::serialize(&enc_data).unwrap();
         save_entry(&db, &key, &entry).unwrap();
@@ -1119,7 +1108,7 @@ mod tests {
         init_test_vault(&state, "master123");
 
         let db = state.database.lock().unwrap().clone().unwrap();
-        let key = state.keystore.get_key().unwrap();
+        let key = state.session.get_enc_key().unwrap();
 
         let mut entry = PasswordEntry::new("Site".to_string(), None, "user".to_string());
         entry.encrypted_password = bincode::serialize(&encrypt(&key, b"pass").unwrap()).unwrap();
@@ -1145,7 +1134,7 @@ mod tests {
         init_test_vault(&state, "master123");
 
         let db = state.database.lock().unwrap().clone().unwrap();
-        let key = state.keystore.get_key().unwrap();
+        let key = state.session.get_enc_key().unwrap();
 
         for i in 0..5 {
             let mut entry = PasswordEntry::new(
