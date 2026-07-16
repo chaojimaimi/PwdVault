@@ -38,8 +38,10 @@ pub fn export_vault(
                 let enc: EncryptedData = bincode::deserialize(enc_notes_bytes)
                     .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
                 let notes_bytes = decrypt(&key, &enc)?;
-                Some(String::from_utf8(notes_bytes)
-                    .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?)
+                Some(
+                    String::from_utf8(notes_bytes)
+                        .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?,
+                )
             } else {
                 None
             };
@@ -78,8 +80,8 @@ pub fn export_vault(
         settings,
     };
 
-    let mut payload_json = serde_json::to_vec(&payload)
-        .map_err(|e| VaultError::InternalError(e.to_string()))?;
+    let mut payload_json =
+        serde_json::to_vec(&payload).map_err(|e| VaultError::InternalError(e.to_string()))?;
 
     // Derive export key from export password using Argon2id
     let salt = crypto::kdf::generate_salt();
@@ -120,7 +122,9 @@ pub fn import_vault(
     }
 
     if backup.version != 1 {
-        return Err(VaultError::InvalidBackup("Unsupported backup version".to_string()));
+        return Err(VaultError::InvalidBackup(
+            "Unsupported backup version".to_string(),
+        ));
     }
 
     // Decode salt and nonce from base64
@@ -161,8 +165,8 @@ pub fn import_vault(
         nonce: nonce_bytes,
         ciphertext,
     };
-    let mut payload_bytes = decrypt(&import_key, &encrypted_data)
-        .map_err(|_| VaultError::InvalidPassword)?;
+    let mut payload_bytes =
+        decrypt(&import_key, &encrypted_data).map_err(|_| VaultError::InvalidPassword)?;
 
     // Zeroize the import key now that decryption is done.
     import_key.zeroize();
@@ -178,7 +182,8 @@ pub fn import_vault(
     let key = state.keystore.get_key()?;
 
     // Pre-validate and prepare groups (generate new IDs to avoid conflicts)
-    let mut group_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut group_id_map: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     let mut new_groups = Vec::new();
     for g in &payload.groups {
         let new_group = Group::new(g.name.clone());

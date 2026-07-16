@@ -40,20 +40,15 @@ pub fn list_all_groups(state: &Arc<AppState>) -> Result<Vec<Group>, VaultError> 
     Ok(groups)
 }
 
-pub fn update_group(
-    state: &Arc<AppState>,
-    id: String,
-    name: String,
-) -> Result<Group, VaultError> {
+pub fn update_group(state: &Arc<AppState>, id: String, name: String) -> Result<Group, VaultError> {
     if !state.keystore.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }
 
     let db = get_db(state)?;
     let key = state.keystore.get_key()?;
-    let mut group = load_group(&db, &key, &id)?.ok_or(VaultError::InternalError(
-        "Group not found".to_string(),
-    ))?;
+    let mut group = load_group(&db, &key, &id)?
+        .ok_or(VaultError::InternalError("Group not found".to_string()))?;
     group.name = name;
     group.updated_at = chrono::Utc::now().timestamp();
     save_group(&db, &key, &group)?;

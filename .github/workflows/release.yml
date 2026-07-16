@@ -12,18 +12,83 @@ on:
       - 'v*'
 
 jobs:
-  security-audit:
-    runs-on: macos-latest
+  # ---------------------------------------------------------------------------
+  # Release gate: all quality gates must pass before any build job starts.
+  # This prevents publishing a release that fails fmt/clippy/tests/version
+  # checks. (Phase 0 of the Comprehensive Optimization Plan v1.0.5)
+  # ---------------------------------------------------------------------------
+  release-gate:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
-      - name: Run security audit
-        run: cd src-tauri && cargo audit
+        with:
+          components: rustfmt, clippy
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript type-check
+        run: pnpm tsc --noEmit
+
+      - name: Frontend tests
+        run: pnpm test
+
+      - name: Check formatting (main app)
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Clippy (main app, deny warnings)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run tests (main app)
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: Check formatting (native host)
+        working-directory: extensions/native-host
+        run: cargo fmt --check
+
+      - name: Clippy (native host, deny warnings)
+        working-directory: extensions/native-host
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run tests (native host)
+        working-directory: extensions/native-host
+        run: cargo test --locked
+
+      - name: Security audit (main app)
+        working-directory: src-tauri
+        run: |
+          cargo install cargo-audit
+          cargo audit
+
+      - name: Version consistency check
+        run: |
+          set -euo pipefail
+          PKG_JSON=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
+          CARGO_MAIN=$(grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          TAURI_CONF=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          CHROME=$(python3 -c "import json; print(json.load(open('extensions/chrome/manifest.json'))['version'])")
+          FIREFOX=$(python3 -c "import json; print(json.load(open('extensions/firefox/manifest.json'))['version'])")
+          for v in "$CARGO_MAIN" "$TAURI_CONF" "$CHROME" "$FIREFOX"; do
+            if [ "$v" != "$PKG_JSON" ]; then
+              echo "❌ Version mismatch: expected $PKG_JSON, got $v"
+              exit 1
+            fi
+          done
+          echo "✅ All product versions aligned at $PKG_JSON"
 
   build-macos:
-    needs: security-audit
+    needs: release-gate
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -82,7 +147,7 @@ jobs:
           path: releases/macos/*
 
   build-windows:
-    needs: security-audit
+    needs: release-gate
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -127,7 +192,7 @@ jobs:
           path: releases/windows/*
 
   build-extension:
-    needs: security-audit
+    needs: release-gate
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -138,11 +203,27 @@ jobs:
           cd extensions/chrome
           zip -r ../../releases/chrome-extension/PwdVault-Chrome-Extension.zip . -x "*.DS_Store" "test-page.html" "TEST_RESULTS.md"
 
-      - name: Package Firefox extension
+      - name: Package Firefox extension (self-contained, no symlinks)
         run: |
           mkdir -p releases/firefox-extension
-          cd extensions/firefox
-          zip --symlinks -r ../../releases/firefox-extension/PwdVault-Firefox-Extension.zip . -x "*.DS_Store"
+          # Firefox extension uses symlinks to ../chrome/ in source.
+          # Shipping symlinks in a distributed zip breaks on Windows and
+          # any system without the chrome/ directory. Build a staging
+          # directory with real copies instead.
+          mkdir -p /tmp/firefox-staging
+          cp extensions/firefox/manifest.json /tmp/firefox-staging/
+          # Resolve and copy shared source (dereference symlinks)
+          cp -rL extensions/firefox/src /tmp/firefox-staging/src
+          cp -rL extensions/firefox/icons /tmp/firefox-staging/icons
+          cd /tmp/firefox-staging
+          zip -r "$GITHUB_WORKSPACE/releases/firefox-extension/PwdVault-Firefox-Extension.zip" . -x "*.DS_Store"
+
+      - name: Verify extension packages
+        run: |
+          chmod +x extensions/tests/verify_package.sh
+          bash extensions/tests/verify_package.sh \
+            releases/chrome-extension/PwdVault-Chrome-Extension.zip \
+            releases/firefox-extension/PwdVault-Firefox-Extension.zip
 
       - uses: actions/upload-artifact@v4
         with:

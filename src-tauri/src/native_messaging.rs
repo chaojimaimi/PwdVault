@@ -10,11 +10,11 @@ use tauri::Emitter;
 use tiny_http::{Request, Response, Server};
 use zeroize::Zeroizing;
 
-use crate::{AppState, CreateEntryRequest, VaultBackup, VaultError};
 use crate::auth;
 use crate::constants;
 use crate::database;
 use crate::service;
+use crate::{AppState, CreateEntryRequest, VaultBackup, VaultError};
 
 /// Native messaging request
 ///
@@ -75,8 +75,12 @@ pub struct GeneratorOptions {
     pub include_symbols: bool,
 }
 
-fn default_length() -> usize { 16 }
-fn default_true() -> bool { true }
+fn default_length() -> usize {
+    16
+}
+fn default_true() -> bool {
+    true
+}
 
 /// Native messaging response
 #[derive(Debug, Serialize)]
@@ -104,8 +108,7 @@ pub fn start_server(
 ) -> Result<(), String> {
     let addr = format!("127.0.0.1:{}", port);
 
-    let server = Server::http(&addr)
-        .map_err(|_| "Server error".to_string())?;
+    let server = Server::http(&addr).map_err(|_| "Server error".to_string())?;
 
     tracing::info!(port = port, "native messaging server started");
 
@@ -133,14 +136,26 @@ fn get_cors_origin(origin: Option<&str>) -> Option<String> {
 fn add_cors_headers<T: std::io::Read>(response: &mut Response<T>, origin: Option<&str>) {
     if let Some(allowed) = get_cors_origin(origin) {
         response.add_header(
-            tiny_http::Header::from_bytes("Access-Control-Allow-Origin".as_bytes(), allowed.as_bytes()).expect("valid CORS header")
+            tiny_http::Header::from_bytes(
+                "Access-Control-Allow-Origin".as_bytes(),
+                allowed.as_bytes(),
+            )
+            .expect("valid CORS header"),
         );
     }
     response.add_header(
-        tiny_http::Header::from_bytes("Access-Control-Allow-Methods".as_bytes(), "POST, OPTIONS".as_bytes()).expect("valid CORS header")
+        tiny_http::Header::from_bytes(
+            "Access-Control-Allow-Methods".as_bytes(),
+            "POST, OPTIONS".as_bytes(),
+        )
+        .expect("valid CORS header"),
     );
     response.add_header(
-        tiny_http::Header::from_bytes("Access-Control-Allow-Headers".as_bytes(), "Content-Type, Authorization".as_bytes()).expect("valid CORS header")
+        tiny_http::Header::from_bytes(
+            "Access-Control-Allow-Headers".as_bytes(),
+            "Content-Type, Authorization".as_bytes(),
+        )
+        .expect("valid CORS header"),
     );
 }
 
@@ -149,7 +164,8 @@ fn handle_request(
     state: Arc<AppState>,
     app_handle: Option<tauri::AppHandle>,
 ) {
-    let origin: Option<String> = request.headers()
+    let origin: Option<String> = request
+        .headers()
         .iter()
         .find(|h| h.field.equiv("Origin"))
         .map(|h| h.value.to_string());
@@ -163,7 +179,8 @@ fn handle_request(
     }
 
     // Read request body with size limit
-    let content_length: usize = request.headers()
+    let content_length: usize = request
+        .headers()
         .iter()
         .find(|h| h.field.equiv("Content-Length"))
         .and_then(|h| h.value.as_str().parse().ok())
@@ -191,7 +208,8 @@ fn handle_request(
     let native_req: NativeRequest = match serde_json::from_str(&body) {
         Ok(r) => r,
         Err(_) => {
-            let response = create_error_response(0, "Invalid request".to_string(), origin.as_deref());
+            let response =
+                create_error_response(0, "Invalid request".to_string(), origin.as_deref());
             let _ = request.respond(response);
             return;
         }
@@ -215,7 +233,8 @@ fn handle_request(
     // (extension pairing flow — no token exists yet). All other endpoints
     // require Bearer token.
     if command != "pair" && command != "pair_confirm" {
-        let auth_header = request.headers()
+        let auth_header = request
+            .headers()
             .iter()
             .find(|h| h.field.equiv("Authorization"))
             .map(|h| h.value.as_str())
@@ -250,17 +269,24 @@ fn handle_request(
     let _ = request.respond(create_json_response(&response, origin.as_deref()));
 }
 
-fn create_json_response(response: &NativeResponse, origin: Option<&str>) -> Response<std::io::Cursor<Vec<u8>>> {
+fn create_json_response(
+    response: &NativeResponse,
+    origin: Option<&str>,
+) -> Response<std::io::Cursor<Vec<u8>>> {
     let body = serde_json::to_vec(response).unwrap_or_default();
-    let mut response = Response::from_data(body)
-        .with_header(
-            tiny_http::Header::from_bytes("Content-Type".as_bytes(), "application/json".as_bytes()).expect("valid Content-Type header")
-        );
+    let mut response = Response::from_data(body).with_header(
+        tiny_http::Header::from_bytes("Content-Type".as_bytes(), "application/json".as_bytes())
+            .expect("valid Content-Type header"),
+    );
     add_cors_headers(&mut response, origin);
     response
 }
 
-fn create_error_response(id: u32, error: String, origin: Option<&str>) -> Response<std::io::Cursor<Vec<u8>>> {
+fn create_error_response(
+    id: u32,
+    error: String,
+    origin: Option<&str>,
+) -> Response<std::io::Cursor<Vec<u8>>> {
     let response = NativeResponse {
         id,
         success: false,
@@ -306,17 +332,26 @@ fn execute_command(
                 // dropped before we write it back — re-locking a Mutex while
                 // still holding it would deadlock.
                 let needs_reset = {
-                    let last_reset = state.pair_last_reset.lock().expect("pair reset lock poisoned");
+                    let last_reset = state
+                        .pair_last_reset
+                        .lock()
+                        .expect("pair reset lock poisoned");
                     match last_reset.as_ref() {
                         Some(t) => now.duration_since(*t).as_secs() > 60,
                         None => true,
                     }
                 };
                 if needs_reset {
-                    *state.pair_last_reset.lock().expect("pair reset lock poisoned") = Some(now);
+                    *state
+                        .pair_last_reset
+                        .lock()
+                        .expect("pair reset lock poisoned") = Some(now);
                 }
 
-                let mut pair_count = state.pair_request_count.lock().expect("pair count lock poisoned");
+                let mut pair_count = state
+                    .pair_request_count
+                    .lock()
+                    .expect("pair count lock poisoned");
                 if needs_reset {
                     *pair_count = 0;
                 }
@@ -355,11 +390,9 @@ fn execute_command(
             Ok(serde_json::to_value(service::is_unlocked(&state)).expect("bool serializable"))
         }
 
-        "setup_vault" => {
-            service::setup_vault(&state)
-                .map(|ok| serde_json::to_value(ok).expect("bool serializable"))
-                .map_err(vault_error_to_message)
-        }
+        "setup_vault" => service::setup_vault(&state)
+            .map(|ok| serde_json::to_value(ok).expect("bool serializable"))
+            .map_err(vault_error_to_message),
 
         "init_vault" => {
             let password = req.password.ok_or("Password required".to_string())?;
@@ -380,11 +413,9 @@ fn execute_command(
             Ok(serde_json::json!(null))
         }
 
-        "get_settings" => {
-            service::get_settings(&state)
-                .map(|settings| serde_json::to_value(settings).expect("settings serializable"))
-                .map_err(vault_error_to_message)
-        }
+        "get_settings" => service::get_settings(&state)
+            .map(|settings| serde_json::to_value(settings).expect("settings serializable"))
+            .map_err(vault_error_to_message),
 
         "update_settings" => {
             let settings_json = req.settings.ok_or("Settings required".to_string())?;
@@ -410,11 +441,9 @@ fn execute_command(
                 .map_err(vault_error_to_message)
         }
 
-        "list_all_entries" => {
-            service::list_all_entries(&state)
-                .map(|entries| serde_json::to_value(entries).expect("entries serializable"))
-                .map_err(vault_error_to_message)
-        }
+        "list_all_entries" => service::list_all_entries(&state)
+            .map(|entries| serde_json::to_value(entries).expect("entries serializable"))
+            .map_err(vault_error_to_message),
 
         "get_entry_meta" => {
             let id = req.id_param.ok_or("Entry ID required".to_string())?;
@@ -472,11 +501,9 @@ fn execute_command(
                 .map_err(vault_error_to_message)
         }
 
-        "get_entry_count" => {
-            service::get_entry_count(&state)
-                .map(|count| serde_json::to_value(count).expect("count serializable"))
-                .map_err(vault_error_to_message)
-        }
+        "get_entry_count" => service::get_entry_count(&state)
+            .map(|count| serde_json::to_value(count).expect("count serializable"))
+            .map_err(vault_error_to_message),
 
         "create_group" => {
             let name = req.name.ok_or("Group name required".to_string())?;
@@ -485,11 +512,9 @@ fn execute_command(
                 .map_err(vault_error_to_message)
         }
 
-        "list_all_groups" => {
-            service::list_all_groups(&state)
-                .map(|groups| serde_json::to_value(groups).expect("groups serializable"))
-                .map_err(vault_error_to_message)
-        }
+        "list_all_groups" => service::list_all_groups(&state)
+            .map(|groups| serde_json::to_value(groups).expect("groups serializable"))
+            .map_err(vault_error_to_message),
 
         "update_group" => {
             let id = req.id_param.ok_or("Group ID required".to_string())?;
@@ -507,7 +532,9 @@ fn execute_command(
         }
 
         "export_vault" => {
-            let export_password = req.export_password.ok_or("Export password required".to_string())?;
+            let export_password = req
+                .export_password
+                .ok_or("Export password required".to_string())?;
             service::export_vault(&state, export_password)
                 .map(|backup| serde_json::to_value(backup).expect("backup serializable"))
                 .map_err(vault_error_to_message)
@@ -515,15 +542,17 @@ fn execute_command(
 
         "import_vault" => {
             let backup_json = req.backup.ok_or("Backup data required".to_string())?;
-            let backup: VaultBackup = serde_json::from_value(backup_json)
-                .map_err(|_| "Invalid backup".to_string())?;
-            let import_password = req.import_password.ok_or("Import password required".to_string())?;
+            let backup: VaultBackup =
+                serde_json::from_value(backup_json).map_err(|_| "Invalid backup".to_string())?;
+            let import_password = req
+                .import_password
+                .ok_or("Import password required".to_string())?;
             service::import_vault(&state, backup, import_password)
                 .map(|result| serde_json::to_value(result).expect("result serializable"))
                 .map_err(vault_error_to_message)
         }
 
-        _ => Err("Unknown command".to_string())
+        _ => Err("Unknown command".to_string()),
     }
 }
 
@@ -555,10 +584,16 @@ mod tests {
 
         let salt = crypto::kdf::generate_salt();
         let (master_key, params) = crypto::kdf::derive_key(password, &salt).expect("derive key");
-        let verification = crypto::create_verification_header(&master_key, salt.clone(), params).expect("create verification");
+        let verification = crypto::create_verification_header(&master_key, salt.clone(), params)
+            .expect("create verification");
         let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &salt);
 
-        let db = state.database.lock().expect("db lock").clone().expect("db exists");
+        let db = state
+            .database
+            .lock()
+            .expect("db lock")
+            .clone()
+            .expect("db exists");
         database::save_verification_data(&db, &verification).expect("save verification");
 
         *state.verification_data.lock().expect("v lock") = Some(verification);
@@ -910,7 +945,9 @@ mod tests {
         // Verify password was re-encrypted
         let db = state.database.lock().expect("db lock").clone().expect("db");
         let key = state.keystore.get_key().unwrap();
-        let entry = database::load_entry(&db, &key, &result["id"].as_str().unwrap()).unwrap().unwrap();
+        let entry = database::load_entry(&db, &key, &result["id"].as_str().unwrap())
+            .unwrap()
+            .unwrap();
         let enc: crypto::EncryptedData = bincode::deserialize(&entry.encrypted_password).unwrap();
         let decrypted = crypto::decrypt(&key, &enc).unwrap();
         assert_eq!(String::from_utf8(decrypted).unwrap(), "new_pass");
@@ -1096,7 +1133,9 @@ mod tests {
         let has_upper = password.chars().any(|c| c.is_ascii_uppercase());
         let has_lower = password.chars().any(|c| c.is_ascii_lowercase());
         let has_digit = password.chars().any(|c| c.is_ascii_digit());
-        let has_symbol = password.chars().any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c));
+        let has_symbol = password
+            .chars()
+            .any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c));
 
         assert!(has_upper, "Password missing uppercase letters");
         assert!(has_lower, "Password missing lowercase letters");
@@ -1142,7 +1181,9 @@ mod tests {
             let has_upper = password.chars().any(|c| c.is_ascii_uppercase());
             let has_lower = password.chars().any(|c| c.is_ascii_lowercase());
             let has_digit = password.chars().any(|c| c.is_ascii_digit());
-            let has_symbol = password.chars().any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c));
+            let has_symbol = password
+                .chars()
+                .any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c));
 
             assert!(
                 has_upper && has_lower && has_digit && has_symbol,

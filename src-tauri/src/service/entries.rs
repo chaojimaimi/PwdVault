@@ -6,11 +6,15 @@ use crate::database::{
     self, count_entries, delete_entry, list_entries, load_entry, save_entry, PasswordEntry,
 };
 use crate::service::vault::{get_db, get_mac_key};
-use crate::{constants, AppState, CreateEntryRequest, EntrySecretResponse, EntrySummary, VaultError};
+use crate::{
+    constants, AppState, CreateEntryRequest, EntrySecretResponse, EntrySummary, VaultError,
+};
 
 fn validate_entry_request(req: &CreateEntryRequest) -> Result<(), VaultError> {
     if req.title.is_empty() || req.title.len() > constants::MAX_FIELD_LENGTH {
-        return Err(VaultError::InternalError("Invalid title length".to_string()));
+        return Err(VaultError::InternalError(
+            "Invalid title length".to_string(),
+        ));
     }
     if req.username.is_empty() || req.username.len() > constants::MAX_FIELD_LENGTH {
         return Err(VaultError::InternalError(
@@ -29,7 +33,11 @@ fn validate_entry_request(req: &CreateEntryRequest) -> Result<(), VaultError> {
     {
         return Err(VaultError::InternalError("Notes too long".to_string()));
     }
-    if req.url.as_ref().map_or(false, |u| u.len() > constants::MAX_FIELD_LENGTH) {
+    if req
+        .url
+        .as_ref()
+        .map_or(false, |u| u.len() > constants::MAX_FIELD_LENGTH)
+    {
         return Err(VaultError::InternalError("Invalid URL length".to_string()));
     }
     Ok(())
@@ -110,14 +118,12 @@ pub fn get_entry_secret(
     // (nonce||ciphertext) just in case an older build used to_bytes().
     let encrypted_password: EncryptedData = bincode::deserialize(&entry.encrypted_password)
         .or_else(|e| {
-            tracing::warn!("bincode deserialize failed ({}), trying raw bytes fallback", e);
+            tracing::warn!(
+                "bincode deserialize failed ({}), trying raw bytes fallback",
+                e
+            );
             EncryptedData::from_bytes(&entry.encrypted_password)
-                .map_err(|e2| {
-                    VaultError::DecryptionFailed(format!(
-                        "bincode: {} / raw: {}",
-                        e, e2
-                    ))
-                })
+                .map_err(|e2| VaultError::DecryptionFailed(format!("bincode: {} / raw: {}", e, e2)))
         })?;
     let mut password_bytes = decrypt(&key, &encrypted_password)?;
     let password = Zeroizing::new(
@@ -127,11 +133,12 @@ pub fn get_entry_secret(
 
     // Decrypt notes if present
     let notes = if let Some(encrypted_notes_bytes) = &entry.encrypted_notes {
-        let encrypted: EncryptedData = bincode::deserialize(encrypted_notes_bytes)
-            .or_else(|e| {
+        let encrypted: EncryptedData =
+            bincode::deserialize(encrypted_notes_bytes).or_else(|e| {
                 tracing::warn!("notes bincode deserialize failed ({}), trying raw bytes", e);
-                EncryptedData::from_bytes(encrypted_notes_bytes)
-                    .map_err(|e2| VaultError::DecryptionFailed(format!("bincode: {} / raw: {}", e, e2)))
+                EncryptedData::from_bytes(encrypted_notes_bytes).map_err(|e2| {
+                    VaultError::DecryptionFailed(format!("bincode: {} / raw: {}", e, e2))
+                })
             })?;
         let mut notes_bytes = decrypt(&key, &encrypted)?;
         let notes_str = Zeroizing::new(

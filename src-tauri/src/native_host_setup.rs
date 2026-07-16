@@ -5,9 +5,9 @@
 //! app startup so the manifest's `path` field stays correct after upgrades
 //! (the bundle's absolute path changes when the app is reinstalled).
 
-use std::path::{Path, PathBuf};
 use std::fs;
 use std::io;
+use std::path::{Path, PathBuf};
 
 /// The native messaging host name browsers use in `connectNative`.
 pub const HOST_NAME: &str = "com.pwdvault.app";
@@ -30,7 +30,9 @@ pub fn register(host_binary_path: &Path, extension_ids: &ExtensionIds) {
         if let Err(e) = register_browser(browser, host_binary_path, extension_ids) {
             tracing::error!(
                 "native_host_setup: failed to register {} for {:?}: {}",
-                HOST_NAME, browser, e
+                HOST_NAME,
+                browser,
+                e
             );
         }
     }
@@ -86,7 +88,11 @@ fn build_manifest(host_binary_path: &Path, browser: Browser, ids: &ExtensionIds)
     )
 }
 
-fn register_browser(browser: Browser, host_binary_path: &Path, ids: &ExtensionIds) -> io::Result<()> {
+fn register_browser(
+    browser: Browser,
+    host_binary_path: &Path,
+    ids: &ExtensionIds,
+) -> io::Result<()> {
     let manifest = build_manifest(host_binary_path, browser, ids);
 
     #[cfg(target_os = "macos")]
@@ -120,7 +126,8 @@ fn register_browser(browser: Browser, host_binary_path: &Path, ids: &ExtensionId
 /// Resolve the Native Messaging hosts directory on macOS.
 #[cfg(target_os = "macos")]
 fn nm_dir_macos(browser: Browser) -> io::Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home dir"))?;
+    let home =
+        dirs::home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home dir"))?;
     let app_support = home.join("Library/Application Support");
 
     let dir = match browser {
@@ -133,7 +140,8 @@ fn nm_dir_macos(browser: Browser) -> io::Result<PathBuf> {
 /// Resolve the Native Messaging hosts directory on Linux.
 #[cfg(target_os = "linux")]
 fn nm_dir_linux(browser: Browser) -> io::Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home dir"))?;
+    let home =
+        dirs::home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home dir"))?;
 
     let dir = match browser {
         Browser::Chrome => home.join(".config/google-chrome/NativeMessagingHosts"),

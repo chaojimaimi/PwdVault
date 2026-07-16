@@ -14,10 +14,7 @@ pub fn get_settings(state: &Arc<AppState>) -> Result<Settings, VaultError> {
     Ok(settings)
 }
 
-pub fn update_settings(
-    state: &Arc<AppState>,
-    settings: Settings,
-) -> Result<Settings, VaultError> {
+pub fn update_settings(state: &Arc<AppState>, settings: Settings) -> Result<Settings, VaultError> {
     if !state.keystore.is_unlocked() {
         return Err(VaultError::VaultLocked);
     }

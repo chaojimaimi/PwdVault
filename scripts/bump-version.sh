@@ -23,7 +23,6 @@ if ! [[ "$V3" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     exit 1
 fi
 
-V4="${V3}.0"
 CHANGELOG=false
 
 if [[ "${2:-}" == "--changelog" ]]; then
@@ -32,13 +31,13 @@ fi
 
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null || echo "$(dirname "$0")/..")"
 
-echo "Bumping version to $V3 (VERSION file: $V4)"
+echo "Bumping version to $V3"
 
 # --- Update files ---
 
-# 1. VERSION (4-digit)
-echo "$V4" > VERSION
-echo "  VERSION → $V4"
+# 1. VERSION (3-digit, same as all other sources)
+echo "$V3" > VERSION
+echo "  VERSION → $V3"
 
 # 2. src-tauri/Cargo.toml (line 3)
 sed -i.bak "3s/^version = \".*\"/version = \"${V3}\"/" src-tauri/Cargo.toml && rm -f src-tauri/Cargo.toml.bak
@@ -68,9 +67,9 @@ if $CHANGELOG; then
     # Insert new section after the header block (line 6, after blank line)
     sed -i.bak "6a\\
 \\
-## [${V4}] - ${DATE}
+## [${V3}] - ${DATE}
 " CHANGELOG.md && rm -f CHANGELOG.md.bak
-    echo "  CHANGELOG.md → added [${V4}] - ${DATE}"
+    echo "  CHANGELOG.md → added [${V3}] - ${DATE}"
 fi
 
 # --- Validate ---
@@ -78,7 +77,7 @@ echo ""
 echo "Validating..."
 ERRORS=0
 
-[[ "$(cat VERSION)" == "$V4" ]] || { echo "  FAIL: VERSION"; ERRORS=$((ERRORS+1)); }
+[[ "$(cat VERSION)" == "$V3" ]] || { echo "  FAIL: VERSION"; ERRORS=$((ERRORS+1)); }
 grep -q "version = \"${V3}\"" src-tauri/Cargo.toml || { echo "  FAIL: src-tauri/Cargo.toml"; ERRORS=$((ERRORS+1)); }
 grep -q "\"version\": \"${V3}\"" src-tauri/tauri.conf.json || { echo "  FAIL: tauri.conf.json"; ERRORS=$((ERRORS+1)); }
 grep -q "\"version\": \"${V3}\"" package.json || { echo "  FAIL: package.json"; ERRORS=$((ERRORS+1)); }

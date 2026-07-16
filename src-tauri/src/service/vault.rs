@@ -42,10 +42,7 @@ pub fn reset_rate_limit(state: &AppState) {
         .failed_unlock_attempts
         .lock()
         .expect("attempts lock poisoned") = 0;
-    *state
-        .lockout_until
-        .lock()
-        .expect("lockout lock poisoned") = None;
+    *state.lockout_until.lock().expect("lockout lock poisoned") = None;
 }
 
 /// Get the database from state.
@@ -254,8 +251,10 @@ fn migrate_database(
                     .or_else(|_| EncryptedData::from_bytes(&old_notes_bytes))?;
                 if let Ok(plain) = decrypt(master_key, &old_enc) {
                     let new_enc = encrypt(enc_key, &plain)?;
-                    entry.encrypted_notes = Some(bincode::serialize(&new_enc)
-                        .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?);
+                    entry.encrypted_notes = Some(
+                        bincode::serialize(&new_enc)
+                            .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?,
+                    );
                 } else {
                     // Already encrypted with enc_key — put it back
                     entry.encrypted_notes = Some(old_notes_bytes);

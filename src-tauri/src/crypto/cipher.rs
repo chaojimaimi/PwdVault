@@ -85,7 +85,10 @@ pub fn encrypt(key: &[u8; KEY_SIZE], plaintext: &[u8]) -> Result<EncryptedData, 
 }
 
 /// Decrypt ciphertext using AES-256-GCM
-pub fn decrypt(key: &[u8; KEY_SIZE], encrypted: &EncryptedData) -> Result<Vec<u8>, EncryptionError> {
+pub fn decrypt(
+    key: &[u8; KEY_SIZE],
+    encrypted: &EncryptedData,
+) -> Result<Vec<u8>, EncryptionError> {
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
 
     if encrypted.nonce.len() != NONCE_SIZE {

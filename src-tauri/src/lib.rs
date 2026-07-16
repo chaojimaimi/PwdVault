@@ -1,19 +1,24 @@
 //! PwdVault - A secure, local-first password manager
 
 pub mod auth;
+#[cfg(test)]
+pub mod benchmarks;
 pub mod constants;
 pub mod crypto;
 pub mod database;
+#[cfg(test)]
+pub mod fixtures;
 pub mod native_host_setup;
 pub mod native_messaging;
 pub mod pairing;
 pub mod paths;
 pub mod service;
+#[cfg(test)]
+pub mod test_infra;
 
 use redb::Database;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use zeroize::{Zeroize, Zeroizing};
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
@@ -22,9 +27,10 @@ use tauri::{
     tray::TrayIconBuilder,
     Manager, State,
 };
+use zeroize::{Zeroize, Zeroizing};
 
-use crypto::{EncryptionError, KeyStoreError, KdfError, VerificationData};
 use crypto::keystore::KeyStore;
+use crypto::{EncryptionError, KdfError, KeyStoreError, VerificationData};
 
 #[cfg(test)]
 use crypto::{create_verification_header, decrypt, encrypt, EncryptedData};
@@ -190,7 +196,11 @@ impl std::fmt::Display for VaultError {
             VaultError::InternalError(e) => write!(f, "Internal error: {}", e),
             VaultError::InvalidBackup(e) => write!(f, "Invalid backup: {}", e),
             VaultError::RateLimited { retry_after_secs } => {
-                write!(f, "Too many failed attempts. Try again in {}s", retry_after_secs)
+                write!(
+                    f,
+                    "Too many failed attempts. Try again in {}s",
+                    retry_after_secs
+                )
             }
         }
     }
@@ -210,10 +220,10 @@ impl VaultError {
                 format!("Too many attempts. Retry in {}s", retry_after_secs)
             }
             VaultError::InvalidBackup(_) => "Invalid backup file".to_string(),
-            VaultError::EncryptionFailed(_) | VaultError::DecryptionFailed(_)
-            | VaultError::DatabaseError(_) | VaultError::InternalError(_) => {
-                "Internal error".to_string()
-            }
+            VaultError::EncryptionFailed(_)
+            | VaultError::DecryptionFailed(_)
+            | VaultError::DatabaseError(_)
+            | VaultError::InternalError(_) => "Internal error".to_string(),
         }
     }
 }
@@ -237,12 +247,18 @@ fn is_vault_unlocked(state: State<'_, Arc<AppState>>) -> bool {
 }
 
 #[tauri::command]
-fn init_vault(password: Zeroizing<String>, state: State<'_, Arc<AppState>>) -> Result<(), VaultError> {
+fn init_vault(
+    password: Zeroizing<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), VaultError> {
     service::init_vault(state.inner(), password)
 }
 
 #[tauri::command]
-fn unlock_vault(password: Zeroizing<String>, state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
+fn unlock_vault(
+    password: Zeroizing<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<bool, VaultError> {
     service::unlock_vault(state.inner(), password)
 }
 
@@ -317,10 +333,7 @@ fn check_for_updates() -> Result<UpdateInfo, VaultError> {
         has_update: latest_ver > current_ver,
         latest_version: tag_name.to_string(),
         release_notes: json["body"].as_str().unwrap_or("").to_string(),
-        download_url: json["html_url"]
-            .as_str()
-            .unwrap_or("")
-            .to_string(),
+        download_url: json["html_url"].as_str().unwrap_or("").to_string(),
     })
 }
 
@@ -502,12 +515,12 @@ pub struct BackupPayload {
 pub struct VaultBackup {
     pub version: u32,
     pub created_at: i64,
-    pub salt: String,          // base64
+    pub salt: String, // base64
     pub kdf_memory: u32,
     pub kdf_iterations: u32,
     pub kdf_parallelism: u32,
-    pub nonce: String,          // base64
-    pub data: String,           // base64 (AES-256-GCM encrypted payload)
+    pub nonce: String, // base64
+    pub data: String,  // base64 (AES-256-GCM encrypted payload)
 }
 
 /// Result of import operation
@@ -659,9 +672,7 @@ fn register_native_host(app: &tauri::App) {
 /// database (e.g. ~/Library/Application Support/com.pwdvault.app/native-host.json).
 /// Format: {"chrome": "<id>", "firefox": "<id>"}
 fn load_extension_ids() -> Option<native_host_setup::ExtensionIds> {
-    let config_path = paths::get_db_path()
-        .parent()?
-        .join("native-host.json");
+    let config_path = paths::get_db_path().parent()?.join("native-host.json");
     let content = std::fs::read_to_string(&config_path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&content).ok()?;
     Some(native_host_setup::ExtensionIds {
@@ -725,14 +736,18 @@ pub fn run() {
             {
                 let lock_i_clone = lock_i.clone();
                 let app_handle = app.handle().clone();
-                *state.update_lock_menu_fn.lock().expect("menu lock poisoned") = Some(Box::new(move |text: &str| {
+                *state
+                    .update_lock_menu_fn
+                    .lock()
+                    .expect("menu lock poisoned") = Some(Box::new(move |text: &str| {
                     let _ = lock_i_clone.set_text(text);
                 }));
-                *state.reload_window_fn.lock().expect("window lock poisoned") = Some(Box::new(move || {
-                    if let Some(window) = app_handle.get_webview_window("main") {
-                        let _ = window.eval("window.location.reload()");
-                    }
-                }));
+                *state.reload_window_fn.lock().expect("window lock poisoned") =
+                    Some(Box::new(move || {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let _ = window.eval("window.location.reload()");
+                        }
+                    }));
             }
 
             // Start auto-lock background thread
@@ -859,10 +874,16 @@ mod tests {
 
         let salt = crypto::kdf::generate_salt();
         let (master_key, params) = crypto::kdf::derive_key(password, &salt).expect("derive key");
-        let verification = create_verification_header(&master_key, salt.clone(), params).expect("create verification");
+        let verification = create_verification_header(&master_key, salt.clone(), params)
+            .expect("create verification");
         let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &salt);
 
-        let db = state.database.lock().expect("db lock").clone().expect("db exists");
+        let db = state
+            .database
+            .lock()
+            .expect("db lock")
+            .clone()
+            .expect("db exists");
         database::save_verification_data(&db, &verification).expect("save verification");
 
         *state.verification_data.lock().expect("v lock") = Some(verification);
@@ -973,13 +994,26 @@ mod tests {
     #[test]
     fn test_vault_error_display() {
         assert_eq!(VaultError::VaultLocked.to_string(), "Vault is locked");
-        assert_eq!(VaultError::VaultAlreadyExists.to_string(), "Vault already exists");
-        assert!(VaultError::EncryptionFailed("test".into()).to_string().contains("test"));
+        assert_eq!(
+            VaultError::VaultAlreadyExists.to_string(),
+            "Vault already exists"
+        );
+        assert!(VaultError::EncryptionFailed("test".into())
+            .to_string()
+            .contains("test"));
         assert!(matches!(
-            VaultError::RateLimited { retry_after_secs: 60 },
-            VaultError::RateLimited { retry_after_secs: 60 }
+            VaultError::RateLimited {
+                retry_after_secs: 60
+            },
+            VaultError::RateLimited {
+                retry_after_secs: 60
+            }
         ));
-        assert!(VaultError::RateLimited { retry_after_secs: 30 }.to_string().contains("30"));
+        assert!(VaultError::RateLimited {
+            retry_after_secs: 30
+        }
+        .to_string()
+        .contains("30"));
     }
 
     // ---- get_db_path test ----
@@ -1087,13 +1121,10 @@ mod tests {
         let db = state.database.lock().unwrap().clone().unwrap();
         let key = state.keystore.get_key().unwrap();
 
-        let mut entry = PasswordEntry::new(
-            "Site".to_string(),
-            None,
-            "user".to_string(),
-        );
+        let mut entry = PasswordEntry::new("Site".to_string(), None, "user".to_string());
         entry.encrypted_password = bincode::serialize(&encrypt(&key, b"pass").unwrap()).unwrap();
-        entry.encrypted_notes = Some(bincode::serialize(&encrypt(&key, b"my notes").unwrap()).unwrap());
+        entry.encrypted_notes =
+            Some(bincode::serialize(&encrypt(&key, b"my notes").unwrap()).unwrap());
         entry.tags = vec!["work".to_string(), "important".to_string()];
 
         save_entry(&db, &key, &entry).unwrap();
@@ -1102,7 +1133,8 @@ mod tests {
         assert_eq!(loaded.tags, vec!["work", "important"]);
 
         // Decrypt notes
-        let enc: EncryptedData = bincode::deserialize(loaded.encrypted_notes.as_ref().unwrap()).unwrap();
+        let enc: EncryptedData =
+            bincode::deserialize(loaded.encrypted_notes.as_ref().unwrap()).unwrap();
         let notes = String::from_utf8(decrypt(&key, &enc).unwrap()).unwrap();
         assert_eq!(notes, "my notes");
     }
@@ -1121,7 +1153,9 @@ mod tests {
                 Some(format!("https://site{}.com", i)),
                 format!("user{}@test.com", i),
             );
-            entry.encrypted_password = bincode::serialize(&encrypt(&key, format!("pass{}", i).as_bytes()).unwrap()).unwrap();
+            entry.encrypted_password =
+                bincode::serialize(&encrypt(&key, format!("pass{}", i).as_bytes()).unwrap())
+                    .unwrap();
             save_entry(&db, &key, &entry).unwrap();
         }
 
@@ -1149,7 +1183,10 @@ mod tests {
         }
         let result = service::check_rate_limit(&state);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), VaultError::RateLimited { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            VaultError::RateLimited { .. }
+        ));
     }
 
     #[test]
@@ -1177,9 +1214,7 @@ mod tests {
     fn test_rate_limit_expires_after_duration() {
         let state = AppState::default();
         // Manually set a lockout that already expired
-        *state.lockout_until.lock().unwrap() = Some(
-            Instant::now() - Duration::from_secs(1),
-        );
+        *state.lockout_until.lock().unwrap() = Some(Instant::now() - Duration::from_secs(1));
         assert!(service::check_rate_limit(&state).is_ok());
     }
 }

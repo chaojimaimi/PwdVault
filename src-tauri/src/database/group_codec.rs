@@ -10,11 +10,10 @@ use super::{DatabaseError, Group};
 
 /// Serialize and encrypt a Group.
 pub fn seal_group(group: &Group, key: &[u8; 32]) -> Result<Vec<u8>, DatabaseError> {
-    let plain = bincode::serialize(group)
-        .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
+    let plain =
+        bincode::serialize(group).map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
     let enc = encrypt(key, &plain).map_err(|e| DatabaseError::EncryptionError(e.to_string()))?;
-    bincode::serialize(&enc)
-        .map_err(|e| DatabaseError::SerializationError(e.to_string()))
+    bincode::serialize(&enc).map_err(|e| DatabaseError::SerializationError(e.to_string()))
 }
 
 /// Decrypt and deserialize a stored Group blob.
@@ -31,6 +30,5 @@ pub fn open_group(blob: &[u8], key: &[u8; 32]) -> Result<Group, DatabaseError> {
         }
     }
     // Fallback: old plaintext format (pre-v1.0.5).
-    bincode::deserialize(blob)
-        .map_err(|e| DatabaseError::SerializationError(e.to_string()))
+    bincode::deserialize(blob).map_err(|e| DatabaseError::SerializationError(e.to_string()))
 }

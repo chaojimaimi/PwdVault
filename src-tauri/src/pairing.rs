@@ -5,7 +5,7 @@
 //! code. The user must enter the same code in the extension before an
 //! API token is issued.
 
-use rand::{Rng, rngs::OsRng};
+use rand::{rngs::OsRng, Rng};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 

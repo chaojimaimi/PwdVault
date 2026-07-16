@@ -233,7 +233,10 @@ pub fn refresh_digest(db: &Database, mac_key: &[u8; 32]) -> Result<(), DatabaseE
     {
         let mut table = txn.open_table(META_TABLE)?;
         table.insert(DB_DIGEST_KEY, digest.as_slice())?;
-        table.insert(DB_DIGEST_VERSION_KEY, DB_DIGEST_VERSION.to_le_bytes().as_slice())?;
+        table.insert(
+            DB_DIGEST_VERSION_KEY,
+            DB_DIGEST_VERSION.to_le_bytes().as_slice(),
+        )?;
     }
     txn.commit()?;
     Ok(())
@@ -258,7 +261,9 @@ mod tests {
             let txn = db.begin_write().unwrap();
             {
                 let mut table = txn.open_table(ENTRIES_TABLE).unwrap();
-                table.insert(entry.id.as_str(), entry.encrypted_password.as_slice()).unwrap();
+                table
+                    .insert(entry.id.as_str(), entry.encrypted_password.as_slice())
+                    .unwrap();
             }
             txn.commit().unwrap();
         }

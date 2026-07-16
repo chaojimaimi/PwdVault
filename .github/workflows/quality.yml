@@ -1,0 +1,150 @@
+name: Quality Gates
+
+# Runs on every push to main and on every PR. These gates MUST pass before
+# any stable release tag is accepted. Development/nightly builds are not
+# affected — they are produced by the release.yml workflow_dispatch path.
+#
+# (Phase 0 of the Comprehensive Optimization Plan v1.0.5)
+# This workflow establishes the regression baseline. The release.yml workflow
+# will be wired to require these gates once Phase 6 lands.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Frontend: type-check, lint, test
+  # ---------------------------------------------------------------------------
+  quality-frontend:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: TypeScript type-check
+        run: pnpm tsc --noEmit
+      - name: Frontend tests
+        run: pnpm test
+
+  # ---------------------------------------------------------------------------
+  # Rust main app: fmt, clippy, test
+  # ---------------------------------------------------------------------------
+  quality-rust:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+      - name: Check formatting
+        working-directory: src-tauri
+        run: cargo fmt --check
+      - name: Clippy (deny warnings)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Run tests
+        working-directory: src-tauri
+        run: cargo test --locked
+
+  # ---------------------------------------------------------------------------
+  # Rust native host: fmt, clippy, test
+  # ---------------------------------------------------------------------------
+  quality-native-host:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Check formatting (native host)
+        working-directory: extensions/native-host
+        run: cargo fmt --check
+      - name: Clippy (native host, deny warnings)
+        working-directory: extensions/native-host
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Run tests (native host)
+        working-directory: extensions/native-host
+        run: cargo test --locked
+
+  # ---------------------------------------------------------------------------
+  # Security audit
+  # ---------------------------------------------------------------------------
+  security-audit:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      - name: Audit main app
+        working-directory: src-tauri
+        run: cargo audit
+      - name: Audit native host
+        working-directory: extensions/native-host
+        run: cargo audit
+
+  # ---------------------------------------------------------------------------
+  # Version consistency: ensure all 8 version sources agree
+  # ---------------------------------------------------------------------------
+  version-consistency:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version consistency across all sources
+        run: |
+          set -euo pipefail
+
+          # Extract versions from each source (all use 3-part X.Y.Z)
+          VERSION_FILE=$(cat VERSION | tr -d '[:space:]')
+          PKG_JSON=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
+          CARGO_MAIN=$(python3 -c "import toml; print(toml.load(open('src-tauri/Cargo.toml'))['package']['version'])" 2>/dev/null || \
+            grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          TAURI_CONF=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          CARGO_HOST=$(grep '^version' extensions/native-host/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          CHROME_MANIFEST=$(python3 -c "import json; print(json.load(open('extensions/chrome/manifest.json'))['version'])")
+          FIREFOX_MANIFEST=$(python3 -c "import json; print(json.load(open('extensions/firefox/manifest.json'))['version'])")
+
+          echo "VERSION file:        $VERSION_FILE"
+          echo "package.json:        $PKG_JSON"
+          echo "Cargo.toml (main):   $CARGO_MAIN"
+          echo "tauri.conf.json:     $TAURI_CONF"
+          echo "Cargo.toml (host):   $CARGO_HOST"
+          echo "chrome manifest:     $CHROME_MANIFEST"
+          echo "firefox manifest:    $FIREFOX_MANIFEST"
+
+          # All product components must agree (native host may lag — checked separately)
+          SOURCES=("$VERSION_FILE" "$PKG_JSON" "$CARGO_MAIN" "$TAURI_CONF" "$CHROME_MANIFEST" "$FIREFOX_MANIFEST")
+          REFERENCE="$PKG_JSON"
+          for v in "${SOURCES[@]}"; do
+            if [ "$v" != "$REFERENCE" ]; then
+              echo "❌ Version mismatch: expected $REFERENCE, got $v"
+              exit 1
+            fi
+          done
+
+          # Native host is allowed to lag behind but must be explicitly noted
+          if [ "$CARGO_HOST" != "$REFERENCE" ]; then
+            echo "⚠️  Native host version ($CARGO_HOST) differs from app ($REFERENCE) — must be resolved before stable release"
+            echo "    This is tracked as a known issue in the optimization plan (§5.6.5)."
+            # Warn but don't fail during Phase 0 — the fix lands in Phase 6.
+            # Uncomment the next line to make this a hard failure:
+            # exit 1
+          fi
+
+          echo "✅ Version consistency check passed"

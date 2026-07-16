@@ -3,16 +3,14 @@
 //! Provides Bearer token authentication for the HTTP API.
 //! Token is stored in memory only and regenerated on each application start.
 
-use std::sync::Mutex;
 use once_cell::sync::Lazy;
+use std::sync::Mutex;
 
 /// Token length in bytes (32 bytes = 64 hex chars)
 const TOKEN_BYTES: usize = 32;
 
 /// In-memory token storage (regenerated on each app start)
-static API_TOKEN: Lazy<Mutex<String>> = Lazy::new(|| {
-    Mutex::new(generate_token())
-});
+static API_TOKEN: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(generate_token()));
 
 /// Generate a cryptographically random hex token
 fn generate_token() -> String {
@@ -46,10 +44,7 @@ pub fn validate_token(auth_header: &str) -> bool {
 
     // Parse "Bearer <token>"
     if let Some(provided) = auth_header.strip_prefix("Bearer ") {
-        subtle::ConstantTimeEq::ct_eq(
-            provided.trim().as_bytes(),
-            expected.as_bytes(),
-        ).into()
+        subtle::ConstantTimeEq::ct_eq(provided.trim().as_bytes(), expected.as_bytes()).into()
     } else {
         false
     }
@@ -112,7 +107,11 @@ mod tests {
 
         let t3 = regenerate_token();
         assert_ne!(t1, t3, "regenerated token should be different");
-        assert_eq!(t3, get_token(), "after regeneration, get_token should return new token");
+        assert_eq!(
+            t3,
+            get_token(),
+            "after regeneration, get_token should return new token"
+        );
         assert!(validate_token(&format!("Bearer {}", t3)));
     }
 

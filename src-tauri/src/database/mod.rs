@@ -18,9 +18,9 @@ pub(crate) const ENTRIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::
 pub(crate) const GROUPS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("groups");
 pub(crate) const SETTINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("settings");
 
-pub mod integrity;
 pub mod entry_codec;
 pub mod group_codec;
+pub mod integrity;
 
 // ============================================================================
 // Error Types
@@ -184,12 +184,9 @@ pub fn init_database<P: AsRef<Path>>(path: P) -> Result<Database, DatabaseError>
 }
 
 /// Save verification data to the database
-pub fn save_verification_data(
-    db: &Database,
-    data: &VerificationData,
-) -> Result<(), DatabaseError> {
-    let encoded = bincode::serialize(data)
-        .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
+pub fn save_verification_data(db: &Database, data: &VerificationData) -> Result<(), DatabaseError> {
+    let encoded =
+        bincode::serialize(data).map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
 
     let write_txn = db.begin_write()?;
     {
@@ -286,11 +283,7 @@ pub fn count_entries(db: &Database) -> Result<usize, DatabaseError> {
 }
 
 /// Save a group to the database (group is encrypted as a whole blob)
-pub fn save_group(
-    db: &Database,
-    key: &[u8; 32],
-    group: &Group,
-) -> Result<(), DatabaseError> {
+pub fn save_group(db: &Database, key: &[u8; 32], group: &Group) -> Result<(), DatabaseError> {
     let encoded = group_codec::seal_group(group, key)?;
 
     let write_txn = db.begin_write()?;
@@ -304,11 +297,7 @@ pub fn save_group(
 }
 
 /// Load a group from the database (decrypts the stored blob)
-pub fn load_group(
-    db: &Database,
-    key: &[u8; 32],
-    id: &str,
-) -> Result<Option<Group>, DatabaseError> {
+pub fn load_group(db: &Database, key: &[u8; 32], id: &str) -> Result<Option<Group>, DatabaseError> {
     let read_txn = db.begin_read()?;
     let table = read_txn.open_table(GROUPS_TABLE)?;
 
@@ -432,11 +421,7 @@ mod tests {
     fn test_delete_entry() {
         let (db, _temp) = get_test_db();
 
-        let entry = PasswordEntry::new(
-            "Test".to_string(),
-            None,
-            "user".to_string(),
-        );
+        let entry = PasswordEntry::new("Test".to_string(), None, "user".to_string());
 
         save_entry(&db, &TEST_KEY, &entry).unwrap();
         assert!(load_entry(&db, &TEST_KEY, &entry.id).unwrap().is_some());
