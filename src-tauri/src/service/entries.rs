@@ -3,7 +3,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::{decrypt, encrypt, EncryptedData};
 use crate::database;
-use crate::database::{count_entries, list_entries, load_entry, vault_store, PasswordEntry};
+use crate::database::{count_entries, list_all_entries_bulk, load_entry, vault_store, PasswordEntry};
 use crate::service::vault::get_db;
 use crate::{
     validation, AppState, CreateEntryRequest, EntrySecretResponse, EntrySummary,
@@ -139,14 +139,10 @@ pub fn list_all_entries(state: &Arc<AppState>) -> Result<Vec<EntrySummary>, Vaul
     let lease = state.lease()?;
     let db = get_db(state)?;
     let key = lease.enc_key()?;
-    let ids = list_entries(&db)?;
-    let mut summaries = Vec::new();
 
-    for id in ids {
-        if let Some(entry) = load_entry(&db, key, &id)? {
-            summaries.push(entry.into());
-        }
-    }
+    // §5.6.2: single read transaction bulk scan instead of 1+N.
+    let entries = list_all_entries_bulk(&db, key, None)?;
+    let summaries: Vec<EntrySummary> = entries.into_iter().map(Into::into).collect();
 
     lease.touch_activity();
 

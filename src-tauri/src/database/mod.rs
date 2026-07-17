@@ -342,6 +342,34 @@ pub fn list_entries(db: &Database) -> Result<Vec<String>, DatabaseError> {
     Ok(ids)
 }
 
+/// Load and decrypt every entry in a single read transaction (§5.6.2).
+///
+/// This replaces the previous list-IDs-then-load-each pattern that opened
+/// 1+N read transactions. The bulk scan iterates the table once, decrypting
+/// each record as it goes. `filter_group` optionally restricts to a group.
+pub fn list_all_entries_bulk(
+    db: &Database,
+    key: &[u8; 32],
+    filter_group: Option<&str>,
+) -> Result<Vec<PasswordEntry>, DatabaseError> {
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(ENTRIES_TABLE)?;
+
+    let mut entries = Vec::new();
+    for result in table.iter()? {
+        let (key_handle, value) = result?;
+        let id = key_handle.value();
+        let entry = entry_codec::open_entry(value.value(), key, id)?;
+        if let Some(group) = filter_group {
+            if entry.group_id.as_deref() != Some(group) {
+                continue;
+            }
+        }
+        entries.push(entry);
+    }
+    Ok(entries)
+}
+
 /// Count password entries
 pub fn count_entries(db: &Database) -> Result<usize, DatabaseError> {
     let read_txn = db.begin_read()?;
@@ -401,6 +429,23 @@ pub fn list_groups(db: &Database) -> Result<Vec<String>, DatabaseError> {
     }
 
     Ok(ids)
+}
+
+/// Load and decrypt every group in a single read transaction (§5.6.2).
+///
+/// Replaces the list-IDs-then-load-each pattern (1+N read transactions).
+pub fn list_all_groups_bulk(db: &Database, key: &[u8; 32]) -> Result<Vec<Group>, DatabaseError> {
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(GROUPS_TABLE)?;
+
+    let mut groups = Vec::new();
+    for result in table.iter()? {
+        let (key_handle, value) = result?;
+        let id = key_handle.value();
+        let group = group_codec::open_group(value.value(), key, id)?;
+        groups.push(group);
+    }
+    Ok(groups)
 }
 
 /// Count groups

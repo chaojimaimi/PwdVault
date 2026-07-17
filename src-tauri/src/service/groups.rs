@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::database::{self, list_groups, load_group, vault_store, Group};
+use crate::database::{list_all_entries_bulk, list_all_groups_bulk, load_group, vault_store, Group};
 use crate::service::vault::get_db;
 use crate::{AppState, VaultError};
 
@@ -10,8 +10,12 @@ pub fn create_group(state: &Arc<AppState>, name: String) -> Result<Group, VaultE
     let db = get_db(state)?;
     let key = lease.enc_key()?;
     let mac_key = lease.mac_key()?;
-    for id in list_groups(&db)? {
-        if load_group(&db, key, &id)?.is_some_and(|group| group.name.eq_ignore_ascii_case(&name)) {
+
+    // §5.6.2: single bulk scan for the duplicate-name check instead of
+    // list-groups-then-load-each.
+    let name_lower = name.to_ascii_lowercase();
+    for g in list_all_groups_bulk(&db, key)? {
+        if g.name.to_ascii_lowercase() == name_lower {
             return Err(VaultError::InvalidInput {
                 code: "DUPLICATE_GROUP_NAME".into(),
                 message: "A group with this name already exists".into(),
@@ -35,13 +39,9 @@ pub fn list_all_groups(state: &Arc<AppState>) -> Result<Vec<Group>, VaultError> 
     let lease = state.lease()?;
     let db = get_db(state)?;
     let key = lease.enc_key()?;
-    let ids = list_groups(&db)?;
-    let mut groups = Vec::new();
-    for id in ids {
-        if let Some(g) = load_group(&db, key, &id)? {
-            groups.push(g);
-        }
-    }
+
+    // §5.6.2: single read transaction bulk scan instead of 1+N.
+    let groups = list_all_groups_bulk(&db, key)?;
 
     lease.touch_activity();
     Ok(groups)
@@ -54,11 +54,11 @@ pub fn update_group(state: &Arc<AppState>, id: String, name: String) -> Result<G
     let db = get_db(state)?;
     let key = lease.enc_key()?;
     let mac_key = lease.mac_key()?;
-    for other_id in list_groups(&db)? {
-        if other_id != id
-            && load_group(&db, key, &other_id)?
-                .is_some_and(|group| group.name.eq_ignore_ascii_case(&name))
-        {
+
+    // §5.6.2: single bulk scan for the duplicate-name check.
+    let name_lower = name.to_ascii_lowercase();
+    for g in list_all_groups_bulk(&db, key)? {
+        if g.id != id && g.name.to_ascii_lowercase() == name_lower {
             return Err(VaultError::InvalidInput {
                 code: "DUPLICATE_GROUP_NAME".into(),
                 message: "A group with this name already exists".into(),
@@ -88,17 +88,15 @@ pub fn remove_group(state: &Arc<AppState>, id: String) -> Result<bool, VaultErro
     let key = lease.enc_key()?;
     let mac_key = lease.mac_key()?;
 
-    // Pre-load entries that reference this group for cascade clearing.
-    let entry_ids = database::list_entries(&db)?;
-    let mut entries_to_update = Vec::new();
-    for entry_id in &entry_ids {
-        if let Some(mut entry) = database::load_entry(&db, key, entry_id)? {
-            if entry.group_id.as_deref() == Some(id.as_str()) {
-                entry.group_id = None;
-                entries_to_update.push(entry);
-            }
-        }
-    }
+    // §5.6.2: single bulk read transaction to find entries referencing this
+    // group, instead of list-IDs + N×load_entry.
+    let entries_to_update: Vec<_> = list_all_entries_bulk(&db, key, Some(id.as_str()))?
+        .into_iter()
+        .map(|mut e| {
+            e.group_id = None;
+            e
+        })
+        .collect();
 
     // Single transaction: delete group + cascade clear entries + digest (§5.1.2)
     let store = vault_store::VaultStore::new(&db);

@@ -23,7 +23,6 @@ use redb::Database;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::Duration;
 use std::time::Instant;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -69,6 +68,10 @@ pub struct AppState {
     /// Rate limiting for pair endpoint (requests per minute)
     pub pair_request_count: Mutex<u32>,
     pub pair_last_reset: Mutex<Option<Instant>>,
+    /// Cancellation flag for the in-flight update check (§5.6.2). Set to true
+    /// on lock/quit so the HTTP call aborts promptly instead of blocking the
+    /// IPC thread for the full 5s timeout.
+    pub update_check_cancel: std::sync::atomic::AtomicBool,
 }
 
 impl AppState {
@@ -108,6 +111,10 @@ impl AppState {
     /// Lock the vault: obtain exclusive access, wait for in-flight operations
     /// to drain, then atomically clear keys. Used by auto-lock and manual lock.
     pub fn lock_vault(&self) {
+        // §5.6.2: cancel any in-flight update check so its blocking worker
+        // returns promptly instead of holding a thread for the full timeout.
+        self.update_check_cancel
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         self.session.exclusive_lock_and_clear();
         self.update_lock_menu("Unlock Vault");
     }
@@ -126,6 +133,7 @@ impl Default for AppState {
             lockout_until: Mutex::new(None),
             pair_request_count: Mutex::new(0),
             pair_last_reset: Mutex::new(None),
+            update_check_cancel: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
@@ -248,19 +256,28 @@ fn is_vault_unlocked(state: State<'_, Arc<AppState>>) -> bool {
 }
 
 #[tauri::command]
-fn init_vault(
+async fn init_vault(
     password: Zeroizing<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), VaultError> {
-    service::init_vault(state.inner(), password)
+    // §5.6.2: KDF (Argon2id) is CPU/memory intensive — run on a blocking
+    // worker so the Tauri IPC thread and the window/tray stay responsive.
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service::init_vault(&state, password))
+        .await
+        .map_err(|e| VaultError::InternalError(format!("init task join error: {}", e)))?
 }
 
 #[tauri::command]
-fn unlock_vault(
+async fn unlock_vault(
     password: Zeroizing<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<bool, VaultError> {
-    service::unlock_vault(state.inner(), password)
+    // §5.6.2: KDF (Argon2id) is CPU/memory intensive — run on a blocking worker.
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service::unlock_vault(&state, password))
+        .await
+        .map_err(|e| VaultError::InternalError(format!("unlock task join error: {}", e)))?
 }
 
 #[tauri::command]
@@ -298,44 +315,14 @@ pub struct UpdateInfo {
 }
 
 #[tauri::command]
-fn check_for_updates() -> Result<UpdateInfo, VaultError> {
-    let current = env!("CARGO_PKG_VERSION");
-
-    let config = ureq::config::Config::builder()
-        .timeout_global(Some(Duration::from_secs(5)))
-        .build();
-    let agent: ureq::Agent = config.into();
-
-    let mut response = agent
-        .get("https://api.github.com/repos/chaojimaimi/PwdVault/releases/latest")
-        .header("User-Agent", "PwdVault-Update-Checker")
-        .call()
-        .map_err(|_| VaultError::InternalError("Update check failed".to_string()))?;
-
-    let body = response
-        .body_mut()
-        .read_to_string()
-        .map_err(|_| VaultError::InternalError("Failed to read response".to_string()))?;
-
-    let json: serde_json::Value = serde_json::from_str(&body)
-        .map_err(|_| VaultError::InternalError("Invalid response".to_string()))?;
-
-    let tag_name = json["tag_name"]
-        .as_str()
-        .unwrap_or("")
-        .trim_start_matches('v');
-
-    let current_ver = semver::Version::parse(current)
-        .map_err(|e| VaultError::InternalError(format!("Invalid current version: {}", e)))?;
-    let latest_ver = semver::Version::parse(tag_name)
-        .map_err(|e| VaultError::InternalError(format!("Invalid remote version: {}", e)))?;
-
-    Ok(UpdateInfo {
-        has_update: latest_ver > current_ver,
-        latest_version: tag_name.to_string(),
-        release_notes: json["body"].as_str().unwrap_or("").to_string(),
-        download_url: json["html_url"].as_str().unwrap_or("").to_string(),
-    })
+async fn check_for_updates(state: State<'_, Arc<AppState>>) -> Result<UpdateInfo, VaultError> {
+    // §5.6.2: run the HTTP GET on a blocking worker so the IPC thread and
+    // window/tray stay responsive during the 5s timeout. The worker checks
+    // the cancellation flag so lock/quit can abort promptly.
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service::check_for_updates(&state))
+        .await
+        .map_err(|e| VaultError::InternalError(format!("update check join error: {}", e)))?
 }
 
 // ============================================================================
@@ -577,20 +564,28 @@ pub struct ImportResult {
 }
 
 #[tauri::command]
-fn export_vault(
+async fn export_vault(
     export_password: Zeroizing<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<VaultBackup, VaultError> {
-    service::export_vault(state.inner(), export_password)
+    // §5.6.2: encrypting all entries for export is CPU intensive.
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service::export_vault(&state, export_password))
+        .await
+        .map_err(|e| VaultError::InternalError(format!("export task join error: {}", e)))?
 }
 
 #[tauri::command]
-fn import_vault(
+async fn import_vault(
     backup: VaultBackup,
     import_password: Zeroizing<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<ImportResult, VaultError> {
-    service::import_vault(state.inner(), backup, import_password)
+    // §5.6.2: KDF for import password + re-encrypting all entries is intensive.
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service::import_vault(&state, backup, import_password))
+        .await
+        .map_err(|e| VaultError::InternalError(format!("import task join error: {}", e)))?
 }
 
 // ============================================================================
@@ -905,6 +900,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     /// Helper: create a test AppState with a temp database

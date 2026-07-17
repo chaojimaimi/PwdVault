@@ -4,6 +4,7 @@ pub mod backup;
 pub mod entries;
 pub mod groups;
 pub mod settings;
+pub mod update;
 pub mod utils;
 pub mod vault;
 
@@ -14,6 +15,7 @@ pub use entries::{
 };
 pub use groups::{create_group, list_all_groups, remove_group, update_group};
 pub use settings::{get_settings, update_settings};
+pub use update::{cancel_update_check, check_for_updates};
 pub use utils::generate_password;
 pub use vault::{
     check_rate_limit, init_vault, is_initialized, is_unlocked, lock_vault, record_failed_attempt,
