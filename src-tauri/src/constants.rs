@@ -20,6 +20,19 @@ pub const MAX_NOTES_LENGTH: usize = 65536;
 pub const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 
 /// Browser extension ↔ native host ↔ desktop protocol version.
+///
+/// Per §5.6.5, this is **independent of the product version** (the X.Y.Z in
+/// Cargo.toml / package.json / manifests). The protocol version tracks the
+/// wire format compatibility between the extension, the native host binary,
+/// and the desktop HTTP API. It bumps only when the message contract changes
+/// in a backwards-incompatible way.
+///
+/// The native host Cargo.toml version and this constant MAY diverge from the
+/// desktop product version; any divergence must be explicitly declared and
+/// CI-checked (`scripts/bump-version.sh --check` covers the product sources;
+/// protocol version changes require a coordinated review of
+/// `extensions/native-host`, `extensions/chrome/src/background.js`, and the
+/// HTTP dispatch table).
 pub const NATIVE_PROTOCOL_VERSION: u16 = 1;
 
 // ---------------------------------------------------------------------------

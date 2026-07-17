@@ -128,8 +128,11 @@ jobs:
           echo "chrome manifest:     $CHROME_MANIFEST"
           echo "firefox manifest:    $FIREFOX_MANIFEST"
 
-          # All product components must agree (native host may lag — checked separately)
-          SOURCES=("$VERSION_FILE" "$PKG_JSON" "$CARGO_MAIN" "$TAURI_CONF" "$CHROME_MANIFEST" "$FIREFOX_MANIFEST")
+          # All product components must agree — including the native host.
+          # Per §5.6.5, the native host product version is part of the same
+          # release set as the desktop app; the only independent version is
+          # NATIVE_PROTOCOL_VERSION (constants.rs), which tracks wire format.
+          SOURCES=("$VERSION_FILE" "$PKG_JSON" "$CARGO_MAIN" "$TAURI_CONF" "$CHROME_MANIFEST" "$FIREFOX_MANIFEST" "$CARGO_HOST")
           REFERENCE="$PKG_JSON"
           for v in "${SOURCES[@]}"; do
             if [ "$v" != "$REFERENCE" ]; then
@@ -138,13 +141,4 @@ jobs:
             fi
           done
 
-          # Native host is allowed to lag behind but must be explicitly noted
-          if [ "$CARGO_HOST" != "$REFERENCE" ]; then
-            echo "⚠️  Native host version ($CARGO_HOST) differs from app ($REFERENCE) — must be resolved before stable release"
-            echo "    This is tracked as a known issue in the optimization plan (§5.6.5)."
-            # Warn but don't fail during Phase 0 — the fix lands in Phase 6.
-            # Uncomment the next line to make this a hard failure:
-            # exit 1
-          fi
-
-          echo "✅ Version consistency check passed"
+          echo "✅ Version consistency check passed (all 7 sources at $REFERENCE)"

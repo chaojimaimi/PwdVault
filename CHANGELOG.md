@@ -5,7 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
-## [1.0.5.0] - 2026-07-04
+## [Unreleased]
+
+### PwdVault Comprehensive Optimization Plan v1.0.5 (Phases 0–5)
+
+Implementation of `docs/PwdVault-Comprehensive-Optimization-Plan-v1.0.5.md`.
+Each phase has a dedicated progress document under `docs/PHASE{n}-PROGRESS.md`.
+
+#### Phase 1 — Transaction, Session & Integrity (§5.1)
+- **§5.1.1** `VaultSession` state machine with RwLock-backed lease mechanism; replaces scattered `keystore`/`mac_key`/`last_activity`/`op_lock` fields with a unified concurrency model across Tauri IPC, HTTP, and auto-lock.
+- **§5.1.2** `VaultStore::write()` atomic single-transaction pattern; business mutations and digest refresh now commit in one redb `WriteTransaction`, eliminating the crash window that left stale digests.
+- **§5.1.2** Removed `last_used_at` write-amplification from `get_entry_secret` (frontend confirmed not using it).
+- **§5.1.3** Two-phase unlock: keys stay in local `Zeroizing` scope until all verification (rate limit → password → header → digest → migration → settings) passes, then published atomically via `session.unlock()`.
+- **§5.1.4** AEAD-authenticated `VaultHeader` with `integrity_required` flag; AES-GCM AAD = `table_name || record_id || record_format_version` per record; digest version bumped to v4; migration refuses to auto-refresh baseline for unknown/missing digests; pre-migration backup `vault.db.{timestamp}.bak`.
+- **§5.1.5** `SecretKey` (`ZeroizeOnDrop`, non-Copy/Clone) adopted across all key paths; `KeyStore::with_key` closure borrowing; `Zeroizing` buffers for master key, subkeys, migration plaintext, codec serialization; error/log redaction.
+
+#### Phase 2 — Unified Input Boundary & Backup Security (§5.2)
+- **§5.2.1** Centralized `ValidationPolicy` shared by Tauri IPC, HTTP, and Native Messaging; stable `InvalidInput { code, message }` error codes; group references validated, names unique case-insensitively.
+- **§5.2.2** `KdfPolicy` validates Argon2 params before memory allocation (16–256 MiB, 1–10 iterations, 1–8 parallelism, 1 GiB combined ceiling); extreme values rejected in the fast pre-derivation path.
+- **§5.2.3** Backup v2 envelope with `PWDVAULT` magic, `argon2id`/`aes-256-gcm` identifiers, header authenticated as AES-GCM AAD; import ordering bounded (size → lengths → algorithms → derivation → decryption → payload validation → single-transaction replacement); ciphertext capped at 10 MiB.
+- **§5.2.4** Explicit migration registry (`LegacyToV1`, sequential `vN→vN+1`); unknown/skipped versions fail closed; corrupt stored settings return error instead of silent default fallback.
+- **§5.2.5** Unix file permissions: data/log dirs `0700`, sensitive files `0600`; database pre-created with restrictive permissions before redb opens it; native-messaging manifest/config use same helpers; startup repairs app-owned paths. (Windows ACL pending.)
+
+#### Phase 3 — Frontend Data Fidelity & Privacy (§5.3)
+- **§5.3.1** Independent `idle | loading | success | error` status for entries/groups/settings; loading failures no longer render as empty data; boot detection failure shows fatal error with Retry.
+- **§5.3.2** Update-network access gated on unlocked vault + successful settings load + `check_updates=true` + trusted feed + once-per-startup; private builds default `VITE_UPDATE_CHECK_ENABLED=false`.
+- **§5.3.3** `GroupSelector` consumes `VaultContext` (no private API copy); create/delete refreshes global groups and entries; deleting selected filter returns to All.
+- **§5.3.4** Backend `UpdateEntryRequest` with optional password and `update_notes` flag; metadata-only patches preserve encrypted secrets without decryption; edit screens fetch password/notes on demand only.
+- **§5.3.5** Clipboard timeout retains SHA-256 digest, not plaintext; clears only if digest still matches; username copying no longer uses sensitive auto-clear path. (Native pasteboard change-count tracking deferred.)
+- **§5.3.6** Generator/Settings reject all-charset-disabled state; Entry/Settings/extension Create track dirty state and warn before navigation.
+
+#### Phase 4 — UI, Design System & Accessibility (§5.4)
+- **§5.4.1** Local theme bootstrap resolves System/Light/Dark before React; removed Google Fonts and inline scripts; subscribes to `prefers-color-scheme`.
+- **§5.4.2** Shared `screen-shell` / `screen-scroll-region` contract; `100dvh`, `flex:1`, `min-height:0`, 350px compaction.
+- **§5.4.3** DESIGN.md semantic tokens (`--color-on-primary/on-danger/on-success`); WCAG AA contrast verified; 40px touch targets.
+- **§5.4.4** `StrengthMeter` rebuilt on native `<progress>` with `role=meter`, value text, visible label.
+- **§5.4.5** Portal-based `AccessibleDialog`: initial focus, Tab trapping, Escape, overlay close, focus restoration, background `inert`; restore requires typing `RESTORE`.
+- **§5.4.6** Form/list/notification semantics: explicit labels, real removal buttons, alert/invalid relationships, polite live regions, `role=alert` for errors.
+- **§5.4.7** Extension a11y: `aria-expanded` entry headers, polite toast, `prefers-reduced-motion`.
+
+#### Phase 5 — Browser Extension & Native Messaging (§5.5)
+- **§5.5.1** Cross-browser native host manifests: Chrome `allowed_origins`, Firefox `allowed_extensions` with stable `pwdvault@pwdvault.app` ID; serde_json serialization; Windows distinct per-browser filenames; obsolete loopback `host_permissions` removed.
+- **§5.5.2** Self-contained Chrome/Firefox packages: `src/` layout preserved, Firefox symlinks dereferenced, `verify_manifest.py` / `verify_extension_identity.py` validate references recursively.
+- **§5.5.3** Caller-bound pairing: identity derived only from browser launch args; per-caller state with 6-digit code, 128-bit nonce, 30s TTL, 5 attempts; wrong caller/nonce does not consume challenge; `Revoke Extension Access` rotates token and cancels sessions.
+- **§5.5.4** Transport limits: 8 fixed workers, 64-request queue (HTTP 503 on overflow), `tiny_http` replaced with direct `TcpListener`; POST + `Content-Type` + bounded `Content-Length` + path match enforced; `Cache-Control: no-store`; 10 MiB inbound / 1 MiB outbound frame caps.
+- **§5.5.5** Protocol version 1 on every request; unauthenticated origin-checked `handshake`; stable `error_code`/`error_message`/`retry_after` response fields.
+- **§5.5.6** Extension sender/secret boundaries: `sender-auth.js`, `token-storage.js`, `connection-errors.js`; content scripts restricted to `GET_ENTRIES_FOR_URL`/`GET_ENTRY`; cross-domain entry rejected; `storage.session` preferred with `TRUSTED_CONTEXTS`; `VAULT_LOCKED` broadcast clears tab caches.
+- **§5.5.7** Phase 5 automation toolkit (`scripts/phase5/`): adversarial load, native bridge/host probes, resource monitor, evidence validator. First adversarial load (1000 malformed requests) passed at ~10ms p95; remediation removed thread-per-request and bounded the queue.
+
+### Pre-optimization baseline (2026-07-04)
+
+The following changes were the v1.0.5 baseline before the comprehensive optimization plan was applied.
+
+## [1.0.5] - 2026-07-04
 
 ### Security
 - **B1 元数据加密**: PasswordEntry 与 Group 整体使用 AES-256-GCM 加密（entry_codec / group_codec），title/username/url/tags 等元数据不再以明文存储于 redb
@@ -28,9 +80,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **D2 数据缓存层**: `useEntries` hook 提供 O(1) 查找 + 乐观更新
 - **D3 文档同步**: CLAUDE.md 更新测试数量、移除 test-threads=1 约束
 
-## [1.0.4.0] - 2026-07-04
+## [1.0.4] - 2026-07-04
 
-## [1.0.3.0] - 2026-06-17
+## [1.0.3] - 2026-06-17
 
 ### Added
 - **Native Messaging bridge architecture** — Extension now communicates via the official Chrome/Firefox Native Messaging API instead of direct HTTP fetch
@@ -56,7 +108,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Extension IDs unstable in development (load unpacked); use `install-native-host.sh` to configure
 - 9-10 pre-existing unit test failures from global-state pollution (keystore/auth singletons)
 
-## [1.0.2.0] - 2026-06-03
+## [1.0.2] - 2026-06-03
 
 ### Fixed
 - **Security: remove_group cascade** — Deleting a group now clears `group_id` on all associated entries (prevents orphaned references)
@@ -68,7 +120,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Extension: innerHTML eliminated** — Content script and popup use `textContent` / `createElement` for all user data
 - **Extension: host_permissions narrowed** — Restricted to `localhost:17429` only
 
-## [0.3.1.0] - 2026-04-30
+## [0.3.1] - 2026-04-30
 
 ### Added
 - **F2: Update notification** — Checks GitHub Releases for newer versions on startup
@@ -93,7 +145,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Cleanup**: Removed stale v0.2.0 release artifacts
 
 
-## [0.3.0.0] - 2026-04-17
+## [0.3.0] - 2026-04-17
 
 ### Added
 - **E2: Fuzzy search** — fuse.js based search across title, username, URL, tags
@@ -112,7 +164,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Settings, groups, and entry timestamps preserved on import
   - Tauri file dialog for save/open + browser fallback download
 
-## [0.2.0.0] - 2026-04-15
+## [0.2.0] - 2026-04-15
 
 ### Added
 - **Design system implementation**: Three visual themes (Classic, Cyber, Hybrid) fully applied to all screens
@@ -147,7 +199,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `releases/PwdVault-Extension-v0.2.0.zip` (20.8KB)
 
 
-## [0.1.3.0] - 2026-04-14 (Published)
+## [0.1.3] - 2026-04-14 (Published)
 
 ### Release
 - Built release artifacts (macOS): `releases/PwdVault_0.1.3_aarch64.dmg`, `releases/PwdVault-macOS-v0.1.3.zip`.
@@ -155,7 +207,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - See `releases/RELEASE_NOTES_v0.1.3.0.md` for full details and installation instructions.
 
 
-## [0.1.3.0] - 2026-03-31
+## [0.1.3] - 2026-03-31
 
 ### Added
 - **Rust test suite**: 48 unit tests covering crypto, database, lib.rs commands, and HTTP API (native_messaging.rs)
@@ -175,13 +227,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `database/`: 5 tests (init, CRUD, list, count, delete)
 - Frontend: 17 tests (passwordStrength, vault API client)
 
-## [0.1.2.0] - 2026-03-31
+## [0.1.2] - 2026-03-31
 
 ### Fixed
 - **Auto-lock race condition**: Key clearing and activity reset now execute atomically within the same mutex scope, preventing inconsistent state
 - **Removed debug prints**: Cleaned all `eprintln!("[DEBUG]...")` from production code paths
 
-## [0.1.1.0] - 2026-03-31
+## [0.1.1] - 2026-03-31
 
 ### Fixed
 - **Version display**: About dialog now correctly shows 0.1.1 (was showing 0.0.1)
@@ -196,7 +248,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - All vault operations (Tauri + HTTP API) reset the auto-lock activity timer
 - Tray menu "Lock Vault" / "Unlock Vault" toggles based on current vault state
 
-## [0.0.1.0] - 2026-03-26
+## [0.0.1] - 2026-03-26
 
 ### Added
 - Initial project scaffold with Tauri v2 + React 19 + TypeScript

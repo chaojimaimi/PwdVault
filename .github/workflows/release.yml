@@ -75,17 +75,21 @@ jobs:
         run: |
           set -euo pipefail
           PKG_JSON=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
+          VERSION_FILE=$(cat VERSION | tr -d '[:space:]')
           CARGO_MAIN=$(grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          CARGO_HOST=$(grep '^version' extensions/native-host/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           TAURI_CONF=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
           CHROME=$(python3 -c "import json; print(json.load(open('extensions/chrome/manifest.json'))['version'])")
           FIREFOX=$(python3 -c "import json; print(json.load(open('extensions/firefox/manifest.json'))['version'])")
-          for v in "$CARGO_MAIN" "$TAURI_CONF" "$CHROME" "$FIREFOX"; do
+          # All 7 sources must agree (§5.6.5): VERSION, package.json, main Cargo,
+          # native-host Cargo, tauri.conf.json, Chrome manifest, Firefox manifest.
+          for v in "$VERSION_FILE" "$CARGO_MAIN" "$CARGO_HOST" "$TAURI_CONF" "$CHROME" "$FIREFOX"; do
             if [ "$v" != "$PKG_JSON" ]; then
               echo "❌ Version mismatch: expected $PKG_JSON, got $v"
               exit 1
             fi
           done
-          echo "✅ All product versions aligned at $PKG_JSON"
+          echo "✅ All 7 product sources aligned at $PKG_JSON"
 
   build-macos:
     needs: release-gate
