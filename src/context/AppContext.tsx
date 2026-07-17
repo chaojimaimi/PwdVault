@@ -27,12 +27,19 @@ interface CombinedState {
   isUnlocked: boolean;
   isLoading: boolean;
   error: string | null;
+  bootError: string | null;
   entries: ReturnType<typeof useVault>['state']['entries'];
   groups: ReturnType<typeof useVault>['state']['groups'];
   selectedGroupId: string | null;
   selectedEntry: ReturnType<typeof useVault>['state']['selectedEntry'];
   searchQuery: string;
+  entriesStatus: ReturnType<typeof useVault>['state']['entriesStatus'];
+  entriesError: string | null;
+  groupsStatus: ReturnType<typeof useVault>['state']['groupsStatus'];
+  groupsError: string | null;
   settings: ReturnType<typeof useSettings>['state']['settings'];
+  settingsStatus: ReturnType<typeof useSettings>['state']['status'];
+  settingsError: string | null;
   updateInfo: ReturnType<typeof useSettings>['state']['updateInfo'];
 }
 
@@ -42,7 +49,7 @@ interface CombinedActions {
   lock: () => Promise<void>;
   loadEntries: () => Promise<void>;
   loadGroups: () => Promise<void>;
-  createGroup: (name: string) => Promise<void>;
+  createGroup: (name: string) => Promise<import('../types').Group>;
   updateGroup: (id: string, name: string) => Promise<void>;
   deleteGroup: (id: string) => Promise<void>;
   selectGroup: (id: string | null) => void;
@@ -52,6 +59,7 @@ interface CombinedActions {
   updateEntry: (id: string, data: Parameters<ReturnType<typeof useVault>['actions']['updateEntry']>[1]) => Promise<import('../types').EntrySummary>;
   deleteEntry: (id: string) => Promise<void>;
   navigate: (screen: import('../types').AppScreen) => void;
+  retryBoot: () => Promise<void>;
   setSearchQuery: (query: string) => void;
   loadSettings: () => Promise<void>;
   updateSettings: (settings: import('../types').Settings) => Promise<void>;
@@ -92,12 +100,19 @@ function useCombinedApp(): AppContextValue {
     isUnlocked: auth.state.isUnlocked,
     isLoading: auth.state.isLoading,
     error: auth.state.error,
+    bootError: auth.state.bootError,
     entries: vault.state.entries,
     groups: vault.state.groups,
     selectedGroupId: vault.state.selectedGroupId,
     selectedEntry: vault.state.selectedEntry,
     searchQuery: vault.state.searchQuery,
+    entriesStatus: vault.state.entriesStatus,
+    entriesError: vault.state.entriesError,
+    groupsStatus: vault.state.groupsStatus,
+    groupsError: vault.state.groupsError,
     settings: settings.state.settings,
+    settingsStatus: settings.state.status,
+    settingsError: settings.state.error,
     updateInfo: settings.state.updateInfo,
   };
 
@@ -123,6 +138,7 @@ function useCombinedApp(): AppContextValue {
     updateEntry: wrap(vault.actions.updateEntry),
     deleteEntry: wrap(vault.actions.deleteEntry),
     navigate: auth.actions.navigate,
+    retryBoot: auth.actions.retryBoot,
     setSearchQuery: vault.actions.setSearchQuery,
     loadSettings: wrap(settings.actions.loadSettings),
     updateSettings: wrap(settings.actions.updateSettings),
@@ -138,6 +154,8 @@ function useCombinedApp(): AppContextValue {
       case 'SET_SELECTED_GROUP':
       case 'SET_SELECTED_ENTRY':
       case 'SET_SEARCH_QUERY':
+      case 'SET_ENTRIES_RESOURCE':
+      case 'SET_GROUPS_RESOURCE':
       case 'RESET':
         // RESET clears VaultContext (entries/groups/selectedEntry/searchQuery)
         // so manual lock does not leave sensitive metadata in React memory.
@@ -145,6 +163,7 @@ function useCombinedApp(): AppContextValue {
         break;
       case 'SET_SETTINGS':
       case 'SET_UPDATE_INFO':
+      case 'SET_RESOURCE':
         settings.dispatch(action);
         break;
       default:

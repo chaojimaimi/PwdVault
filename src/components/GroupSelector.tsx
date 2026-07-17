@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { createGroup, listAllGroups } from '../api/vault';
-import type { Group } from '../types';
+import { useVault } from '../context/VaultContext';
 
 interface Props {
   value?: string | null;
@@ -8,22 +7,13 @@ interface Props {
 }
 
 export default function GroupSelector({ value, onChange }: Props) {
-  const [groups, setGroups] = useState<Group[]>([]);
+  const { state, actions } = useVault();
   const [isCreating, setIsCreating] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const fetchGroups = async () => {
-    try {
-      const g = await listAllGroups();
-      setGroups(g || []);
-    } catch {
-      setGroups([]);
-    }
-  };
-
   useEffect(() => {
-    fetchGroups();
+    if (state.groupsStatus === 'idle') void actions.loadGroups().catch(() => undefined);
   }, []);
 
   const handleCreate = async () => {
@@ -31,8 +21,7 @@ export default function GroupSelector({ value, onChange }: Props) {
     if (!name) return;
     setError(null);
     try {
-      const created = await createGroup(name);
-      await fetchGroups();
+      const created = await actions.createGroup(name);
       onChange(created.id || null);
       setNewGroupName('');
       setIsCreating(false);
@@ -43,9 +32,11 @@ export default function GroupSelector({ value, onChange }: Props) {
 
   return (
     <div className="group-selector">
+      <label htmlFor={isCreating ? 'new-group-name' : 'entry-group'}>Group</label>
       {isCreating ? (
         <div className="group-selector-row">
           <input
+            id="new-group-name"
             type="text"
             className="form-input"
             value={newGroupName}
@@ -59,13 +50,18 @@ export default function GroupSelector({ value, onChange }: Props) {
         </div>
       ) : (
         <div className="group-selector-row">
-          <select value={value || ''} onChange={(e) => onChange(e.target.value || null)}>
+          <select id="entry-group" className="form-input" value={value || ''} onChange={(e) => onChange(e.target.value || null)}>
             <option value="">(No group)</option>
-            {groups.map((g) => (
+            {state.groups.map((g) => (
               <option key={g.id} value={g.id}>{g.name}</option>
             ))}
           </select>
           <button className="btn btn-link" onClick={() => setIsCreating(true)} type="button">New</button>
+        </div>
+      )}
+      {state.groupsStatus === 'error' && (
+        <div className="error-message group-selector-error">
+          Could not load groups. <button className="btn btn-link" type="button" onClick={() => void actions.loadGroups()}>Retry</button>
         </div>
       )}
       {error && <div className="error-message group-selector-error">{error}</div>}

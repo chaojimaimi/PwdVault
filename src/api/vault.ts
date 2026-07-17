@@ -1,4 +1,9 @@
-import type { CreateEntryRequest, EntrySecretResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, UpdateInfo, Group } from '../types';
+import type { CreateEntryRequest, UpdateEntryRequest, EntrySecretResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, UpdateInfo, Group } from '../types';
+
+// Private-repository builds have no suitable unauthenticated release feed.
+// A release pipeline may explicitly enable this only after publishing a public,
+// trusted metadata endpoint. Never embed a GitHub token in the client.
+export const UPDATE_CHECK_AVAILABLE = import.meta.env.VITE_UPDATE_CHECK_ENABLED === 'true';
 
 // Unified invoke function that works in both Tauri and browser environments
 async function invoke<T>(cmd: string, args?: Record<string, any>): Promise<T> {
@@ -69,7 +74,7 @@ export async function listAllEntries(): Promise<EntrySummary[]> {
   return invoke('list_all_entries');
 }
 
-export async function updateEntry(id: string, request: CreateEntryRequest): Promise<EntrySummary> {
+export async function updateEntry(id: string, request: UpdateEntryRequest): Promise<EntrySummary> {
   return invoke('update_entry', { id, request });
 }
 
@@ -107,6 +112,10 @@ export async function getSettings(): Promise<Settings> {
 
 export async function updateSettings(settings: Settings): Promise<Settings> {
   return invoke('update_settings', { settings });
+}
+
+export async function revokeExtensionAccess(): Promise<boolean> {
+  return invoke('revoke_extension_access');
 }
 
 // Import/Export

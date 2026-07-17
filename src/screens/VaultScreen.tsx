@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { useTheme } from '../hooks/useTheme';
-import { copyWithTimeout } from '../utils/clipboard';
+import { copyWithTimeout, copyWithoutClear } from '../utils/clipboard';
 import { searchEntries } from '../utils/search';
 import { showToast } from '../utils/toast';
 import { UpdateNotification } from '../components/UpdateNotification';
@@ -19,8 +19,7 @@ export function VaultScreen() {
 
   useEffect(() => {
     if (state.isUnlocked) {
-      actions.loadEntries();
-      actions.loadGroups();
+      void Promise.allSettled([actions.loadEntries(), actions.loadGroups()]);
     }
   }, [state.isUnlocked]);
 
@@ -39,7 +38,7 @@ export function VaultScreen() {
 
   const handleCopyUsername = async (e: React.MouseEvent, username: string) => {
     e.stopPropagation();
-    await copyWithTimeout(username);
+    await copyWithoutClear(username);
     showToast('Username copied');
   };
 
@@ -64,7 +63,7 @@ export function VaultScreen() {
   };
 
   return (
-    <div className="vault-container">
+    <div className="vault-container screen-shell">
       {state.updateInfo && (
         <UpdateNotification
           updateInfo={state.updateInfo}
@@ -95,6 +94,7 @@ export function VaultScreen() {
         <div className="search-input-wrapper">
           <SearchIcon className="search-icon" />
           <input
+            aria-label="Search passwords"
             type="text"
             className="search-input"
             placeholder="Search passwords..."
@@ -104,7 +104,7 @@ export function VaultScreen() {
         </div>
       </div>
 
-      {state.groups.length > 0 && (
+      {state.groupsStatus === 'success' && state.groups.length > 0 && (
         <div className="group-tabs">
           <div className="group-tabs-scroll">
             <button
@@ -129,7 +129,7 @@ export function VaultScreen() {
         </div>
       )}
 
-      {state.groups.length === 0 && (
+      {state.groupsStatus === 'success' && state.groups.length === 0 && (
         <div className="group-tabs group-tabs-empty">
           <button className="group-manage-btn group-manage-first" onClick={handleManageGroups}>
             <FolderIcon size={14} />
@@ -138,8 +138,26 @@ export function VaultScreen() {
         </div>
       )}
 
-      <div className="entry-list" role="list">
-        {filteredEntries.length === 0 ? (
+      {state.groupsStatus === 'error' && (
+        <div className="resource-error resource-error-compact" role="alert">
+          <span>Could not load groups.</span>
+          <button className="btn btn-link" onClick={() => void actions.loadGroups()}>Retry</button>
+        </div>
+      )}
+
+      <div className="entry-list screen-scroll-region" role="list">
+        {(state.entriesStatus === 'idle' || state.entriesStatus === 'loading') ? (
+          <div className="loading" role="status">
+            <span className="spinner" />
+            <span>Loading passwords…</span>
+          </div>
+        ) : state.entriesStatus === 'error' ? (
+          <div className="resource-error" role="alert">
+            <p>Could not load passwords.</p>
+            <p className="text-muted-hint">{state.entriesError}</p>
+            <button className="btn btn-secondary" onClick={() => void actions.loadEntries()}>Retry</button>
+          </div>
+        ) : filteredEntries.length === 0 ? (
           <div className="empty-state" role="listitem">
             <LockIcon size={64} />
             <p>{state.searchQuery ? 'No matching passwords found' : 'No passwords saved yet'}</p>
@@ -151,16 +169,18 @@ export function VaultScreen() {
               key={entry.id}
               className="entry-item"
               role="listitem"
-              tabIndex={0}
-              aria-label={`${entry.title}, ${entry.username}`}
-              onClick={() => handleEntryClick(entry)}
-              onKeyDown={(e) => e.key === 'Enter' && handleEntryClick(entry)}
             >
-              <div className="entry-icon">{getInitials(entry.title)}</div>
-              <div className="entry-info">
-                <h3>{entry.title}</h3>
-                <p>{entry.username}</p>
-              </div>
+              <button
+                className="entry-main"
+                onClick={() => handleEntryClick(entry)}
+                aria-label={`Open ${entry.title}, ${entry.username}`}
+              >
+                <span className="entry-icon" aria-hidden="true">{getInitials(entry.title)}</span>
+                <span className="entry-info">
+                  <span className="entry-title">{entry.title}</span>
+                  <span className="entry-username">{entry.username}</span>
+                </span>
+              </button>
               <div className="entry-actions-inline">
                 <button
                   className="btn btn-icon btn-copy"

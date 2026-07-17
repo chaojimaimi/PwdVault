@@ -18,18 +18,24 @@ export function GeneratorScreen() {
     includeSymbols: state.settings.default_include_symbols,
   });
   const [copied, setCopied] = useState(false);
+  const [pending, setPending] = useState(false);
+  const charsetValid = options.includeUppercase || options.includeLowercase || options.includeNumbers || options.includeSymbols;
 
   useEffect(() => {
     handleGenerate();
   }, []);
 
   const handleGenerate = async () => {
+    if (!charsetValid || pending) return;
+    setPending(true);
     try {
       const pwd = await generatePassword(options);
       setPassword(pwd);
       setCopied(false);
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to generate password');
+    } finally {
+      setPending(false);
     }
   };
 
@@ -49,10 +55,10 @@ export function GeneratorScreen() {
   };
 
   return (
-    <div className="generator-screen">
+    <div className="generator-screen screen-shell">
       <BackHeader title="Password Generator" onBack={handleBack} />
 
-      <div className="generator-content">
+      <div className="generator-content screen-scroll-region">
         <div className="password-preview">
           {password || 'Generating...'}
         </div>
@@ -124,13 +130,15 @@ export function GeneratorScreen() {
           </div>
         </div>
 
-        <button className="btn btn-secondary" onClick={handleGenerate}>
-          Generate New Password
+        {!charsetValid && <p className="error-message" role="alert">Select at least one character set.</p>}
+
+        <button className="btn btn-secondary" onClick={handleGenerate} disabled={!charsetValid || pending}>
+          {pending ? 'Generating…' : 'Generate New Password'}
         </button>
       </div>
 
       <div className="generator-actions">
-        <button className="btn btn-primary" onClick={handleCopy}>
+        <button className="btn btn-primary" onClick={handleCopy} disabled={!password}>
           {copied ? 'Copied!' : 'Copy to Clipboard'}
         </button>
       </div>

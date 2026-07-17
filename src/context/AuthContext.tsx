@@ -18,6 +18,7 @@ export interface AuthState {
   isUnlocked: boolean;
   isLoading: boolean;
   error: string | null;
+  bootError: string | null;
 }
 
 type AuthAction =
@@ -26,6 +27,7 @@ type AuthAction =
   | { type: 'SET_SCREEN'; payload: AppScreen }
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | null }
+  | { type: 'SET_BOOT_ERROR'; payload: string | null }
   | { type: 'RESET' };
 
 const initialAuthState: AuthState = {
@@ -34,6 +36,7 @@ const initialAuthState: AuthState = {
   isUnlocked: false,
   isLoading: true,
   error: null,
+  bootError: null,
 };
 
 function authReducer(state: AuthState, action: AuthAction): AuthState {
@@ -48,6 +51,8 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
       return { ...state, isLoading: action.payload };
     case 'SET_ERROR':
       return { ...state, error: action.payload };
+    case 'SET_BOOT_ERROR':
+      return { ...state, bootError: action.payload };
     case 'RESET':
       return { ...initialAuthState, isLoading: false };
     default:
@@ -67,6 +72,7 @@ export interface AuthContextValue {
     unlock: (password: string) => Promise<boolean>;
     lock: () => Promise<void>;
     navigate: (screen: AppScreen) => void;
+    retryBoot: () => Promise<void>;
   };
 }
 
@@ -75,19 +81,22 @@ export const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(authReducer, initialAuthState);
 
-  useEffect(() => {
-    async function init() {
+  const boot = async () => {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      dispatch({ type: 'SET_BOOT_ERROR', payload: null });
       try {
         const initialized = await api.setupVault();
         dispatch({ type: 'SET_INITIALIZED', payload: initialized });
         dispatch({ type: 'SET_SCREEN', payload: initialized ? 'unlock' : 'setup' });
       } catch (error) {
-        dispatch({ type: 'SET_ERROR', payload: formatError(error) });
+        dispatch({ type: 'SET_BOOT_ERROR', payload: formatError(error) });
       } finally {
         dispatch({ type: 'SET_LOADING', payload: false });
       }
-    }
-    init();
+    };
+
+  useEffect(() => {
+    void boot();
   }, []);
 
   const actions = useMemo(() => ({
@@ -134,6 +143,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     navigate: (screen: AppScreen) => {
       dispatch({ type: 'SET_SCREEN', payload: screen });
     },
+
+    retryBoot: boot,
   }), [dispatch]);
 
   const value = useMemo(() => ({ state, dispatch, actions }), [state, dispatch, actions]);

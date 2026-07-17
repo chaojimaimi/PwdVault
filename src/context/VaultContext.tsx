@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, useMemo, type ReactNode } from 'react';
-import type { EntrySummary, EntrySecretResponse, Group, VaultBackup, ImportResult } from '../types';
+import type { EntrySummary, EntrySecretResponse, Group, VaultBackup, ImportResult, ResourceStatus } from '../types';
 import * as api from '../api/vault';
 
 // ---------------------------------------------------------------------------
@@ -12,6 +12,10 @@ export interface VaultState {
   selectedGroupId: string | null;
   selectedEntry: EntrySummary | null;
   searchQuery: string;
+  entriesStatus: ResourceStatus;
+  entriesError: string | null;
+  groupsStatus: ResourceStatus;
+  groupsError: string | null;
 }
 
 type VaultAction =
@@ -20,6 +24,8 @@ type VaultAction =
   | { type: 'SET_SELECTED_GROUP'; payload: string | null }
   | { type: 'SET_SELECTED_ENTRY'; payload: EntrySummary | null }
   | { type: 'SET_SEARCH_QUERY'; payload: string }
+  | { type: 'SET_ENTRIES_RESOURCE'; payload: { status: ResourceStatus; error?: string | null } }
+  | { type: 'SET_GROUPS_RESOURCE'; payload: { status: ResourceStatus; error?: string | null } }
   | { type: 'RESET' };
 
 const initialVaultState: VaultState = {
@@ -28,6 +34,10 @@ const initialVaultState: VaultState = {
   selectedGroupId: null,
   selectedEntry: null,
   searchQuery: '',
+  entriesStatus: 'idle',
+  entriesError: null,
+  groupsStatus: 'idle',
+  groupsError: null,
 };
 
 function vaultReducer(state: VaultState, action: VaultAction): VaultState {
@@ -42,6 +52,10 @@ function vaultReducer(state: VaultState, action: VaultAction): VaultState {
       return { ...state, selectedEntry: action.payload };
     case 'SET_SEARCH_QUERY':
       return { ...state, searchQuery: action.payload };
+    case 'SET_ENTRIES_RESOURCE':
+      return { ...state, entriesStatus: action.payload.status, entriesError: action.payload.error ?? null };
+    case 'SET_GROUPS_RESOURCE':
+      return { ...state, groupsStatus: action.payload.status, groupsError: action.payload.error ?? null };
     case 'RESET':
       return { ...initialVaultState };
     default:
@@ -59,7 +73,7 @@ export interface VaultContextValue {
   actions: {
     loadEntries: () => Promise<void>;
     loadGroups: () => Promise<void>;
-    createGroup: (name: string) => Promise<void>;
+    createGroup: (name: string) => Promise<Group>;
     updateGroup: (id: string, name: string) => Promise<void>;
     deleteGroup: (id: string) => Promise<void>;
     selectGroup: (id: string | null) => void;
@@ -81,27 +95,34 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   const actions = useMemo(() => ({
     loadEntries: async () => {
+      dispatch({ type: 'SET_ENTRIES_RESOURCE', payload: { status: 'loading' } });
       try {
         const entries = await api.listAllEntries();
         dispatch({ type: 'SET_ENTRIES', payload: entries });
+        dispatch({ type: 'SET_ENTRIES_RESOURCE', payload: { status: 'success' } });
       } catch (error) {
+        dispatch({ type: 'SET_ENTRIES_RESOURCE', payload: { status: 'error', error: formatError(error) } });
         throw error;
       }
     },
 
     loadGroups: async () => {
+      dispatch({ type: 'SET_GROUPS_RESOURCE', payload: { status: 'loading' } });
       try {
         const groups = await api.listAllGroups();
         dispatch({ type: 'SET_GROUPS', payload: groups || [] });
+        dispatch({ type: 'SET_GROUPS_RESOURCE', payload: { status: 'success' } });
       } catch (error) {
+        dispatch({ type: 'SET_GROUPS_RESOURCE', payload: { status: 'error', error: formatError(error) } });
         throw error;
       }
     },
 
     createGroup: async (name: string) => {
       try {
-        await api.createGroup(name);
+        const created = await api.createGroup(name);
         await actions.loadGroups();
+        return created;
       } catch (error) {
         throw error;
       }
@@ -120,6 +141,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       try {
         await api.removeGroup(id);
         await actions.loadGroups();
+        await actions.loadEntries();
+        dispatch({ type: 'SET_SELECTED_GROUP', payload: state.selectedGroupId === id ? null : state.selectedGroupId });
       } catch (error) {
         throw error;
       }
@@ -178,10 +201,16 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       await actions.loadGroups();
       return result;
     },
-  }), [dispatch]);
+  }), [dispatch, state.selectedGroupId]);
 
   const value = useMemo(() => ({ state, dispatch, actions }), [state, dispatch, actions]);
   return <VaultContext.Provider value={value}>{children}</VaultContext.Provider>;
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  try { return JSON.stringify(error); } catch { return 'Unknown error'; }
 }
 
 export function useVault() {

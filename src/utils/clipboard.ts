@@ -18,12 +18,13 @@ export async function copyWithTimeout(
   timeoutMs: number = DEFAULT_TIMEOUT_MS
 ): Promise<void> {
   await navigator.clipboard.writeText(text);
+  const expectedDigest = await digestText(text);
 
   setTimeout(async () => {
     try {
       const current = await navigator.clipboard.readText();
       // Only clear if the text hasn't been changed by the user
-      if (current === text) {
+      if (await digestText(current) === expectedDigest) {
         await navigator.clipboard.writeText('');
       }
     } catch {
@@ -34,6 +35,12 @@ export async function copyWithTimeout(
       // - The page is no longer focused
     }
   }, timeoutMs);
+}
+
+async function digestText(text: string): Promise<string> {
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 /**

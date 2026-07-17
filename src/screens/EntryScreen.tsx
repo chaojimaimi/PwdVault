@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { generatePassword } from '../api/vault';
 import { copyWithTimeout } from '../utils/clipboard';
@@ -9,7 +9,9 @@ import { EyeIcon, EyeOffIcon, CopyIcon, GenerateIcon } from '../components/Icons
 import ConfirmationModal, { ChangeItem } from '../components/ConfirmationModal';
 import DeleteConfirmModal from '../components/DeleteConfirmModal';
 import GroupSelector from '../components/GroupSelector';
-import type { CreateEntryRequest, EntrySummary } from '../types';
+import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
+import { AccessibleDialog } from '../components/AccessibleDialog';
+import type { CreateEntryRequest, EntrySummary, UpdateEntryRequest } from '../types';
 
 export function EntryScreen() {
   const { state, actions } = useApp();
@@ -26,7 +28,10 @@ export function EntryScreen() {
     group_id: null,
   });
   const [originalSecret, setOriginalSecret] = useState<{ password: string; notes: string } | null>(null);
-  const [secretLoaded, setSecretLoaded] = useState(false);
+  const [passwordChanged, setPasswordChanged] = useState(false);
+  const [notesLoaded, setNotesLoaded] = useState(false);
+  const [notesChanged, setNotesChanged] = useState(false);
+  const [secretLoading, setSecretLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,10 +39,11 @@ export function EntryScreen() {
   const [showGenerator, setShowGenerator] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState('');
   const [showConfirmation, setShowConfirmation] = useState(false);
-  const [pendingChanges, setPendingChanges] = useState<CreateEntryRequest | null>(null);
+  const [pendingChanges, setPendingChanges] = useState<UpdateEntryRequest | null>(null);
   const [changesList, setChangesList] = useState<ChangeItem[]>([]);
   const [isSavingConfirmed, setIsSavingConfirmed] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showUnsaved, setShowUnsaved] = useState(false);
 
   useEffect(() => {
     if (state.selectedEntry) {
@@ -53,36 +59,9 @@ export function EntryScreen() {
         group_id: state.selectedEntry.group_id || null,
       });
       setOriginalSecret(null);
-      setSecretLoaded(false);
-
-      // Editing an existing entry: load secrets once so the form can be saved
-      // with the existing password/notes if unchanged.
-      setIsLoading(true);
-      actions.getEntrySecret(state.selectedEntry.id)
-        .then((secret) => {
-          if (secret) {
-            setFormData((prev) => ({
-              ...prev,
-              password: secret.password,
-              notes: secret.notes || '',
-            }));
-            setOriginalSecret({
-              password: secret.password,
-              notes: secret.notes || '',
-            });
-          } else {
-            setError('Failed to load entry secrets (empty response)');
-          }
-          setSecretLoaded(true);
-        })
-        .catch((err) => {
-          const msg = typeof err === 'string' ? err
-            : err?.message ? err.message
-            : (() => { try { return JSON.stringify(err); } catch { return String(err); } })();
-          setError(`Failed to load entry secrets: ${msg}`);
-          setSecretLoaded(true);
-        })
-        .finally(() => setIsLoading(false));
+      setPasswordChanged(false);
+      setNotesLoaded(false);
+      setNotesChanged(false);
     } else {
       setFormData({
         title: '',
@@ -94,9 +73,32 @@ export function EntryScreen() {
         group_id: null,
       });
       setOriginalSecret(null);
-      setSecretLoaded(false);
+      setPasswordChanged(false);
+      setNotesLoaded(true);
+      setNotesChanged(false);
     }
   }, [state.selectedEntry]);
+
+  const metadataDirty = useMemo(() => {
+    if (!state.selectedEntry) {
+      return Boolean(formData.title || formData.url || formData.username || formData.password || formData.notes || formData.tags.length || formData.group_id);
+    }
+    return state.selectedEntry.title !== formData.title
+      || (state.selectedEntry.url || '') !== (formData.url || '')
+      || state.selectedEntry.username !== formData.username
+      || JSON.stringify(state.selectedEntry.tags || []) !== JSON.stringify(formData.tags)
+      || (state.selectedEntry.group_id || null) !== (formData.group_id || null);
+  }, [formData, state.selectedEntry]);
+  const isDirty = metadataDirty || passwordChanged || notesChanged;
+
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!isDirty) return;
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [isDirty]);
 
   // Clear plaintext secrets from component state as soon as the user leaves
   // the screen, minimizing the time they reside in memory.
@@ -108,13 +110,22 @@ export function EntryScreen() {
   }, []);
 
   const handleBack = () => {
+    if (isDirty) {
+      setShowUnsaved(true);
+      return;
+    }
+    leaveEntry();
+  };
+
+  const leaveEntry = () => {
     actions.selectEntry(null);
     actions.navigate('vault');
   };
 
   const handleSave = async () => {
-    if (!formData.title || !formData.username || !formData.password) {
-      setError('Title, username, and password are required');
+    if (isLoading || isSavingConfirmed) return;
+    if (!formData.title || !formData.username || (isNew && !formData.password)) {
+      setError(isNew ? 'Title, username, and password are required' : 'Title and username are required');
       return;
     }
     setError(null);
@@ -123,7 +134,7 @@ export function EntryScreen() {
       setIsLoading(true);
       try {
         await actions.createEntry(formData);
-        handleBack();
+        leaveEntry();
       } catch {
         setError('Failed to create entry');
       } finally {
@@ -134,13 +145,22 @@ export function EntryScreen() {
 
     if (!state.selectedEntry) return;
 
-    const changes = detectChanges(state.selectedEntry, originalSecret, formData);
+    const changes = detectChanges(state.selectedEntry, originalSecret, formData, passwordChanged, notesChanged);
     if (changes.length === 0) {
-      handleBack();
+      leaveEntry();
       return;
     }
 
-    setPendingChanges(formData);
+    setPendingChanges({
+      title: formData.title,
+      url: formData.url,
+      username: formData.username,
+      ...(passwordChanged ? { password: formData.password } : {}),
+      ...(notesChanged ? { notes: formData.notes || undefined } : {}),
+      update_notes: notesChanged,
+      tags: formData.tags,
+      group_id: formData.group_id,
+    });
     setChangesList(changes);
     setShowConfirmation(true);
   };
@@ -156,7 +176,7 @@ export function EntryScreen() {
     try {
       await actions.deleteEntry(state.selectedEntry.id);
       setShowDeleteConfirm(false);
-      handleBack();
+      leaveEntry();
     } catch {
       setError('Failed to delete entry');
     } finally {
@@ -168,6 +188,8 @@ export function EntryScreen() {
     originalMeta: EntrySummary,
     originalSecret: { password: string; notes: string } | null,
     current: CreateEntryRequest,
+    passwordChanged: boolean,
+    notesChanged: boolean,
   ): ChangeItem[] {
     const changes: ChangeItem[] = [];
     if (originalMeta.title !== current.title) {
@@ -179,12 +201,11 @@ export function EntryScreen() {
     if (originalMeta.username !== current.username) {
       changes.push({ fieldId: 'username', label: 'Username', oldValue: originalMeta.username, newValue: current.username, valueType: 'text' });
     }
-    const originalPassword = originalSecret?.password ?? '';
-    if (originalPassword !== current.password) {
+    if (passwordChanged) {
       changes.push({ fieldId: 'password', label: 'Password', valueType: 'password' });
     }
-    const originalNotes = originalSecret?.notes ?? '';
-    if (originalNotes !== (current.notes || '')) {
+    if (notesChanged) {
+      const originalNotes = originalSecret?.notes ?? '';
       changes.push({ fieldId: 'notes', label: 'Notes', oldValue: originalNotes.slice(0, 200), newValue: (current.notes || '').slice(0, 200), valueType: 'notes' });
     }
     const origTags = originalMeta.tags || [];
@@ -205,7 +226,7 @@ export function EntryScreen() {
     try {
       await actions.updateEntry(state.selectedEntry.id, pendingChanges);
       setShowConfirmation(false);
-      handleBack();
+      leaveEntry();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '';
       setError('Failed to save entry' + (msg ? ': ' + msg : ''));
@@ -242,13 +263,14 @@ export function EntryScreen() {
 
   const handleUseGenerated = () => {
     setFormData({ ...formData, password: generatedPassword });
+    setPasswordChanged(true);
     setShowGenerator(false);
     setGeneratedPassword('');
   };
 
   const handleCopyPassword = async () => {
-    let password = formData.password;
-    if (!password && state.selectedEntry) {
+    let password = passwordChanged || isNew ? formData.password : '';
+    if (state.selectedEntry && !passwordChanged) {
       try {
         const secret = await actions.getEntrySecret(state.selectedEntry.id);
         password = secret?.password || '';
@@ -262,47 +284,52 @@ export function EntryScreen() {
     showToast('Password copied (auto-clears in 30s)');
   };
 
-  if (showGenerator) {
-    return (
-      <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Generate Password">
-        <div className="modal">
-          <div className="modal-header">
-            <h3>Generate Password</h3>
-            <button className="btn btn-icon" onClick={() => setShowGenerator(false)} aria-label="Close">
-              ×
-            </button>
-          </div>
-          <div className="modal-body">
-            <div className="password-preview">
-              {generatedPassword || 'Click generate to create a password'}
-            </div>
-            <button className="btn btn-secondary" onClick={handleGeneratePassword}>
-              Generate New
-            </button>
-          </div>
-          <div className="modal-footer">
-            <button className="btn btn-secondary" onClick={() => setShowGenerator(false)}>
-              Cancel
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={handleUseGenerated}
-              disabled={!generatedPassword}
-            >
-              Use Password
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const handleTogglePassword = async () => {
+    if (showPassword) {
+      setShowPassword(false);
+      if (!passwordChanged && isEditing) setFormData((prev) => ({ ...prev, password: '' }));
+      return;
+    }
+    if (isEditing && !passwordChanged && !formData.password && state.selectedEntry) {
+      setSecretLoading(true);
+      try {
+        const secret = await actions.getEntrySecret(state.selectedEntry.id);
+        if (!secret) throw new Error('Empty secret response');
+        setFormData((prev) => ({ ...prev, password: secret.password }));
+        setOriginalSecret({ password: secret.password, notes: originalSecret?.notes || '' });
+      } catch {
+        setError('Failed to reveal password');
+        return;
+      } finally {
+        setSecretLoading(false);
+      }
+    }
+    setShowPassword(true);
+  };
+
+  const handleLoadNotes = async () => {
+    if (!state.selectedEntry || notesLoaded || secretLoading) return;
+    setSecretLoading(true);
+    try {
+      const secret = await actions.getEntrySecret(state.selectedEntry.id);
+      if (!secret) throw new Error('Empty secret response');
+      const notes = secret.notes || '';
+      setFormData((prev) => ({ ...prev, notes }));
+      setOriginalSecret({ password: originalSecret?.password || '', notes });
+      setNotesLoaded(true);
+    } catch {
+      setError('Failed to load notes');
+    } finally {
+      setSecretLoading(false);
+    }
+  };
 
   return (
-    <div className="entry-screen">
+    <div className="entry-screen screen-shell">
       <BackHeader title={isNew ? 'New Password' : 'Edit Password'} onBack={handleBack} headerClass="entry-header" />
 
-      <div className="entry-content">
-        {error && <div className="error-message">{error}</div>}
+      <div className="entry-content screen-scroll-region">
+        {error && <div className="error-message" id="entry-error" role="alert">{error}</div>}
 
         <div className="form-group">
           <label htmlFor="entry-title">Title *</label>
@@ -313,6 +340,9 @@ export function EntryScreen() {
             value={formData.title}
             onChange={(e) => setFormData({ ...formData, title: e.target.value })}
             placeholder="e.g., Google, GitHub"
+            aria-required="true"
+            aria-invalid={!!error && !formData.title}
+            aria-describedby={error ? 'entry-error' : undefined}
           />
         </div>
 
@@ -337,6 +367,9 @@ export function EntryScreen() {
             value={formData.username}
             onChange={(e) => setFormData({ ...formData, username: e.target.value })}
             placeholder="email@example.com"
+            aria-required="true"
+            aria-invalid={!!error && !formData.username}
+            aria-describedby={error ? 'entry-error' : undefined}
           />
         </div>
 
@@ -347,13 +380,16 @@ export function EntryScreen() {
               id="entry-password"
               type={showPassword ? 'text' : 'password'}
               value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              placeholder={isEditing && !secretLoaded ? 'Loading secret…' : ''}
+              onChange={(e) => { setFormData({ ...formData, password: e.target.value }); setPasswordChanged(true); }}
+              placeholder={isEditing && !passwordChanged ? 'Unchanged' : ''}
+              aria-required={isNew}
+              aria-invalid={!!error && isNew && !formData.password}
+              aria-describedby={error ? 'entry-error' : undefined}
             />
             <button
-              onClick={() => setShowPassword(!showPassword)}
+              onClick={() => void handleTogglePassword()}
               type="button"
-              disabled={isEditing && !secretLoaded}
+              disabled={secretLoading}
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
               {showPassword ? <EyeOffIcon /> : <EyeIcon />}
@@ -361,7 +397,7 @@ export function EntryScreen() {
             <button
               onClick={handleCopyPassword}
               type="button"
-              disabled={isEditing && !secretLoaded}
+              disabled={secretLoading}
               aria-label="Copy password"
             >
               <CopyIcon />
@@ -374,27 +410,32 @@ export function EntryScreen() {
         </div>
 
         <div className="form-group">
-          <label htmlFor="entry-notes">Notes</label>
-          <textarea
+          {isEditing && !notesLoaded ? (
+            <>
+              <span className="form-label">Notes</span>
+              <button className="btn btn-secondary" type="button" onClick={() => void handleLoadNotes()} disabled={secretLoading}>
+                {secretLoading ? 'Loading…' : 'Load notes to edit'}
+              </button>
+            </>
+          ) : <><label htmlFor="entry-notes">Notes</label><textarea
             id="entry-notes"
             className="form-input"
             value={formData.notes}
-            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+            onChange={(e) => { setFormData({ ...formData, notes: e.target.value }); setNotesChanged(true); }}
             placeholder="Additional notes..."
             rows={3}
-          />
+          /></>}
         </div>
 
         <div className="form-group">
-          <label>Group</label>
           <GroupSelector value={formData.group_id || null} onChange={(id) => setFormData({ ...formData, group_id: id })} />
 
           <label htmlFor="tag-input" className="tag-label">Tags</label>
           <div className="entry-tags">
             {formData.tags.map((tag) => (
-              <span key={tag} className="tag" onClick={() => handleRemoveTag(tag)}>
+              <button key={tag} className="tag" type="button" onClick={() => handleRemoveTag(tag)} aria-label={`Remove tag ${tag}`}>
                 {tag} ×
-              </span>
+              </button>
             ))}
           </div>
           <div className="tag-input-row">
@@ -439,6 +480,32 @@ export function EntryScreen() {
         onConfirm={onConfirmDelete}
         onCancel={() => setShowDeleteConfirm(false)}
         isDeleting={isLoading}
+      />
+      <AccessibleDialog
+        isOpen={showGenerator}
+        onClose={() => setShowGenerator(false)}
+        labelledBy="entry-generator-title"
+        describedBy="entry-generator-description"
+        initialFocusSelector="[data-generate-password]"
+      >
+        <div className="modal-header">
+          <h3 id="entry-generator-title">Generate Password</h3>
+          <button className="btn btn-icon" onClick={() => setShowGenerator(false)} aria-label="Close generator">×</button>
+        </div>
+        <div className="modal-body">
+          <p id="entry-generator-description" className="visually-hidden">Generate a password and insert it into this entry.</p>
+          <div className="password-preview">{generatedPassword || 'Click generate to create a password'}</div>
+          <button className="btn btn-secondary" data-generate-password onClick={handleGeneratePassword}>Generate New</button>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={() => setShowGenerator(false)}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleUseGenerated} disabled={!generatedPassword}>Use Password</button>
+        </div>
+      </AccessibleDialog>
+      <UnsavedChangesModal
+        isOpen={showUnsaved}
+        onStay={() => setShowUnsaved(false)}
+        onDiscard={() => { setShowUnsaved(false); leaveEntry(); }}
       />
     </div>
   );

@@ -20,7 +20,7 @@ import './styles/groups.css';
 import './styles/settings.css';
 
 function AppContent() {
-  const { state } = useApp();
+  const { state, actions } = useApp();
 
   if (state.isLoading) {
     return (
@@ -28,6 +28,20 @@ function AppContent() {
         <div className="loading">
           <span className="spinner" />
           <span>Loading...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.bootError) {
+    return (
+      <div className="screen">
+        <div className="fatal-error" role="alert">
+          <h1>PwdVault could not start</h1>
+          <p>{state.bootError}</p>
+          <button className="btn btn-primary" onClick={() => void actions.retryBoot()}>
+            Retry
+          </button>
         </div>
       </div>
     );

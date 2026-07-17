@@ -1,5 +1,5 @@
-import { createContext, useContext, useReducer, useEffect, useMemo, type ReactNode } from 'react';
-import type { Settings, UpdateInfo } from '../types';
+import { createContext, useContext, useReducer, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import type { Settings, UpdateInfo, ResourceStatus } from '../types';
 import { DEFAULT_SETTINGS } from '../types';
 import * as api from '../api/vault';
 import { useAuth } from './AuthContext';
@@ -17,15 +17,21 @@ function formatError(error: unknown): string {
 export interface SettingsState {
   settings: Settings;
   updateInfo: UpdateInfo | null;
+  status: ResourceStatus;
+  error: string | null;
 }
 
 type SettingsAction =
   | { type: 'SET_SETTINGS'; payload: Settings }
-  | { type: 'SET_UPDATE_INFO'; payload: UpdateInfo | null };
+  | { type: 'SET_UPDATE_INFO'; payload: UpdateInfo | null }
+  | { type: 'SET_RESOURCE'; payload: { status: ResourceStatus; error?: string | null } }
+  | { type: 'RESET' };
 
 const initialSettingsState: SettingsState = {
   settings: DEFAULT_SETTINGS,
   updateInfo: null,
+  status: 'idle',
+  error: null,
 };
 
 function settingsReducer(state: SettingsState, action: SettingsAction): SettingsState {
@@ -34,6 +40,10 @@ function settingsReducer(state: SettingsState, action: SettingsAction): Settings
       return { ...state, settings: action.payload };
     case 'SET_UPDATE_INFO':
       return { ...state, updateInfo: action.payload };
+    case 'SET_RESOURCE':
+      return { ...state, status: action.payload.status, error: action.payload.error ?? null };
+    case 'RESET':
+      return initialSettingsState;
     default:
       return state;
   }
@@ -59,9 +69,15 @@ export const SettingsContext = createContext<SettingsContextValue | null>(null);
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(settingsReducer, initialSettingsState);
   const { state: authState } = useAuth();
+  const checkedThisStartup = useRef(false);
 
-  // Check for updates on mount (non-blocking, silent on failure)
+  // Privacy invariant: update checks run only after unlock + successful settings
+  // load + explicit opt-in, and at most once during this application startup.
   useEffect(() => {
+    if (!api.UPDATE_CHECK_AVAILABLE || !authState.isUnlocked || state.status !== 'success' || !state.settings.check_updates || checkedThisStartup.current) {
+      return;
+    }
+    checkedThisStartup.current = true;
     let cancelled = false;
     api.checkForUpdates()
       .then((info) => {
@@ -75,7 +91,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => { /* silently ignore */ });
     return () => { cancelled = true; };
-  }, []);
+  }, [authState.isUnlocked, state.status, state.settings.check_updates]);
 
   // Load settings from the backend after the vault is unlocked so that
   // SettingsScreen and GeneratorScreen reflect the user's saved preferences
@@ -86,25 +102,33 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     if (!authState.isUnlocked) {
       // Vault locked (or never unlocked): clear any previously loaded
       // settings so they don't linger in React memory while locked.
-      dispatch({ type: 'SET_SETTINGS', payload: DEFAULT_SETTINGS });
+      dispatch({ type: 'RESET' });
       return;
     }
     let cancelled = false;
+    dispatch({ type: 'SET_RESOURCE', payload: { status: 'loading' } });
     api.getSettings()
       .then((settings) => {
-        if (!cancelled) dispatch({ type: 'SET_SETTINGS', payload: settings });
+        if (!cancelled) {
+          dispatch({ type: 'SET_SETTINGS', payload: settings });
+          dispatch({ type: 'SET_RESOURCE', payload: { status: 'success' } });
+        }
       })
-      .catch(() => { /* settings unavailable — keep defaults */ });
+      .catch((error) => {
+        if (!cancelled) dispatch({ type: 'SET_RESOURCE', payload: { status: 'error', error: formatError(error) } });
+      });
     return () => { cancelled = true; };
   }, [authState.isUnlocked]);
 
   const actions = useMemo(() => ({
     loadSettings: async () => {
+      dispatch({ type: 'SET_RESOURCE', payload: { status: 'loading' } });
       try {
         const settings = await api.getSettings();
         dispatch({ type: 'SET_SETTINGS', payload: settings });
+        dispatch({ type: 'SET_RESOURCE', payload: { status: 'success' } });
       } catch (error) {
-        // Surface via auth error channel by rethrowing to caller
+        dispatch({ type: 'SET_RESOURCE', payload: { status: 'error', error: formatError(error) } });
         throw error;
       }
     },
@@ -113,6 +137,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       try {
         const updated = await api.updateSettings(settings);
         dispatch({ type: 'SET_SETTINGS', payload: updated });
+        dispatch({ type: 'SET_RESOURCE', payload: { status: 'success' } });
       } catch (error) {
         throw error;
       }
