@@ -89,6 +89,20 @@ pub struct Settings {
     pub check_updates: bool,
 }
 
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            auto_lock_secs: 600,
+            default_length: 16,
+            default_include_uppercase: true,
+            default_include_lowercase: true,
+            default_include_numbers: true,
+            default_include_symbols: true,
+            check_updates: true,
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }

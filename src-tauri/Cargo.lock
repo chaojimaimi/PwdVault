@@ -3270,6 +3270,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "pwdvault-infrastructure"
+version = "1.0.5"
+dependencies = [
+ "aes-gcm",
+ "argon2",
+ "base64 0.22.1",
+ "bincode",
+ "chrono",
+ "dirs 5.0.1",
+ "hkdf",
+ "hmac",
+ "once_cell",
+ "pwdvault-domain",
+ "rand 0.8.6",
+ "redb",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "typenum",
+ "uuid",
+ "winreg",
+ "zeroize",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

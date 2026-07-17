@@ -15,7 +15,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # `pwdvault` crate remains the Tauri binary while members migrate.
 # ---------------------------------------------------------------------------
 [workspace]
-members = ["crates/domain"]
+members = ["crates/domain", "crates/infrastructure"]
 
 # The main crate currently still owns the Tauri binary + legacy src/ tree.
 # As modules migrate into workspace members, they will be re-exported from
