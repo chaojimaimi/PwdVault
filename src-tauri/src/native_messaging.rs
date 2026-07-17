@@ -2,19 +2,26 @@
 //!
 //! Provides an HTTP server for browser extension communication.
 
-use std::io::Read;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::{Shutdown, TcpListener, TcpStream};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
-use tiny_http::{Request, Response, Server};
 use zeroize::Zeroizing;
 
 use crate::auth;
 use crate::constants;
 use crate::database;
 use crate::service;
-use crate::{AppState, CreateEntryRequest, VaultBackup, VaultError};
+use crate::{AppState, CreateEntryRequest, UpdateEntryRequest, VaultBackup, VaultError};
+
+const HTTP_WORKERS: usize = 8;
+const HTTP_QUEUE_CAPACITY: usize = 64;
+const HTTP_HEADER_LIMIT: usize = 16 * 1024;
+const HTTP_IO_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Native messaging request
 ///
@@ -26,6 +33,8 @@ use crate::{AppState, CreateEntryRequest, VaultBackup, VaultError};
 #[derive(Debug, Deserialize)]
 pub struct NativeRequest {
     pub id: u32,
+    #[serde(default)]
+    pub protocol_version: u16,
     pub command: String,
     #[serde(default)]
     pub password: Option<Zeroizing<String>>,
@@ -35,6 +44,8 @@ pub struct NativeRequest {
     pub id_param: Option<String>,
     #[serde(default)]
     pub code: Option<Zeroizing<String>>,
+    #[serde(default)]
+    pub session_nonce: Option<Zeroizing<String>>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -91,126 +102,259 @@ pub struct NativeResponse {
     pub data: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after: Option<u64>,
 }
 
 /// Start the native messaging HTTP server
 ///
-/// Each incoming request is handled on its own thread so that a slow
-/// command (e.g. Argon2 key derivation during unlock) cannot stall
-/// connection acceptance or pairing flow for other concurrent clients.
-/// Vault-mutating commands are serialized via `AppState::op_lock` inside
-/// `execute_command`, so multi-threading here only parallelizes
-/// connection/parsing/auth — mutation correctness is preserved.
+/// Requests are processed by a fixed worker pool and bounded queue. This keeps
+/// slow or malformed loopback clients from creating unbounded OS threads.
 pub fn start_server(
     port: u16,
     state: Arc<AppState>,
     app_handle: Option<tauri::AppHandle>,
 ) -> Result<(), String> {
     let addr = format!("127.0.0.1:{}", port);
-
-    let server = Server::http(&addr).map_err(|_| "Server error".to_string())?;
+    let listener = TcpListener::bind(&addr).map_err(|error| format!("Server error: {error}"))?;
 
     tracing::info!(port = port, "native messaging server started");
 
-    for request in server.incoming_requests() {
+    // Bound accepted sockets before HTTP parsing. tiny_http's internal task
+    // pool grew one thread per slow connection, so bounding only parsed
+    // requests was insufficient against slowloris traffic.
+    let (sender, receiver) = mpsc::sync_channel::<TcpStream>(HTTP_QUEUE_CAPACITY);
+    let receiver = Arc::new(Mutex::new(receiver));
+    for index in 0..HTTP_WORKERS {
+        let receiver = receiver.clone();
         let state = state.clone();
         let app_handle = app_handle.clone();
-        std::thread::spawn(move || handle_request(request, state, app_handle));
+        std::thread::Builder::new()
+            .name(format!("pwdvault-http-{index}"))
+            .spawn(move || loop {
+                let request = {
+                    let guard = receiver.lock().expect("HTTP queue lock poisoned");
+                    guard.recv()
+                };
+                match request {
+                    Ok(stream) => handle_connection(stream, state.clone(), app_handle.clone()),
+                    Err(_) => break,
+                }
+            })
+            .map_err(|error| format!("Failed to start HTTP worker: {error}"))?;
+    }
+
+    for incoming in listener.incoming() {
+        let stream = incoming.map_err(|error| format!("Accept failed: {error}"))?;
+        if let Err(error) = sender.try_send(stream) {
+            match error {
+                mpsc::TrySendError::Full(mut stream) => {
+                    reject_busy_connection(&mut stream);
+                }
+                mpsc::TrySendError::Disconnected(_) => {
+                    return Err("HTTP worker pool stopped".to_string());
+                }
+            }
+        }
     }
 
     Ok(())
 }
 
-/// Build CORS headers based on the request Origin.
-/// Only allows localhost and browser extension origins.
-fn get_cors_origin(origin: Option<&str>) -> Option<String> {
-    match origin {
-        Some(o) if o.starts_with("chrome-extension://") => Some(o.to_string()),
-        Some(o) if o.starts_with("moz-extension://") => Some(o.to_string()),
-        Some(o) if o.starts_with("http://localhost") => Some(o.to_string()),
-        Some(o) if o.starts_with("http://127.0.0.1") => Some(o.to_string()),
-        _ => None,
+fn reject_busy_connection(stream: &mut TcpStream) {
+    // Drain bytes already delivered by a complete client request so macOS does
+    // not replace the 503 response with an immediate RST when the socket is
+    // dropped. Never wait here: the accept loop must remain bounded even for
+    // slow clients.
+    if stream.set_nonblocking(true).is_ok() {
+        let mut drained = 0usize;
+        let mut buffer = [0u8; 4096];
+        while drained < HTTP_HEADER_LIMIT {
+            match stream.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => drained += read,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(_) => break,
+            }
+        }
+        let _ = stream.set_nonblocking(false);
+    }
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(250)));
+    let response = error_response(0, "Server busy; retry later".to_string());
+    let _ = write_http_response(stream, 503, &response);
+    let _ = stream.shutdown(Shutdown::Write);
+}
+
+#[derive(Debug)]
+struct ParsedHttpRequest {
+    method: String,
+    path: String,
+    headers: HashMap<String, String>,
+    body: Zeroizing<String>,
+}
+
+#[derive(Debug)]
+struct HttpFailure {
+    status: u16,
+    message: String,
+}
+
+impl HttpFailure {
+    fn new(status: u16, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+        }
     }
 }
 
-fn add_cors_headers<T: std::io::Read>(response: &mut Response<T>, origin: Option<&str>) {
-    if let Some(allowed) = get_cors_origin(origin) {
-        response.add_header(
-            tiny_http::Header::from_bytes(
-                "Access-Control-Allow-Origin".as_bytes(),
-                allowed.as_bytes(),
-            )
-            .expect("valid CORS header"),
-        );
-    }
-    response.add_header(
-        tiny_http::Header::from_bytes(
-            "Access-Control-Allow-Methods".as_bytes(),
-            "POST, OPTIONS".as_bytes(),
-        )
-        .expect("valid CORS header"),
-    );
-    response.add_header(
-        tiny_http::Header::from_bytes(
-            "Access-Control-Allow-Headers".as_bytes(),
-            "Content-Type, Authorization".as_bytes(),
-        )
-        .expect("valid CORS header"),
-    );
+fn find_header_end(buffer: &[u8]) -> Option<usize> {
+    buffer.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
-fn handle_request(
-    mut request: Request,
+fn read_http_request(stream: &mut TcpStream) -> Result<ParsedHttpRequest, HttpFailure> {
+    stream
+        .set_read_timeout(Some(HTTP_IO_TIMEOUT))
+        .map_err(|_| HttpFailure::new(500, "Request failed"))?;
+    stream
+        .set_write_timeout(Some(HTTP_IO_TIMEOUT))
+        .map_err(|_| HttpFailure::new(500, "Request failed"))?;
+
+    let mut buffer = Vec::with_capacity(4096);
+    let header_end = loop {
+        if let Some(index) = find_header_end(&buffer) {
+            break index;
+        }
+        if buffer.len() >= HTTP_HEADER_LIMIT {
+            return Err(HttpFailure::new(431, "Request headers too large"));
+        }
+        let mut chunk = [0u8; 4096];
+        let read = stream
+            .read(&mut chunk)
+            .map_err(|_| HttpFailure::new(408, "Request timeout"))?;
+        if read == 0 {
+            return Err(HttpFailure::new(400, "Invalid request"));
+        }
+        buffer.extend_from_slice(&chunk[..read]);
+        if buffer.len() > HTTP_HEADER_LIMIT + constants::MAX_BODY_SIZE {
+            return Err(HttpFailure::new(413, "Request too large"));
+        }
+    };
+
+    let header_bytes = &buffer[..header_end];
+    let header_text =
+        std::str::from_utf8(header_bytes).map_err(|_| HttpFailure::new(400, "Invalid request"))?;
+    let mut lines = header_text.split("\r\n");
+    let request_line = lines
+        .next()
+        .ok_or_else(|| HttpFailure::new(400, "Invalid request"))?;
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts
+        .next()
+        .ok_or_else(|| HttpFailure::new(400, "Invalid request"))?;
+    let path = request_parts
+        .next()
+        .ok_or_else(|| HttpFailure::new(400, "Invalid request"))?;
+    let version = request_parts
+        .next()
+        .ok_or_else(|| HttpFailure::new(400, "Invalid request"))?;
+    if request_parts.next().is_some() || !matches!(version, "HTTP/1.0" | "HTTP/1.1") {
+        return Err(HttpFailure::new(400, "Invalid request"));
+    }
+
+    let mut headers = HashMap::new();
+    for line in lines {
+        let (name, value) = line
+            .split_once(':')
+            .ok_or_else(|| HttpFailure::new(400, "Invalid request"))?;
+        let name = name.trim().to_ascii_lowercase();
+        if name.is_empty() || value.contains(['\r', '\n']) || headers.contains_key(&name) {
+            return Err(HttpFailure::new(400, "Invalid request"));
+        }
+        headers.insert(name, value.trim().to_string());
+    }
+
+    if method != "POST" {
+        return Err(HttpFailure::new(405, "POST required"));
+    }
+    if headers.contains_key("transfer-encoding") {
+        return Err(HttpFailure::new(400, "Transfer-Encoding is not supported"));
+    }
+    let content_type_is_json = headers
+        .get("content-type")
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"));
+    if !content_type_is_json {
+        return Err(HttpFailure::new(
+            415,
+            "Content-Type application/json required",
+        ));
+    }
+    let content_length = headers
+        .get("content-length")
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|length| *length > 0)
+        .ok_or_else(|| HttpFailure::new(411, "Valid Content-Length required"))?;
+    if content_length > constants::MAX_BODY_SIZE {
+        return Err(HttpFailure::new(413, "Request too large"));
+    }
+
+    let body_start = header_end + 4;
+    let mut body = Vec::with_capacity(content_length);
+    let already_read = buffer.len().saturating_sub(body_start).min(content_length);
+    body.extend_from_slice(&buffer[body_start..body_start + already_read]);
+    while body.len() < content_length {
+        let mut chunk = [0u8; 8192];
+        let remaining = content_length - body.len();
+        let read_limit = remaining.min(chunk.len());
+        let read = stream
+            .read(&mut chunk[..read_limit])
+            .map_err(|_| HttpFailure::new(408, "Request timeout"))?;
+        if read == 0 {
+            return Err(HttpFailure::new(400, "Content-Length mismatch"));
+        }
+        body.extend_from_slice(&chunk[..read]);
+    }
+    let body = String::from_utf8(body).map_err(|_| HttpFailure::new(400, "Invalid request"))?;
+
+    Ok(ParsedHttpRequest {
+        method: method.to_string(),
+        path: path.to_string(),
+        headers,
+        body: Zeroizing::new(body),
+    })
+}
+
+fn handle_connection(
+    mut stream: TcpStream,
     state: Arc<AppState>,
     app_handle: Option<tauri::AppHandle>,
 ) {
-    let origin: Option<String> = request
-        .headers()
-        .iter()
-        .find(|h| h.field.equiv("Origin"))
-        .map(|h| h.value.to_string());
-
-    // Handle CORS preflight
-    if request.method() == &tiny_http::Method::Options {
-        let mut response = Response::empty(204);
-        add_cors_headers(&mut response, origin.as_deref());
-        let _ = request.respond(response);
-        return;
-    }
-
-    // Read request body with size limit
-    let content_length: usize = request
-        .headers()
-        .iter()
-        .find(|h| h.field.equiv("Content-Length"))
-        .and_then(|h| h.value.as_str().parse().ok())
-        .unwrap_or(0);
-
-    if content_length > constants::MAX_BODY_SIZE {
-        let response = create_error_response(0, "Request too large".to_string(), origin.as_deref());
-        let _ = request.respond(response);
-        return;
-    }
-
-    let mut body = String::new();
-    // Limit the reader to the declared Content-Length so read_to_string
-    // returns promptly instead of blocking for MAX_BODY_SIZE bytes.
-    let mut reader = request
-        .as_reader()
-        .take(content_length.min(constants::MAX_BODY_SIZE) as u64);
-    if let Err(_) = reader.read_to_string(&mut body) {
-        let response = create_error_response(0, "Request failed".to_string(), origin.as_deref());
-        let _ = request.respond(response);
-        return;
-    }
+    let request = match read_http_request(&mut stream) {
+        Ok(request) => request,
+        Err(error) => {
+            let response = error_response(0, error.message);
+            let _ = write_http_response(&mut stream, error.status, &response);
+            return;
+        }
+    };
+    debug_assert_eq!(request.method, "POST");
+    let origin = request.headers.get("origin").cloned();
+    // This is a caller label derived by the native host from browser process
+    // arguments. The loopback header is not itself an authentication boundary;
+    // it binds pairing state after the host has validated the browser caller.
+    let caller = request.headers.get("x-pwdvault-caller").cloned();
 
     // Parse request
-    let native_req: NativeRequest = match serde_json::from_str(&body) {
+    let native_req: NativeRequest = match serde_json::from_str(&request.body) {
         Ok(r) => r,
         Err(_) => {
-            let response =
-                create_error_response(0, "Invalid request".to_string(), origin.as_deref());
-            let _ = request.respond(response);
+            let response = error_response(0, "Invalid request".to_string());
+            let _ = write_http_response(&mut stream, 400, &response);
             return;
         }
     };
@@ -218,37 +362,50 @@ fn handle_request(
     let id = native_req.id;
     let command = native_req.command.clone();
 
-    // Origin check (defense in depth): every request must come from a browser
-    // extension origin. CORS alone is browser-enforced and trivially bypassed
-    // by non-browser clients; requiring an extension origin server-side
-    // prevents any non-extension context (even one that stole a token) from
-    // invoking the API.
+    if request.path != format!("/api/{command}") {
+        let response = error_response(id, "Invalid API path".to_string());
+        let _ = write_http_response(&mut stream, 404, &response);
+        return;
+    }
+
+    if native_req.protocol_version != constants::NATIVE_PROTOCOL_VERSION {
+        let response = error_response(
+            id,
+            "Unsupported protocol version; update PwdVault and the browser extension".to_string(),
+        );
+        let _ = write_http_response(&mut stream, 400, &response);
+        return;
+    }
+
+    // Origin is a browser-caller label supplied by the native host. It rejects
+    // accidental/direct clients but is not an authentication boundary on a
+    // loopback HTTP socket; Bearer auth and user-confirmed pairing remain the
+    // security controls until the socket/pipe transport phase.
     if !auth::is_extension_origin(origin.as_deref()) {
-        let response = create_error_response(id, "Forbidden".to_string(), origin.as_deref());
-        let _ = request.respond(response);
+        let response = error_response(id, "Forbidden".to_string());
+        let _ = write_http_response(&mut stream, 403, &response);
         return;
     }
 
     // Authentication: /api/pair and /api/pair_confirm are unauthenticated
     // (extension pairing flow — no token exists yet). All other endpoints
     // require Bearer token.
-    if command != "pair" && command != "pair_confirm" {
+    if command != "handshake" && command != "pair" && command != "pair_confirm" {
         let auth_header = request
-            .headers()
-            .iter()
-            .find(|h| h.field.equiv("Authorization"))
-            .map(|h| h.value.as_str())
+            .headers
+            .get("authorization")
+            .map(String::as_str)
             .unwrap_or("");
 
         if !auth::validate_token(auth_header) {
-            let response = create_error_response(id, "Unauthorized".to_string(), origin.as_deref());
-            let _ = request.respond(response);
+            let response = error_response(id, "Unauthorized".to_string());
+            let _ = write_http_response(&mut stream, 401, &response);
             return;
         }
     }
 
     // Execute command
-    let result = execute_command(native_req, state, app_handle, origin.clone());
+    let result = execute_command(native_req, state, app_handle, caller);
 
     // Send response
     let response = match result {
@@ -257,43 +414,73 @@ fn handle_request(
             success: true,
             data: Some(data),
             error: None,
+            error_code: None,
+            error_message: None,
+            retry_after: None,
         },
         Err(e) => NativeResponse {
             id,
             success: false,
             data: None,
-            error: Some(e),
+            error: Some(e.clone()),
+            error_code: Some("COMMAND_FAILED".to_string()),
+            error_message: Some(e),
+            retry_after: None,
         },
     };
 
-    let _ = request.respond(create_json_response(&response, origin.as_deref()));
+    let _ = write_http_response(&mut stream, 200, &response);
 }
 
-fn create_json_response(
+fn status_reason(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        408 => "Request Timeout",
+        411 => "Length Required",
+        413 => "Payload Too Large",
+        415 => "Unsupported Media Type",
+        431 => "Request Header Fields Too Large",
+        503 => "Service Unavailable",
+        _ => "Internal Server Error",
+    }
+}
+
+fn write_http_response(
+    stream: &mut TcpStream,
+    status: u16,
     response: &NativeResponse,
-    origin: Option<&str>,
-) -> Response<std::io::Cursor<Vec<u8>>> {
+) -> std::io::Result<()> {
     let body = serde_json::to_vec(response).unwrap_or_default();
-    let mut response = Response::from_data(body).with_header(
-        tiny_http::Header::from_bytes("Content-Type".as_bytes(), "application/json".as_bytes())
-            .expect("valid Content-Type header"),
+    let headers = format!(
+        "HTTP/1.1 {status} {}\r\n\
+         Content-Type: application/json\r\n\
+         Cache-Control: no-store\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n",
+        status_reason(status),
+        body.len()
     );
-    add_cors_headers(&mut response, origin);
-    response
+    stream.write_all(headers.as_bytes())?;
+    stream.write_all(&body)?;
+    stream.flush()
 }
 
-fn create_error_response(
-    id: u32,
-    error: String,
-    origin: Option<&str>,
-) -> Response<std::io::Cursor<Vec<u8>>> {
-    let response = NativeResponse {
+fn error_response(id: u32, error: String) -> NativeResponse {
+    NativeResponse {
         id,
         success: false,
         data: None,
-        error: Some(error),
-    };
-    create_json_response(&response, origin)
+        error: Some(error.clone()),
+        error_code: Some("REQUEST_REJECTED".to_string()),
+        error_message: Some(error),
+        retry_after: None,
+    }
 }
 
 /// Convert a `VaultError` into a sanitized user-facing error message for HTTP
@@ -306,7 +493,7 @@ fn execute_command(
     req: NativeRequest,
     state: Arc<AppState>,
     app_handle: Option<tauri::AppHandle>,
-    origin: Option<String>,
+    caller: Option<String>,
 ) -> Result<serde_json::Value, String> {
     // Vault operations now acquire a session lease (§5.1.1) inside each
     // service function, which provides the same serialization guarantee
@@ -319,9 +506,26 @@ fn execute_command(
     // obtain keys from the session directly.
 
     match req.command.as_str() {
+        "handshake" => Ok(serde_json::json!({
+            "protocol_version": constants::NATIVE_PROTOCOL_VERSION,
+            "app_version": env!("CARGO_PKG_VERSION"),
+            "capabilities": [
+                "caller_bound_pairing",
+                "entry_secret_split",
+                "trusted_token_storage",
+            ],
+        })),
+
+        "revoke_extension_access" => {
+            auth::revoke_extension_access();
+            crate::pairing::cancel_all_sessions();
+            Ok(serde_json::json!(true))
+        }
+
         // Extension pairing — returns API token (no auth required, origin checked in handle_request)
         // Rate limited to prevent token enumeration attacks
         "pair" => {
+            let caller = caller.as_deref().ok_or("Browser caller required")?;
             // Check rate limit for pair endpoint (max 10 requests per minute)
             {
                 let now = std::time::Instant::now();
@@ -362,17 +566,22 @@ fn execute_command(
                 *pair_count += 1;
             }
 
-            let code = crate::pairing::create_session(origin.clone());
+            let challenge = crate::pairing::create_session(caller);
             // Notify desktop UI to display the pairing code.
             if let Some(handle) = app_handle {
-                let _ = handle.emit("pair-request", &code);
+                let _ = handle.emit("pair-request", &challenge.code);
             }
-            Ok(serde_json::json!({ "pending": true }))
+            Ok(serde_json::json!({
+                "pending": true,
+                "session_nonce": challenge.nonce,
+            }))
         }
 
         "pair_confirm" => {
+            let caller = caller.as_deref().ok_or("Browser caller required")?;
+            let session_nonce = req.session_nonce.ok_or("Pairing session required")?;
             let user_code = req.code.ok_or("Code required")?;
-            if crate::pairing::verify(user_code.as_str()) {
+            if crate::pairing::verify(caller, session_nonce.as_str(), user_code.as_str()) {
                 let token = auth::get_token();
                 Ok(serde_json::json!({ "token": token }))
             } else {
@@ -478,12 +687,14 @@ fn execute_command(
 
         "update_entry" => {
             let id = req.id_param.ok_or("Entry ID required".to_string())?;
-            let request = CreateEntryRequest {
+            let update_notes = req.notes.is_some();
+            let request = UpdateEntryRequest {
                 title: req.title.ok_or("Title required".to_string())?,
                 username: req.username.ok_or("Username required".to_string())?,
-                password: req.password.ok_or("Password required".to_string())?,
+                password: req.password,
                 url: req.url,
                 notes: req.notes,
+                update_notes,
                 tags: req.tags.unwrap_or_default(),
                 group_id: req.group_id,
             };
@@ -582,7 +793,7 @@ mod tests {
 
         let salt = crypto::kdf::generate_salt();
         let (master_key, params) = crypto::kdf::derive_key(password, &salt).expect("derive key");
-        let verification = crypto::create_verification_header(&master_key, salt.clone(), params)
+        let verification = crypto::create_verification_header(&master_key, salt, params)
             .expect("create verification");
         let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &salt);
 
@@ -602,11 +813,13 @@ mod tests {
     fn make_request(command: &str, id: u32) -> NativeRequest {
         NativeRequest {
             id,
+            protocol_version: constants::NATIVE_PROTOCOL_VERSION,
             command: command.to_string(),
             password: None,
             url: None,
             id_param: None,
             code: None,
+            session_nonce: None,
             title: None,
             username: None,
             notes: None,
@@ -623,6 +836,18 @@ mod tests {
     }
 
     // ---- is_vault_initialized ----
+
+    #[test]
+    fn test_handshake_reports_protocol_and_capabilities() {
+        let (state, _temp) = setup_test_state();
+        let req = make_request("handshake", 1);
+        let result = execute_command(req, state, None, None).unwrap();
+        assert_eq!(
+            result["protocol_version"],
+            constants::NATIVE_PROTOCOL_VERSION
+        );
+        assert!(result["capabilities"].as_array().unwrap().len() >= 3);
+    }
 
     #[test]
     fn test_is_vault_initialized_false() {
@@ -675,35 +900,46 @@ mod tests {
     fn test_pair_returns_pending() {
         let (state, _temp) = setup_test_state();
         let req = make_request("pair", 1);
-        let result = execute_command(req, state, None, None).unwrap();
+        let result = execute_command(
+            req,
+            state,
+            None,
+            Some("chrome-extension://pair-test".to_string()),
+        )
+        .unwrap();
         assert_eq!(result["pending"], true);
+        assert_eq!(result["session_nonce"].as_str().unwrap().len(), 32);
     }
 
     #[test]
     fn test_pair_confirm_success() {
         let (state, _temp) = setup_test_state();
-        let code = crate::pairing::create_session(None);
+        let caller = "chrome-extension://confirm-success";
+        let challenge = crate::pairing::create_session(caller);
         let confirm_req = NativeRequest {
             id: 1,
             command: "pair_confirm".to_string(),
-            code: Some(Zeroizing::new(code)),
+            code: Some(Zeroizing::new(challenge.code)),
+            session_nonce: Some(Zeroizing::new(challenge.nonce)),
             ..make_request("pair_confirm", 1)
         };
-        let result = execute_command(confirm_req, state, None, None).unwrap();
+        let result = execute_command(confirm_req, state, None, Some(caller.to_string())).unwrap();
         assert!(result["token"].as_str().unwrap().len() >= 32);
     }
 
     #[test]
     fn test_pair_confirm_wrong_code_fails() {
         let (state, _temp) = setup_test_state();
-        let _ = crate::pairing::create_session(None);
+        let caller = "chrome-extension://confirm-wrong-code";
+        let challenge = crate::pairing::create_session(caller);
         let req = NativeRequest {
             id: 1,
             command: "pair_confirm".to_string(),
             code: Some(Zeroizing::new("000000".to_string())),
+            session_nonce: Some(Zeroizing::new(challenge.nonce)),
             ..make_request("pair_confirm", 1)
         };
-        let result = execute_command(req, state, None, None);
+        let result = execute_command(req, state, None, Some(caller.to_string()));
         assert!(result.is_err());
     }
 
@@ -714,9 +950,15 @@ mod tests {
             id: 1,
             command: "pair_confirm".to_string(),
             code: Some(Zeroizing::new("123456".to_string())),
+            session_nonce: Some(Zeroizing::new("missing-session".to_string())),
             ..make_request("pair_confirm", 1)
         };
-        let result = execute_command(req, state, None, None);
+        let result = execute_command(
+            req,
+            state,
+            None,
+            Some("chrome-extension://no-session".to_string()),
+        );
         assert!(result.is_err());
     }
 
@@ -729,11 +971,13 @@ mod tests {
 
         let req = NativeRequest {
             id: 1,
+            protocol_version: constants::NATIVE_PROTOCOL_VERSION,
             command: "create_entry".to_string(),
             password: Some(Zeroizing::new("secret123".to_string())),
             url: Some("https://github.com".to_string()),
             id_param: None,
             code: None,
+            session_nonce: None,
             title: Some("GitHub".to_string()),
             username: Some("user@example.com".to_string()),
             notes: Some("My GitHub account".to_string()),
@@ -763,11 +1007,13 @@ mod tests {
 
         let req = NativeRequest {
             id: 1,
+            protocol_version: constants::NATIVE_PROTOCOL_VERSION,
             command: "create_entry".to_string(),
             password: Some(Zeroizing::new("secret".to_string())),
             url: None,
             id_param: None,
             code: None,
+            session_nonce: None,
             title: Some("Test".to_string()),
             username: Some("user".to_string()),
             notes: None,
@@ -797,11 +1043,13 @@ mod tests {
         // Create an entry first
         let create_req = NativeRequest {
             id: 1,
+            protocol_version: constants::NATIVE_PROTOCOL_VERSION,
             command: "create_entry".to_string(),
             password: Some(Zeroizing::new("my_password".to_string())),
             url: None,
             id_param: None,
             code: None,
+            session_nonce: None,
             title: Some("Site".to_string()),
             username: Some("user".to_string()),
             notes: Some("some notes".to_string()),
@@ -857,11 +1105,13 @@ mod tests {
         for i in 0..3 {
             let req = NativeRequest {
                 id: i,
+                protocol_version: constants::NATIVE_PROTOCOL_VERSION,
                 command: "create_entry".to_string(),
                 password: Some(Zeroizing::new(format!("pass{}", i))),
                 url: None,
                 id_param: None,
                 code: None,
+                session_nonce: None,
                 title: Some(format!("Site {}", i)),
                 username: Some(format!("user{}@test.com", i)),
                 notes: None,
@@ -894,11 +1144,13 @@ mod tests {
         // Create an entry
         let create_req = NativeRequest {
             id: 1,
+            protocol_version: constants::NATIVE_PROTOCOL_VERSION,
             command: "create_entry".to_string(),
             password: Some(Zeroizing::new("old_pass".to_string())),
             url: Some("https://old.com".to_string()),
             id_param: None,
             code: None,
+            session_nonce: None,
             title: Some("Old Title".to_string()),
             username: Some("old_user".to_string()),
             notes: None,
@@ -918,11 +1170,13 @@ mod tests {
         // Update the entry
         let update_req = NativeRequest {
             id: 2,
+            protocol_version: constants::NATIVE_PROTOCOL_VERSION,
             command: "update_entry".to_string(),
             password: Some(Zeroizing::new("new_pass".to_string())),
             url: Some("https://new.com".to_string()),
             id_param: Some(entry_id),
             code: None,
+            session_nonce: None,
             title: Some("New Title".to_string()),
             username: Some("new_user".to_string()),
             notes: Some("updated notes".to_string()),
@@ -944,7 +1198,7 @@ mod tests {
         // Verify password was re-encrypted
         let db = state.database.lock().expect("db lock").clone().expect("db");
         let key = state.session.get_enc_key().unwrap();
-        let entry = database::load_entry(&db, &key, &result["id"].as_str().unwrap())
+        let entry = database::load_entry(&db, &key, result["id"].as_str().unwrap())
             .unwrap()
             .unwrap();
         let enc: crypto::EncryptedData = bincode::deserialize(&entry.encrypted_password).unwrap();
@@ -962,11 +1216,13 @@ mod tests {
         // Create an entry
         let create_req = NativeRequest {
             id: 1,
+            protocol_version: constants::NATIVE_PROTOCOL_VERSION,
             command: "create_entry".to_string(),
             password: Some(Zeroizing::new("pass".to_string())),
             url: None,
             id_param: None,
             code: None,
+            session_nonce: None,
             title: Some("To Delete".to_string()),
             username: Some("user".to_string()),
             notes: None,
@@ -986,11 +1242,13 @@ mod tests {
         // Remove it
         let remove_req = NativeRequest {
             id: 2,
+            protocol_version: constants::NATIVE_PROTOCOL_VERSION,
             command: "remove_entry".to_string(),
             password: None,
             url: None,
             id_param: Some(entry_id),
             code: None,
+            session_nonce: None,
             title: None,
             username: None,
             notes: None,
@@ -1027,11 +1285,13 @@ mod tests {
         // Create an entry
         let create_req = NativeRequest {
             id: 2,
+            protocol_version: constants::NATIVE_PROTOCOL_VERSION,
             command: "create_entry".to_string(),
             password: Some(Zeroizing::new("pass".to_string())),
             url: None,
             id_param: None,
             code: None,
+            session_nonce: None,
             title: Some("Test".to_string()),
             username: Some("u".to_string()),
             notes: None,
@@ -1068,11 +1328,13 @@ mod tests {
         let (state, _temp) = setup_test_state();
         let req = NativeRequest {
             id: 1,
+            protocol_version: constants::NATIVE_PROTOCOL_VERSION,
             command: "generate_password".to_string(),
             password: None,
             url: None,
             id_param: None,
             code: None,
+            session_nonce: None,
             title: None,
             username: None,
             notes: None,
@@ -1102,11 +1364,13 @@ mod tests {
         let (state, _temp) = setup_test_state();
         let req = NativeRequest {
             id: 1,
+            protocol_version: constants::NATIVE_PROTOCOL_VERSION,
             command: "generate_password".to_string(),
             password: None,
             url: None,
             id_param: None,
             code: None,
+            session_nonce: None,
             title: None,
             username: None,
             notes: None,
@@ -1149,11 +1413,13 @@ mod tests {
         for _ in 0..50 {
             let req = NativeRequest {
                 id: 1,
+                protocol_version: constants::NATIVE_PROTOCOL_VERSION,
                 command: "generate_password".to_string(),
                 password: None,
                 url: None,
                 id_param: None,
                 code: None,
+                session_nonce: None,
                 title: None,
                 username: None,
                 notes: None,

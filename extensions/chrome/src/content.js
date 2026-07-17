@@ -1032,6 +1032,13 @@
         sendResponse({ hasForm: !!form, formType: form?.formType });
         break;
 
+      case 'VAULT_LOCKED':
+        cachedEntries = null;
+        hideOverlay();
+        hideNotificationBar();
+        sendResponse({ success: true });
+        break;
+
       default:
         sendResponse({ error: 'Unknown message type' });
     }

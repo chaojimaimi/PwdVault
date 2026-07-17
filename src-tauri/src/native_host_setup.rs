@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 
 /// The native messaging host name browsers use in `connectNative`.
 pub const HOST_NAME: &str = "com.pwdvault.app";
+/// Stable ID derived from the public key embedded in the Chrome manifest.
+pub const CHROME_EXTENSION_ID: &str = "kekeibdcccjakipnmdpbafhaeknioaem";
+pub const FIREFOX_EXTENSION_ID: &str = "pwdvault@pwdvault.app";
 
 /// Register the native messaging host for Chrome and Firefox.
 ///
@@ -43,19 +46,23 @@ pub fn register(host_binary_path: &Path, extension_ids: &ExtensionIds) {
 /// IDs become stable.
 #[derive(Debug, Clone)]
 pub struct ExtensionIds {
-    pub chrome: String,
+    /// The stable packaged ID plus any valid legacy/development IDs retained
+    /// during migration so an extension update does not break connectivity.
+    pub chrome: Vec<String>,
     pub firefox: String,
 }
 
 impl Default for ExtensionIds {
     fn default() -> Self {
-        // Placeholders — real IDs must be supplied. The auto-registration in
-        // lib.rs uses these only when the bundled config file is absent.
-        ExtensionIds {
-            chrome: String::new(),
-            firefox: String::new(),
+        Self {
+            chrome: vec![CHROME_EXTENSION_ID.to_string()],
+            firefox: FIREFOX_EXTENSION_ID.to_string(),
         }
     }
+}
+
+pub fn is_valid_chrome_extension_id(value: &str) -> bool {
+    value.len() == 32 && value.bytes().all(|byte| matches!(byte, b'a'..=b'p'))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -66,26 +73,38 @@ enum Browser {
 
 /// Build the manifest JSON for a given browser.
 fn build_manifest(host_binary_path: &Path, browser: Browser, ids: &ExtensionIds) -> String {
-    let path_str = host_binary_path.to_string_lossy().replace('\\', "\\\\");
+    let mut manifest = serde_json::json!({
+        "name": HOST_NAME,
+        "description": "PwdVault native messaging host",
+        "path": host_binary_path.to_string_lossy(),
+        "type": "stdio",
+    });
+    match browser {
+        Browser::Chrome => {
+            manifest["allowed_origins"] = serde_json::json!(ids
+                .chrome
+                .iter()
+                .filter(|id| is_valid_chrome_extension_id(id))
+                .map(|id| format!("chrome-extension://{id}/"))
+                .collect::<Vec<_>>());
+        }
+        Browser::Firefox => {
+            manifest["allowed_extensions"] = serde_json::json!([ids.firefox]);
+        }
+    }
+    serde_json::to_string_pretty(&manifest).expect("native host manifest serializable") + "\n"
+}
 
-    let origin = match browser {
-        Browser::Chrome => format!("chrome-extension://{}/", ids.chrome),
-        Browser::Firefox => format!("moz-extension://{}/", ids.firefox),
+/// Chrome and Firefox registry entries must point to different files on
+/// Windows. Otherwise registering the second browser overwrites the first
+/// browser's allowlist while leaving both registry keys apparently valid.
+#[cfg(any(target_os = "windows", test))]
+fn windows_manifest_filename(browser: Browser) -> String {
+    let suffix = match browser {
+        Browser::Chrome => "chrome",
+        Browser::Firefox => "firefox",
     };
-
-    format!(
-        r#"{{
-  "name": "{name}",
-  "description": "PwdVault native messaging host",
-  "path": "{path}",
-  "type": "stdio",
-  "allowed_origins": ["{origin}"]
-}}
-"#,
-        name = HOST_NAME,
-        path = path_str,
-        origin = origin,
-    )
+    format!("{}.{}.json", HOST_NAME, suffix)
 }
 
 fn register_browser(
@@ -98,16 +117,18 @@ fn register_browser(
     #[cfg(target_os = "macos")]
     {
         let dir = nm_dir_macos(browser)?;
-        fs::create_dir_all(&dir)?;
+        crate::paths::secure_dir(&dir)?;
         let manifest_path = dir.join(format!("{}.json", HOST_NAME));
+        crate::paths::prepare_sensitive_file(&manifest_path)?;
         fs::write(&manifest_path, &manifest)?;
     }
 
     #[cfg(target_os = "linux")]
     {
         let dir = nm_dir_linux(browser)?;
-        fs::create_dir_all(&dir)?;
+        crate::paths::secure_dir(&dir)?;
         let manifest_path = dir.join(format!("{}.json", HOST_NAME));
+        crate::paths::prepare_sensitive_file(&manifest_path)?;
         fs::write(&manifest_path, &manifest)?;
     }
 
@@ -164,8 +185,9 @@ fn register_windows(browser: Browser, manifest: &str) -> io::Result<()> {
     let base = dirs::data_local_dir()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "local app data dir"))?
         .join("PwdVault");
-    fs::create_dir_all(&base)?;
-    let manifest_path = base.join(format!("{}.json", HOST_NAME));
+    crate::paths::secure_dir(&base)?;
+    let manifest_path = base.join(windows_manifest_filename(browser));
+    crate::paths::prepare_sensitive_file(&manifest_path)?;
     fs::write(&manifest_path, manifest)?;
 
     let path_str = manifest_path.to_string_lossy().to_string();
@@ -196,7 +218,7 @@ mod tests {
 
     fn test_ids() -> ExtensionIds {
         ExtensionIds {
-            chrome: "abcdefghijklmnopabcdefghijklmnop".to_string(),
+            chrome: vec!["abcdefghijklmnopabcdefghijklmnop".to_string()],
             firefox: "zyxwvutsrqponmlkjihgfedcba".to_string(),
         }
     }
@@ -210,6 +232,7 @@ mod tests {
         assert!(manifest.contains("\"type\": \"stdio\""));
         assert!(manifest.contains("\"path\": \"/tmp/pwdvault-native\""));
         assert!(manifest.contains("\"allowed_origins\""));
+        assert!(!manifest.contains("\"allowed_extensions\""));
     }
 
     #[test]
@@ -230,10 +253,48 @@ mod tests {
     }
 
     #[test]
-    fn manifest_has_firefox_origin_for_firefox() {
+    fn default_manifest_uses_stable_chrome_extension_id() {
+        let manifest = build_manifest(
+            Path::new("/tmp/pwdvault-native"),
+            Browser::Chrome,
+            &ExtensionIds::default(),
+        );
+        assert!(manifest.contains(&format!("chrome-extension://{CHROME_EXTENSION_ID}/")));
+    }
+
+    #[test]
+    fn manifest_keeps_stable_and_valid_legacy_chrome_ids() {
+        let ids = ExtensionIds {
+            chrome: vec![
+                CHROME_EXTENSION_ID.to_string(),
+                "abcdefghijklmnopabcdefghijklmnop".to_string(),
+                "invalid".to_string(),
+            ],
+            firefox: FIREFOX_EXTENSION_ID.to_string(),
+        };
+        let manifest = build_manifest(Path::new("/tmp/pwdvault-native"), Browser::Chrome, &ids);
+        assert!(manifest.contains(&format!("chrome-extension://{CHROME_EXTENSION_ID}/")));
+        assert!(manifest.contains("chrome-extension://abcdefghijklmnopabcdefghijklmnop/"));
+        assert!(!manifest.contains("chrome-extension://invalid/"));
+    }
+
+    #[test]
+    fn manifest_has_firefox_extension_id_for_firefox() {
         let path = Path::new("/tmp/pwdvault-native");
         let manifest = build_manifest(path, Browser::Firefox, &test_ids());
-        assert!(manifest.contains("moz-extension://zyxwvutsrqponmlkjihgfedcba/"));
-        assert!(!manifest.contains("chrome-extension://"));
+        assert!(manifest.contains("\"allowed_extensions\""));
+        assert!(manifest.contains("zyxwvutsrqponmlkjihgfedcba"));
+        assert!(!manifest.contains("\"allowed_origins\""));
+        assert!(!manifest.contains("moz-extension://"));
+    }
+
+    #[test]
+    fn windows_browser_manifests_use_distinct_filenames() {
+        let chrome = windows_manifest_filename(Browser::Chrome);
+        let firefox = windows_manifest_filename(Browser::Firefox);
+
+        assert_eq!(chrome, "com.pwdvault.app.chrome.json");
+        assert_eq!(firefox, "com.pwdvault.app.firefox.json");
+        assert_ne!(chrome, firefox);
     }
 }

@@ -27,6 +27,8 @@ class PopupApp {
       generatorCopied: false,
       // Pairing state
       pairingStarted: false,
+      createFormDirty: false,
+      createPending: false,
     };
 
     this.loadTheme();
@@ -80,6 +82,7 @@ class PopupApp {
         this.state.status = 'locked';
       } else {
         this.state.status = 'disconnected';
+        this.state.error = status.error || null;
       }
 
       this.render();
@@ -189,10 +192,11 @@ class PopupApp {
       await navigator.clipboard.writeText(text);
 
       if (autoClear) {
+        const expectedDigest = await this.digestText(text);
         setTimeout(async () => {
           try {
             const current = await navigator.clipboard.readText();
-            if (current === text) {
+            if (await this.digestText(current) === expectedDigest) {
               await navigator.clipboard.writeText('');
             }
           } catch {}
@@ -206,6 +210,12 @@ class PopupApp {
       this.showToast('Failed to copy');
       return false;
     }
+  }
+
+  async digestText(text) {
+    const bytes = new TextEncoder().encode(text);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
   }
 
   // === Auto-fill ===
@@ -444,19 +454,19 @@ class PopupApp {
           <h1>PwdVault</h1>
         </div>
         <div class="header-actions">
-          <button class="theme-dot" id="theme-toggle" title="Toggle theme"></button>
-          <button class="icon-btn" id="add-btn" title="Add Password">
+          <button class="theme-dot" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"></button>
+          <button class="icon-btn" id="add-btn" title="Add Password" aria-label="Add password">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="12" y1="5" x2="12" y2="19"/>
               <line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
           </button>
-          <button class="icon-btn" id="generator-btn" title="Password Generator">
+          <button class="icon-btn" id="generator-btn" title="Password Generator" aria-label="Password generator">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
             </svg>
           </button>
-          <button class="icon-btn danger" id="lock-btn" title="Lock Vault">
+          <button class="icon-btn danger" id="lock-btn" title="Lock Vault" aria-label="Lock vault">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
               <path d="M7 11V7a5 5 0 0110 0v4"/>
@@ -511,7 +521,7 @@ class PopupApp {
     return `
       <div class="header">
         <div class="header-brand">
-          <button class="icon-btn" id="back-btn" title="Back">
+          <button class="icon-btn" id="back-btn" title="Back" aria-label="Go back">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="15 18 9 12 15 6"/>
             </svg>
@@ -535,13 +545,13 @@ class PopupApp {
             <label for="entry-password">Password *</label>
             <div class="password-input-group">
               <input type="password" id="entry-password" class="form-input" placeholder="Enter password" required />
-              <button type="button" class="icon-btn-sm" id="toggle-pw-visibility" title="Show/Hide">
+              <button type="button" class="icon-btn-sm" id="toggle-pw-visibility" title="Show/Hide" aria-label="Show or hide password">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                   <circle cx="12" cy="12" r="3"/>
                 </svg>
               </button>
-              <button type="button" class="icon-btn-sm" id="gen-pw-btn" title="Generate Password">
+              <button type="button" class="icon-btn-sm" id="gen-pw-btn" title="Generate Password" aria-label="Generate password">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
                 </svg>
@@ -582,7 +592,7 @@ class PopupApp {
     return `
       <div class="header">
         <div class="header-brand">
-          <button class="icon-btn" id="back-btn" title="Back">
+          <button class="icon-btn" id="back-btn" title="Back" aria-label="Go back">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="15 18 9 12 15 6"/>
             </svg>
@@ -596,7 +606,7 @@ class PopupApp {
           ${password ? this.escapeHtml(password) : 'Generating...'}
         </div>
 
-        <div class="strength-meter">
+        <div class="strength-meter" role="meter" aria-label="Password strength: ${this.escapeHtml(strength.label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${strength.score}">
           <div class="strength-bar">
             <div class="strength-bar-fill" style="width: ${strength.score}%; background-color: ${strength.color}"></div>
           </div>
@@ -652,7 +662,7 @@ class PopupApp {
 
     return `
       <div class="entry-card ${isExpanded ? 'expanded' : ''}" data-id="${entry.id}">
-        <div class="entry-header">
+        <div class="entry-header" role="button" tabindex="0" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${this.escapeHtml(entry.title || 'Untitled')}">
           <div class="entry-icon">${(entry.title || '?').charAt(0).toUpperCase()}</div>
           <div class="entry-info">
             <div class="entry-title">${this.escapeHtml(entry.title || 'Untitled')}</div>
@@ -782,6 +792,7 @@ class PopupApp {
         </div>
         <h2>Not Connected</h2>
         <p>PwdVault desktop app must be running to access your passwords</p>
+        ${this.state.error ? `<div class="error-message" role="alert">${this.escapeHtml(this.state.error)}</div>` : ''}
         <button class="btn btn-primary" id="connect-btn">Connect to Desktop App</button>
       </div>
     `;
@@ -865,6 +876,7 @@ class PopupApp {
       const result = await this.sendMessage({ type: 'START_PAIRING' });
       if (result && result.result === 'failed') {
         this.state.status = 'disconnected';
+        this.state.error = result.error || 'Unable to connect to the PwdVault desktop app.';
         this.state.pairingStarted = false;
         this.render();
       } else if (result && result.result === 'paired') {
@@ -873,7 +885,10 @@ class PopupApp {
         await this.init();
       }
     } catch (e) {
+      this.state.status = 'disconnected';
+      this.state.error = e.message || 'Unable to connect to the PwdVault desktop app.';
       this.state.pairingStarted = false;
+      this.render();
     }
   }
 
@@ -913,8 +928,10 @@ class PopupApp {
     const connectBtn = document.getElementById('connect-btn');
     if (connectBtn) {
       connectBtn.onclick = async () => {
-        await this.sendMessage({ type: 'CONNECT' });
-        setTimeout(() => this.init(), 500);
+        this.state.status = 'loading';
+        this.state.error = null;
+        this.render();
+        await this.init();
       };
     }
   }
@@ -973,6 +990,8 @@ class PopupApp {
       addBtn.onclick = () => {
         this.state.status = 'creating';
         this.state.error = null;
+        this.state.createFormDirty = false;
+        this.state.createPending = false;
         this.render();
       };
     }
@@ -1003,10 +1022,17 @@ class PopupApp {
     const backBtn = document.getElementById('back-btn');
     if (backBtn) {
       backBtn.onclick = () => {
+        if (this.state.createFormDirty && !window.confirm('Discard unsaved changes?')) return;
         this.state.status = 'unlocked';
         this.state.error = null;
+        this.state.createFormDirty = false;
         this.render();
       };
+    }
+
+    const form = document.getElementById('create-form');
+    if (form) {
+      form.oninput = () => { this.state.createFormDirty = true; };
     }
 
     // Toggle password visibility
@@ -1031,6 +1057,7 @@ class PopupApp {
             const pwInput = document.getElementById('entry-password');
             pwInput.value = password;
             pwInput.type = 'text';
+            this.state.createFormDirty = true;
           }
         } catch {
           this.showToast('Failed to generate password');
@@ -1039,10 +1066,10 @@ class PopupApp {
     }
 
     // Submit form
-    const form = document.getElementById('create-form');
     if (form) {
       form.onsubmit = async (e) => {
         e.preventDefault();
+        if (this.state.createPending) return;
 
         const title = document.getElementById('entry-title').value.trim();
         const username = document.getElementById('entry-username').value.trim();
@@ -1058,6 +1085,9 @@ class PopupApp {
         }
 
         try {
+          this.state.createPending = true;
+          const submitButton = form.querySelector('button[type="submit"]');
+          if (submitButton) submitButton.disabled = true;
           const result = await this.sendMessage({
             type: 'CREATE_ENTRY',
             entry: {
@@ -1079,12 +1109,17 @@ class PopupApp {
 
           this.state.status = 'unlocked';
           this.state.error = null;
+          this.state.createFormDirty = false;
           await Promise.all([this.loadEntries(), this.loadGroups()]);
           this.render();
           this.showToast('Password saved!');
         } catch (error) {
           this.state.error = error.message;
           this.render();
+        } finally {
+          this.state.createPending = false;
+          const submitButton = document.querySelector('#create-form button[type="submit"]');
+          if (submitButton) submitButton.disabled = false;
         }
       };
     }
@@ -1122,6 +1157,15 @@ class PopupApp {
       const cb = document.getElementById(id);
       if (cb) {
         cb.onchange = (e) => {
+          const selectedCount = checkboxes.reduce((count, item) => {
+            const input = document.getElementById(item.id);
+            return count + (input?.checked ? 1 : 0);
+          }, 0);
+          if (!e.target.checked && selectedCount === 0) {
+            e.target.checked = true;
+            this.showToast('Select at least one character set');
+            return;
+          }
           this.state.generatorOptions[key] = e.target.checked;
           this.handleGenerate();
         };
@@ -1202,10 +1246,17 @@ class PopupApp {
   attachEntryEvents() {
     // Entry header clicks (expand/collapse)
     document.querySelectorAll('.entry-header').forEach(header => {
-      header.onclick = () => {
+      const toggle = () => {
         const card = header.closest('.entry-card');
         const id = card.dataset.id;
         this.toggleEntryExpansion(id);
+      };
+      header.onclick = toggle;
+      header.onkeydown = (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          toggle();
+        }
       };
     });
 

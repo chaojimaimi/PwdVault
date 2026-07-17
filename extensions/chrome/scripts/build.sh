@@ -1,13 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Build Chrome & Firefox Extensions
 # Packages the extension files into a distributable format
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXTENSION_DIR="$(dirname "$SCRIPT_DIR")"
 DIST_DIR="$EXTENSION_DIR/dist"
 PROJECT_ROOT="$(dirname "$(dirname "$EXTENSION_DIR")")"
+
+python3 "$PROJECT_ROOT/extensions/tests/verify_extension_identity.py"
 
 echo "Building PwdVault Chrome Extension..."
 
@@ -15,20 +17,13 @@ echo "Building PwdVault Chrome Extension..."
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
-# Copy source files
-cp -r "$EXTENSION_DIR/src"/* "$DIST_DIR/"
-
-# Copy manifest and fix paths (src/ → ./)
+# Preserve the source layout used by manifest.json. This avoids platform-
+# specific sed invocations and makes local packages identical to CI packages.
+cp -R "$EXTENSION_DIR/src" "$DIST_DIR/src"
 cp "$EXTENSION_DIR/manifest.json" "$DIST_DIR/"
-sed -i '' \
-  -e 's|"service_worker": "src/|"service_worker": "|' \
-  -e 's|"js": \["src/|"js": ["|' \
-  -e 's|"css": \["src/|"css": ["|' \
-  -e 's|"default_popup": "src/|"default_popup": "|' \
-  "$DIST_DIR/manifest.json"
 
 # Copy icons
-cp -r "$EXTENSION_DIR/icons" "$DIST_DIR/"
+cp -R "$EXTENSION_DIR/icons" "$DIST_DIR/icons"
 
 echo "Chrome extension built successfully!"
 echo "Dist: $DIST_DIR"
@@ -43,20 +38,13 @@ FIREFOX_DIST="$FIREFOX_DIR/dist"
 rm -rf "$FIREFOX_DIST"
 mkdir -p "$FIREFOX_DIST"
 
-# Copy source files (follow symlinks)
-cp -rL "$FIREFOX_DIR/src"/* "$FIREFOX_DIST/"
-
-# Copy manifest and fix paths (src/ → ./)
+# Dereference shared source into a self-contained staging directory.
+cp -RL "$FIREFOX_DIR/src" "$FIREFOX_DIST/src"
 cp "$FIREFOX_DIR/manifest.json" "$FIREFOX_DIST/"
-sed -i '' \
-  -e 's|"service_worker": "src/|"service_worker": "|' \
-  -e 's|"js": \["src/|"js": ["|' \
-  -e 's|"css": \["src/|"css": ["|' \
-  -e 's|"default_popup": "src/|"default_popup": "|' \
-  "$FIREFOX_DIST/manifest.json"
+cp -RL "$FIREFOX_DIR/icons" "$FIREFOX_DIST/icons"
 
-# Copy icons (follow symlinks)
-cp -rL "$FIREFOX_DIR/icons"/* "$FIREFOX_DIST/icons/" 2>/dev/null || mkdir -p "$FIREFOX_DIST/icons" && cp -rL "$FIREFOX_DIR/icons"/* "$FIREFOX_DIST/icons/"
+python3 "$PROJECT_ROOT/extensions/tests/verify_manifest.py" "$DIST_DIR"
+python3 "$PROJECT_ROOT/extensions/tests/verify_manifest.py" "$FIREFOX_DIST"
 
 echo "Firefox extension built successfully!"
 echo "Dist: $FIREFOX_DIST"

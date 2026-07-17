@@ -9,6 +9,11 @@ edition = "2021"
 name = "pwdvault_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Required for production binaries to serve the embedded frontend through
+# Tauri's application protocol instead of trying the Vite development URL.
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -47,7 +52,6 @@ uuid = { version = "1", features = ["v4"] }
 dirs = "5"
 
 # HTTP server for native messaging
-tiny_http = "0.12"
 
 # Update checker
 ureq = { version = "3", features = ["json"] }

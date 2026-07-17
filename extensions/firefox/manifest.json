@@ -16,10 +16,6 @@
     "clipboardWrite",
     "nativeMessaging"
   ],
-  "host_permissions": [
-    "http://127.0.0.1:17429/*",
-    "http://localhost:17429/*"
-  ],
   "background": {
     "service_worker": "src/background.js",
     "type": "module"

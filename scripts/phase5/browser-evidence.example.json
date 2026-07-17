@@ -1,0 +1,60 @@
+{
+  "platform": "macos",
+  "windows": "DEFERRED",
+  "browsers": {
+    "chrome": {
+      "version": "REPLACE_WITH_TESTED_VERSION",
+      "artifact_sha256": "REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS",
+      "cases": {
+        "E2E-01": "BLOCKED",
+        "E2E-02": "BLOCKED",
+        "E2E-03": "BLOCKED",
+        "E2E-04": "BLOCKED",
+        "E2E-05": "BLOCKED",
+        "E2E-06": "BLOCKED",
+        "E2E-07": "BLOCKED",
+        "E2E-08": "BLOCKED",
+        "E2E-09": "BLOCKED",
+        "E2E-10": "BLOCKED",
+        "E2E-11": "BLOCKED",
+        "E2E-12": "BLOCKED",
+        "E2E-13": "BLOCKED",
+        "E2E-14": "BLOCKED",
+        "E2E-15": "BLOCKED",
+        "E2E-16": "BLOCKED",
+        "SEC-01": "BLOCKED",
+        "SEC-02": "BLOCKED",
+        "SEC-03": "BLOCKED",
+        "SEC-04": "BLOCKED",
+        "SEC-05": "BLOCKED"
+      }
+    },
+    "firefox": {
+      "version": "REPLACE_WITH_TESTED_VERSION",
+      "artifact_sha256": "REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS",
+      "cases": {
+        "E2E-01": "BLOCKED",
+        "E2E-02": "BLOCKED",
+        "E2E-03": "BLOCKED",
+        "E2E-04": "BLOCKED",
+        "E2E-05": "BLOCKED",
+        "E2E-06": "BLOCKED",
+        "E2E-07": "BLOCKED",
+        "E2E-08": "BLOCKED",
+        "E2E-09": "BLOCKED",
+        "E2E-10": "BLOCKED",
+        "E2E-11": "BLOCKED",
+        "E2E-12": "BLOCKED",
+        "E2E-13": "BLOCKED",
+        "E2E-14": "BLOCKED",
+        "E2E-15": "BLOCKED",
+        "E2E-16": "BLOCKED",
+        "SEC-01": "BLOCKED",
+        "SEC-02": "BLOCKED",
+        "SEC-03": "BLOCKED",
+        "SEC-04": "BLOCKED",
+        "SEC-05": "BLOCKED"
+      }
+    }
+  }
+}

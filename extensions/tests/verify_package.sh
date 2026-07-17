@@ -78,6 +78,14 @@ check_manifest_references() {
     fi
     green "✅ $label: manifest.json is valid JSON"
 
+    if ! python3 "$(dirname "$0")/verify_manifest.py" "$tmp_dir"; then
+        red "❌ $label: manifest references are not self-contained regular files"
+        rm -rf "$tmp_dir"
+        FAILURES=$((FAILURES + 1))
+        return
+    fi
+    green "✅ $label: all manifest references are regular files"
+
     # Check that referenced icons exist
     local icons_dir="$tmp_dir/icons"
     if [ ! -d "$icons_dir" ]; then
@@ -127,6 +135,24 @@ check_source_directory() {
         return
     fi
     green "✅ $label: manifest.json is valid JSON"
+
+    # Source trees may share files through symlinks, but all references must
+    # still resolve. Archive mode above enforces regular files strictly.
+    local check_root="$ext_dir"
+    local source_staging=""
+    if find "$ext_dir" -type l -print -quit | grep -q .; then
+        source_staging=$(mktemp -d)
+        cp -RL "$ext_dir"/. "$source_staging"/
+        check_root="$source_staging"
+    fi
+    if ! python3 "$(dirname "$0")/verify_manifest.py" "$check_root"; then
+        red "❌ $label: one or more manifest references are missing"
+        [ -z "$source_staging" ] || rm -rf "$source_staging"
+        FAILURES=$((FAILURES + 1))
+        return
+    fi
+    [ -z "$source_staging" ] || rm -rf "$source_staging"
+    green "✅ $label: all manifest references resolve"
 
     # For Firefox, check that symlinks exist in source (they do — this is the bug)
     if [ "$label" = "Firefox" ]; then

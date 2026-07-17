@@ -23,7 +23,12 @@ if [[ $# -lt 1 ]]; then
 fi
 
 CHROME_ID="$1"
-FIREFOX_ID="${2:-}"
+FIREFOX_ID="${2:-pwdvault@pwdvault.app}"
+
+if [[ ! "$CHROME_ID" =~ ^[a-p]{32}$ ]]; then
+    echo "Invalid Chrome extension ID: expected 32 lowercase letters in the range a-p" >&2
+    exit 1
+fi
 
 # --- Locate the config directory (next to the vault database) ---
 
@@ -48,26 +53,16 @@ CONFIG_FILE="$CONFIG_DIR/native-host.json"
 
 # --- Write the config file ---
 
-if [[ -n "$FIREFOX_ID" ]]; then
-    cat > "$CONFIG_FILE" <<EOF
+cat > "$CONFIG_FILE" <<EOF
 {
   "chrome": "$CHROME_ID",
   "firefox": "$FIREFOX_ID"
 }
 EOF
-else
-    cat > "$CONFIG_FILE" <<EOF
-{
-  "chrome": "$CHROME_ID"
-}
-EOF
-fi
 
 echo "Native host config written to: $CONFIG_FILE"
 echo "  Chrome extension ID:  $CHROME_ID"
-if [[ -n "$FIREFOX_ID" ]]; then
-    echo "  Firefox extension ID: $FIREFOX_ID"
-fi
+echo "  Firefox extension ID: $FIREFOX_ID"
 echo ""
 echo "Now restart the PwdVault desktop app to complete registration."
 echo "The app will write the browser manifests on next launch."

@@ -11,6 +11,9 @@
       --radius-md: 8px;
       --radius-lg: 12px;
       --radius-tag: 9999px;
+      --color-on-primary: #FFFFFF;
+      --color-on-danger: #FFFFFF;
+      --color-on-success: #FFFFFF;
     }
 
     [data-theme="light"] {
@@ -25,7 +28,7 @@
       --color-input: #EDEEF2;
       --color-text: #0F172A;
       --color-text-secondary: #475569;
-      --color-text-muted: #94A3B8;
+      --color-text-muted: #64748B;
       --color-border: rgba(0, 0, 0, 0.06);
       --color-border-light: rgba(0, 0, 0, 0.10);
 
@@ -39,6 +42,9 @@
 
     [data-theme="dark"] {
       --color-primary: #14B8A6;
+      --color-on-primary: #02110F;
+      --color-on-danger: #220505;
+      --color-on-success: #02130D;
       --color-primary-hover: #0D9488;
       --color-primary-dim: rgba(20, 184, 166, 0.10);
       --color-primary-border: rgba(20, 184, 166, 0.25);
@@ -49,7 +55,7 @@
       --color-input: #16161E;
       --color-text: #EDEDEF;
       --color-text-secondary: #8A8F98;
-      --color-text-muted: #5C6370;
+      --color-text-muted: #8A93A3;
       --color-border: rgba(255, 255, 255, 0.08);
       --color-border-light: rgba(255, 255, 255, 0.12);
 
@@ -75,6 +81,11 @@
       margin: 0;
       padding: 0;
       box-sizing: border-box;
+    }
+
+    *:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 2px;
     }
 
     body {
@@ -114,7 +125,7 @@
     .header-logo svg {
       width: 16px;
       height: 16px;
-      color: #fff;
+      color: var(--color-on-primary);
     }
 
     .header h1 {
@@ -131,28 +142,28 @@
 
     /* === Theme Switcher === */
     .theme-dot {
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-md);
       border: 2px solid var(--color-border);
       cursor: pointer;
       transition: all 0.2s;
-      background: linear-gradient(135deg, #1E3A5F, #14B8A6);
+      background: radial-gradient(circle, var(--color-primary) 0 7px, transparent 8px);
     }
 
     [data-theme="dark"] .theme-dot {
-      background: linear-gradient(135deg, #14B8A6, #5EEAD4);
+      background: radial-gradient(circle, var(--color-primary) 0 7px, transparent 8px);
     }
 
     .theme-dot:hover {
-      transform: scale(1.2);
+      background-color: var(--color-primary-dim);
       border-color: var(--color-text);
     }
 
     /* === Icon Buttons === */
     .icon-btn {
-      width: 32px;
-      height: 32px;
+      width: 40px;
+      height: 40px;
       border: none;
       border-radius: var(--radius-md);
       background: transparent;
@@ -682,11 +693,12 @@
       font-weight: 500;
       cursor: pointer;
       transition: all 0.2s;
+      min-height: 40px;
     }
 
     .btn-primary {
       background: var(--color-primary);
-      color: #fff;
+      color: var(--color-on-primary);
       text-transform: var(--text-transform-btn);
     }
 
@@ -845,8 +857,8 @@
     }
 
     .icon-btn-sm {
-      width: 32px;
-      height: 38px;
+      width: 40px;
+      height: 40px;
       border: 1px solid var(--color-border);
       border-radius: var(--radius-md);
       background: var(--color-input);
@@ -1039,6 +1051,15 @@
       flex: 1;
     }
 
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
   </style>
 </head>
 <body>
@@ -1048,7 +1069,7 @@
       <span>Loading...</span>
     </div>
   </div>
-  <div id="toast" class="toast">
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <polyline points="20 6 9 17 4 12"/>
     </svg>

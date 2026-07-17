@@ -1,92 +1,158 @@
 //! Extension pairing confirmation
 //!
-//! Provides an out-of-band pairing confirmation flow: when a browser
-//! extension requests pairing, the desktop app displays a short numeric
-//! code. The user must enter the same code in the extension before an
-//! API token is issued.
+//! Pairing challenges are bound to the browser caller label supplied by the
+//! native host. A challenge also carries an unguessable nonce, expires after a
+//! short TTL, limits code attempts, and is consumed after successful use.
 
-use rand::{rngs::OsRng, Rng};
-use std::sync::Mutex;
+use rand::{rngs::OsRng, Rng, RngCore};
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-/// A pending pairing session.
+#[derive(Debug)]
 struct PairSession {
     code: String,
+    nonce: String,
     expires_at: Instant,
-    #[allow(dead_code)]
-    origin: Option<String>,
+    attempts_remaining: u8,
 }
 
-/// Global pending pairing session. Protected by a Mutex; `None` means no
-/// active session.
-static SESSION: Mutex<Option<PairSession>> = Mutex::new(None);
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairChallenge {
+    pub code: String,
+    pub nonce: String,
+}
 
-/// Session lifetime. Kept in sync with the frontend toast duration so the
-/// code remains valid for as long as it is visible on screen.
+/// One pending challenge per trusted caller. This prevents one browser from
+/// overwriting another browser's in-progress pairing flow.
+static SESSIONS: LazyLock<Mutex<HashMap<String, PairSession>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 const SESSION_TTL: Duration = Duration::from_secs(30);
+const MAX_CODE_ATTEMPTS: u8 = 5;
 
-/// Create a new pairing session and return the 6-digit code to display.
-pub fn create_session(origin: Option<String>) -> String {
-    let code = generate_code();
-    let session = PairSession {
-        code: code.clone(),
-        expires_at: Instant::now() + SESSION_TTL,
-        origin,
+/// Create (or replace) the pending challenge for `caller`.
+pub fn create_session(caller: &str) -> PairChallenge {
+    let challenge = PairChallenge {
+        code: generate_code(),
+        nonce: generate_nonce(),
     };
-    *SESSION.lock().expect("pair session lock poisoned") = Some(session);
-    code
+    let session = PairSession {
+        code: challenge.code.clone(),
+        nonce: challenge.nonce.clone(),
+        expires_at: Instant::now() + SESSION_TTL,
+        attempts_remaining: MAX_CODE_ATTEMPTS,
+    };
+    SESSIONS
+        .lock()
+        .expect("pair sessions lock poisoned")
+        .insert(caller.to_string(), session);
+    challenge
 }
 
-/// Verify the user-entered code. A session can only be used once.
-pub fn verify(code: &str) -> bool {
-    let mut guard = SESSION.lock().expect("pair session lock poisoned");
-    guard.take().map_or(false, |session| {
-        session.code == code && session.expires_at > Instant::now()
-    })
+/// Verify and consume a caller-bound challenge.
+///
+/// A different caller or nonce cannot consume/decrement the legitimate
+/// challenge. A wrong code for the correct caller+nonce consumes one attempt.
+pub fn verify(caller: &str, nonce: &str, code: &str) -> bool {
+    let mut sessions = SESSIONS.lock().expect("pair sessions lock poisoned");
+    let Some(session) = sessions.get_mut(caller) else {
+        return false;
+    };
+
+    if session.expires_at <= Instant::now() {
+        sessions.remove(caller);
+        return false;
+    }
+    if session.nonce != nonce {
+        return false;
+    }
+    if session.code != code {
+        session.attempts_remaining = session.attempts_remaining.saturating_sub(1);
+        if session.attempts_remaining == 0 {
+            sessions.remove(caller);
+        }
+        return false;
+    }
+
+    sessions.remove(caller);
+    true
 }
 
-/// Generate a 6-digit numeric code.
+/// Invalidate all outstanding pairing challenges, e.g. when extension access
+/// is revoked from Settings.
+pub fn cancel_all_sessions() {
+    SESSIONS
+        .lock()
+        .expect("pair sessions lock poisoned")
+        .clear();
+}
+
 fn generate_code() -> String {
     let mut rng = OsRng;
     (0..6).map(|_| rng.gen_range(0..10).to_string()).collect()
+}
+
+fn generate_nonce() -> String {
+    let mut bytes = [0u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_create_and_verify() {
-        let code = create_session(None);
-        assert_eq!(code.len(), 6);
-        assert!(code.chars().all(|c| c.is_ascii_digit()));
-        assert!(verify(&code));
+    fn caller(name: &str) -> String {
+        format!("chrome-extension://{name}")
     }
 
     #[test]
-    fn test_verify_consumes_session() {
-        let code = create_session(None);
-        assert!(verify(&code));
-        assert!(!verify(&code));
+    fn challenge_is_caller_bound_single_use_and_nonce_protected() {
+        let owner = caller("owner");
+        let attacker = caller("attacker");
+        let challenge = create_session(&owner);
+
+        assert_eq!(challenge.code.len(), 6);
+        assert_eq!(challenge.nonce.len(), 32);
+        assert!(!verify(&attacker, &challenge.nonce, &challenge.code));
+        assert!(!verify(&owner, "wrong-nonce", &challenge.code));
+        assert!(verify(&owner, &challenge.nonce, &challenge.code));
+        assert!(!verify(&owner, &challenge.nonce, &challenge.code));
     }
 
     #[test]
-    fn test_verify_wrong_code_fails() {
-        let _ = create_session(None);
-        assert!(!verify("000000"));
-    }
+    fn wrong_codes_are_limited_but_do_not_affect_other_callers() {
+        let owner = caller("limited-owner");
+        let other = caller("other-owner");
+        let challenge = create_session(&owner);
+        let other_challenge = create_session(&other);
 
-    #[test]
-    fn test_session_expires() {
-        let code = "123456";
-        {
-            let mut guard = SESSION.lock().unwrap();
-            *guard = Some(PairSession {
-                code: code.to_string(),
-                expires_at: Instant::now() - Duration::from_secs(1),
-                origin: None,
-            });
+        for _ in 0..MAX_CODE_ATTEMPTS {
+            assert!(!verify(&owner, &challenge.nonce, "wrong"));
         }
-        assert!(!verify(code));
+        assert!(!verify(&owner, &challenge.nonce, &challenge.code));
+        assert!(verify(
+            &other,
+            &other_challenge.nonce,
+            &other_challenge.code
+        ));
+    }
+
+    #[test]
+    fn expired_challenge_is_rejected_and_removed() {
+        let owner = caller("expired-owner");
+        let challenge = create_session(&owner);
+        {
+            let mut sessions = SESSIONS.lock().expect("pair sessions lock");
+            sessions.get_mut(&owner).expect("session").expires_at =
+                Instant::now() - Duration::from_secs(1);
+        }
+
+        assert!(!verify(&owner, &challenge.nonce, &challenge.code));
+        assert!(!SESSIONS
+            .lock()
+            .expect("pair sessions lock")
+            .contains_key(&owner));
     }
 }

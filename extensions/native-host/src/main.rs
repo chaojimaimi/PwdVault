@@ -13,9 +13,10 @@
 //!   - stdout → responses back to the browser
 //!
 //! The binary does NOT implement any business logic. It forwards each request
-//! verbatim to the desktop app's HTTP API, injecting an `Origin` header so
-//! the API's extension-origin check passes. The desktop app handles pairing,
-//! authentication, crypto, and database access.
+//! verbatim to the desktop app's HTTP API. Caller identity is derived only
+//! from browser-supplied process arguments; request JSON is never trusted for
+//! this purpose. The desktop app handles pairing, authentication, crypto, and
+//! database access.
 
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
@@ -25,11 +26,18 @@ const SERVER_HOST: &str = "127.0.0.1";
 const SERVER_PORT: u16 = 17429;
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_MESSAGE_SIZE: u32 = 10 * 1024 * 1024; // 10 MB, matches server limit
+const MAX_RESPONSE_SIZE: usize = 1024 * 1024;
+const MAX_HTTP_HEADER_SIZE: usize = 64 * 1024;
+const FIREFOX_ADDON_ID: &str = "pwdvault@pwdvault.app";
+const PROTOCOL_VERSION: u64 = 1;
 
-/// Origin presented to the desktop app so `pair` passes `is_extension_origin`.
-/// The server only checks the prefix (`chrome-extension://` / `moz-extension://`).
-const CHROME_ORIGIN: &str = "chrome-extension://pwdvault-native-host";
-const FIREFOX_ORIGIN: &str = "moz-extension://pwdvault-native-host";
+#[derive(Debug, PartialEq, Eq)]
+struct CallerContext {
+    /// Stable label used to bind a pairing challenge to its browser caller.
+    label: String,
+    /// Extension-shaped Origin label retained by the loopback bridge.
+    origin: String,
+}
 
 fn main() {
     // Buffer stdout so length-prefixed frames are written atomically.
@@ -38,13 +46,24 @@ fn main() {
     let stdin = io::stdin();
     let mut input = stdin.lock();
 
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let caller = match parse_caller_args(&args) {
+        Ok(caller) => caller,
+        Err(error) => {
+            let _ = send_error(&mut out, 0, &error);
+            return;
+        }
+    };
+
     loop {
-        let msg = match read_message(&mut input) {
+        let mut msg = match read_message(&mut input) {
             Ok(m) => m,
             Err(ReadError::EndOfStream) => break,
             Err(ReadError::TooLarge) => {
                 let _ = send_error(&mut out, 0, "Message too large");
-                continue;
+                // The oversized frame body is still on stdin; continuing would
+                // interpret its first four bytes as a new frame length.
+                break;
             }
             Err(ReadError::Io(e)) => {
                 // A broken stdin pipe (e.g. browser restarted) is a normal
@@ -54,12 +73,13 @@ fn main() {
             }
         };
 
-        // Pick the matching extension origin from the incoming payload if
-        // available; otherwise default to the Chrome origin. The desktop app
-        // only inspects the prefix, so any valid-looking origin passes `pair`.
-        let origin = detect_origin(&msg).unwrap_or(CHROME_ORIGIN);
+        if let Err(error) = validate_protocol_version(&msg) {
+            let _ = send_error(&mut out, extract_id(&msg).unwrap_or(0), &error);
+            msg.fill(0);
+            continue;
+        }
 
-        let response = match forward_to_server(&msg, origin) {
+        let mut response = match forward_to_server(&msg, &caller) {
             Ok(body) => body,
             Err(e) => {
                 // The browser expects a JSON object, not a bare error string.
@@ -68,16 +88,64 @@ fn main() {
                     "id": extract_id(&msg).unwrap_or(0),
                     "success": false,
                     "error": e,
+                    "error_code": "HOST_TRANSPORT_ERROR",
+                    "error_message": e,
+                    "retry_after": null,
                 });
                 err.to_string().into_bytes()
             }
         };
+        msg.fill(0);
 
-        if let Err(_) = write_message(&mut out, &response) {
+        if write_message(&mut out, &response).is_err() {
             // If stdout is broken there's nothing useful we can do.
             break;
         }
+        response.fill(0);
     }
+}
+
+/// Parse the caller identity supplied by the browser when it launches the
+/// native host. Chrome passes the calling extension origin as its first
+/// argument. Firefox passes the native-host manifest path followed by the
+/// add-on ID. The values are tightly validated before being copied to HTTP
+/// headers to prevent caller spoofing and header injection.
+fn parse_caller_args(args: &[String]) -> Result<CallerContext, String> {
+    let first = args.first().ok_or("Missing browser caller identity")?;
+
+    if let Some(raw_id) = first.strip_prefix("chrome-extension://") {
+        let extension_id = raw_id.strip_suffix('/').unwrap_or(raw_id);
+        let valid_id = extension_id.len() == 32
+            && extension_id
+                .bytes()
+                .all(|byte| matches!(byte, b'a'..=b'p'));
+        if !valid_id {
+            return Err("Invalid Chrome extension caller".to_string());
+        }
+        let origin = format!("chrome-extension://{extension_id}/");
+        return Ok(CallerContext {
+            label: origin.clone(),
+            origin,
+        });
+    }
+
+    let addon_id = args.get(1).ok_or("Missing Firefox add-on identity")?;
+    if addon_id != FIREFOX_ADDON_ID {
+        return Err("Invalid Firefox add-on caller".to_string());
+    }
+
+    // Firefox's first argument is the browser-selected manifest path. It is
+    // not an authorization value, but requiring a non-empty JSON path catches
+    // malformed/manual launches before accepting the stable add-on ID.
+    if first.is_empty() || !first.to_ascii_lowercase().ends_with(".json") {
+        return Err("Invalid Firefox native-host manifest argument".to_string());
+    }
+
+    let label = format!("moz-extension://{addon_id}");
+    Ok(CallerContext {
+        label: label.clone(),
+        origin: label,
+    })
 }
 
 /// Errors that can occur while reading a framed message from stdin.
@@ -131,23 +199,16 @@ fn write_message<W: Write>(writer: &mut W, payload: &[u8]) -> io::Result<()> {
 
 /// Send a JSON error frame back to the browser (best-effort).
 fn send_error<W: Write>(writer: &mut W, id: u32, error: &str) -> io::Result<()> {
-    let body = serde_json::json!({ "id": id, "success": false, "error": error });
+    let body = serde_json::json!({
+        "id": id,
+        "success": false,
+        "error": error,
+        "error_code": "HOST_TRANSPORT_ERROR",
+        "error_message": error,
+        "retry_after": null,
+    });
     let bytes = body.to_string().into_bytes();
     write_message(writer, &bytes)
-}
-
-/// Inspect the message payload for a recognizable origin field injected by the
-/// extension, so the server sees an origin that matches the calling browser.
-fn detect_origin(payload: &[u8]) -> Option<&'static str> {
-    // The extension may include a hint in the payload. We keep this cheap and
-    // tolerant: a substring match is enough since the server only checks the
-    // prefix. Default to Chrome when no hint is present.
-    if let Ok(s) = std::str::from_utf8(payload) {
-        if s.contains("moz-extension://") {
-            return Some(FIREFOX_ORIGIN);
-        }
-    }
-    None
 }
 
 /// Extract the `id` field (if present) so transport-error frames stay
@@ -156,6 +217,17 @@ fn extract_id(payload: &[u8]) -> Option<u32> {
     let value = serde_json::from_slice::<serde_json::Value>(payload).ok()?;
     let n = value.get("id")?.as_u64()?;
     u32::try_from(n).ok()
+}
+
+fn validate_protocol_version(payload: &[u8]) -> Result<(), String> {
+    let value = serde_json::from_slice::<serde_json::Value>(payload)
+        .map_err(|_| "Invalid native messaging JSON".to_string())?;
+    match value.get("protocol_version").and_then(|version| version.as_u64()) {
+        Some(PROTOCOL_VERSION) => Ok(()),
+        Some(_) => Err("Unsupported protocol version; update PwdVault and the browser extension"
+            .to_string()),
+        None => Err("Missing protocol version; update the browser extension".to_string()),
+    }
 }
 
 /// Forward a raw JSON payload to the desktop app's HTTP API and return the
@@ -170,13 +242,17 @@ fn extract_id(payload: &[u8]) -> Option<u32> {
 /// carries the Bearer token in a body field `auth_token`; we lift it into an
 /// `Authorization` header here so the server's existing header-based auth works
 /// unchanged.
-fn forward_to_server(payload: &[u8], origin: &str) -> Result<Vec<u8>, String> {
+fn forward_to_server(payload: &[u8], caller: &CallerContext) -> Result<Vec<u8>, String> {
     let command = extract_command(payload).unwrap_or_else(|| "request".to_string());
     let path = format!("/api/{}", command);
     let auth_header = extract_auth_header(payload);
 
-    let mut stream = TcpStream::connect((SERVER_HOST, SERVER_PORT))
-        .map_err(|e| format!("Cannot connect to desktop app ({}:{}): {}", SERVER_HOST, SERVER_PORT, e))?;
+    let mut stream = TcpStream::connect((SERVER_HOST, SERVER_PORT)).map_err(|e| {
+        format!(
+            "Cannot connect to desktop app ({}:{}): {}",
+            SERVER_HOST, SERVER_PORT, e
+        )
+    })?;
 
     stream
         .set_read_timeout(Some(READ_TIMEOUT))
@@ -196,10 +272,17 @@ fn forward_to_server(payload: &[u8], origin: &str) -> Result<Vec<u8>, String> {
              Content-Type: application/json\r\n\
              Content-Length: {}\r\n\
              Origin: {}\r\n\
+             X-PwdVault-Caller: {}\r\n\
              Authorization: Bearer {}\r\n\
              Connection: close\r\n\
              \r\n",
-            path, SERVER_HOST, SERVER_PORT, body_len, origin, token
+            path,
+            SERVER_HOST,
+            SERVER_PORT,
+            body_len,
+            caller.origin,
+            caller.label,
+            token
         ),
         None => format!(
             "POST {} HTTP/1.1\r\n\
@@ -207,9 +290,10 @@ fn forward_to_server(payload: &[u8], origin: &str) -> Result<Vec<u8>, String> {
              Content-Type: application/json\r\n\
              Content-Length: {}\r\n\
              Origin: {}\r\n\
+             X-PwdVault-Caller: {}\r\n\
              Connection: close\r\n\
              \r\n",
-            path, SERVER_HOST, SERVER_PORT, body_len, origin
+            path, SERVER_HOST, SERVER_PORT, body_len, caller.origin, caller.label
         ),
     };
 
@@ -226,12 +310,16 @@ fn forward_to_server(payload: &[u8], origin: &str) -> Result<Vec<u8>, String> {
     // Read the full response. Since we send `Connection: close`, the server
     // closes the socket after the body, so reading to EOF yields everything.
     let mut response = Vec::with_capacity(4096);
-    stream
+    (&mut stream)
+        .take((MAX_RESPONSE_SIZE + MAX_HTTP_HEADER_SIZE + 1) as u64)
         .read_to_end(&mut response)
         .map_err(|e| format!("Read response: {}", e))?;
 
     // Split headers from body at the first blank line.
     let body = split_http_body(&response);
+    if body.len() > MAX_RESPONSE_SIZE {
+        return Err("Desktop response exceeds native messaging limit".to_string());
+    }
     Ok(body)
 }
 
@@ -249,9 +337,7 @@ fn split_http_body(response: &[u8]) -> Vec<u8> {
 
 /// Find the starting index of `needle` in `haystack`, or `None`.
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 /// Extract the `command` field from the JSON payload so the request path can
@@ -328,15 +414,48 @@ mod tests {
     }
 
     #[test]
-    fn detect_origin_picks_firefox_when_hinted() {
-        let payload = br#"{"origin":"moz-extension://abc"}"#;
-        assert_eq!(detect_origin(payload), Some(FIREFOX_ORIGIN));
+    fn protocol_version_is_required_and_bounded() {
+        assert!(validate_protocol_version(br#"{"protocol_version":1,"command":"handshake"}"#).is_ok());
+        assert!(validate_protocol_version(br#"{"command":"handshake"}"#).is_err());
+        assert!(validate_protocol_version(br#"{"protocol_version":2,"command":"handshake"}"#).is_err());
     }
 
     #[test]
-    fn detect_origin_defaults_to_none_without_hint() {
-        let payload = br#"{"command":"pair"}"#;
-        assert_eq!(detect_origin(payload), None);
+    fn parses_chrome_caller_origin_from_browser_args() {
+        let args = vec!["chrome-extension://abcdefghijklmnopabcdefghijklmnop/".to_string()];
+        let caller = parse_caller_args(&args).expect("valid Chrome caller");
+        assert_eq!(caller.label, args[0]);
+        assert_eq!(caller.origin, args[0]);
+    }
+
+    #[test]
+    fn parses_firefox_addon_id_from_browser_args() {
+        let args = vec![
+            "/Library/Application Support/Mozilla/NativeMessagingHosts/com.pwdvault.app.json"
+                .to_string(),
+            FIREFOX_ADDON_ID.to_string(),
+        ];
+        let caller = parse_caller_args(&args).expect("valid Firefox caller");
+        assert_eq!(caller.label, "moz-extension://pwdvault@pwdvault.app");
+    }
+
+    #[test]
+    fn rejects_missing_or_invalid_browser_caller() {
+        assert!(parse_caller_args(&[]).is_err());
+        assert!(parse_caller_args(&["chrome-extension://attacker/".to_string()]).is_err());
+        assert!(parse_caller_args(&[
+            "/tmp/com.pwdvault.app.json".to_string(),
+            "attacker@example.com".to_string(),
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn request_payload_cannot_override_caller_identity() {
+        let payload = br#"{"origin":"moz-extension://attacker","command":"pair"}"#;
+        assert_eq!(extract_command(payload), Some("pair".to_string()));
+        // Caller parsing has no payload parameter by design.
+        assert!(parse_caller_args(&[]).is_err());
     }
 
     #[test]

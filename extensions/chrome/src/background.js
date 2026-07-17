@@ -3,40 +3,43 @@
 // Native Messaging (the browser spawns a host binary that bridges to the
 // desktop app's local HTTP API on 127.0.0.1:17429).
 
+import { authorizeMessage, entryMatchesSenderUrl } from './sender-auth.js';
+import { createTokenStorage } from './token-storage.js';
+import { friendlyConnectionError, isAuthenticationError } from './connection-errors.js';
+
 // The native messaging host name; must match the "name" field in the manifest
 // registered by the desktop app (native_host_setup.rs).
 const NATIVE_HOST = 'com.pwdvault.app';
+const PROTOCOL_VERSION = 1;
 
-// Storage key for persisting the pairing token across service worker
-// restarts. MV3 service workers are killed by Chrome after ~30s idle; if
-// we don't persist the token, the user would be forced to re-pair after
-// every restart.
+// Storage key for retaining the pairing token across MV3 service-worker
+// suspension. The preferred session area intentionally clears on a full
+// browser restart.
 const TOKEN_STORAGE_KEY = 'pwdvault_api_token';
+const tokenStoragePromise = createTokenStorage(chrome.storage, TOKEN_STORAGE_KEY);
 
 let connectionStatus = 'disconnected';
 let requestId = 0;
 let apiToken = null;
+let pendingPairNonce = null;
+let lastConnectionError = null;
 
-// Persist/restore the token via chrome.storage.local. These are no-ops in
-// contexts where the storage API is unavailable (e.g. unit tests).
+// Persist in trusted-context-only storage. Session storage survives MV3 worker
+// suspension but intentionally clears on browser restart. If a browser cannot
+// enforce trusted-context access, the token remains memory-only.
 function saveToken(token) {
   apiToken = token;
-  try {
-    if (token) {
-      chrome.storage.local.set({ [TOKEN_STORAGE_KEY]: token });
-    } else {
-      chrome.storage.local.remove(TOKEN_STORAGE_KEY);
-    }
-  } catch (e) {
-    // storage API may be unavailable in some test contexts — ignore.
-  }
+  void tokenStoragePromise
+    .then(storage => storage.save(token))
+    .catch(() => {});
 }
 
 async function restoreToken() {
   try {
-    const result = await chrome.storage.local.get(TOKEN_STORAGE_KEY);
-    if (result && result[TOKEN_STORAGE_KEY]) {
-      apiToken = result[TOKEN_STORAGE_KEY];
+    const storage = await tokenStoragePromise;
+    const token = await storage.load();
+    if (token) {
+      apiToken = token;
       return true;
     }
   } catch (e) {
@@ -92,28 +95,50 @@ function sendNativeMessageP(message) {
 // Returns 'paired' | 'needs_code' | 'failed'.
 async function pairWithApp() {
   try {
-    const data = await sendNativeMessageP({ id: 0, command: 'pair' });
+    const handshake = await sendNativeMessageP({
+      id: 0,
+      protocol_version: PROTOCOL_VERSION,
+      command: 'handshake',
+    });
+    if (!handshake?.success || handshake.data?.protocol_version !== PROTOCOL_VERSION) {
+      lastConnectionError = 'PwdVault protocol versions do not match. Update the desktop app and extension.';
+      return 'failed';
+    }
+    const data = await sendNativeMessageP({ id: 0, protocol_version: PROTOCOL_VERSION, command: 'pair' });
     if (data && data.success && data.data) {
       if (data.data.token) {
         saveToken(data.data.token);
+        lastConnectionError = null;
         return 'paired';
       }
       if (data.data.pending) {
+        pendingPairNonce = data.data.session_nonce || null;
+        if (!pendingPairNonce) return 'failed';
         return 'needs_code';
       }
     }
+    lastConnectionError = friendlyConnectionError(data?.error_message || data?.error || 'Pairing request failed');
     return 'failed';
-  } catch {
+  } catch (error) {
+    lastConnectionError = friendlyConnectionError(error);
     return 'failed';
   }
 }
 
 // Submit the user-entered 6-digit code to complete pairing.
 async function pairConfirm(code) {
+  if (!pendingPairNonce) return false;
   try {
-    const data = await sendNativeMessageP({ id: 0, command: 'pair_confirm', code });
+    const data = await sendNativeMessageP({
+      id: 0,
+      protocol_version: PROTOCOL_VERSION,
+      command: 'pair_confirm',
+      code,
+      session_nonce: pendingPairNonce,
+    });
     if (data && data.success && data.data && data.data.token) {
       saveToken(data.data.token);
+      pendingPairNonce = null;
       return true;
     }
     return false;
@@ -133,7 +158,7 @@ async function sendToApp(command, params = {}) {
   // Native Messaging has no HTTP headers, so the Bearer token travels in the
   // body as `auth_token`. The host binary lifts it into an Authorization header
   // before forwarding to the desktop app's HTTP API.
-  const message = { id, command, ...params };
+  const message = { id, protocol_version: PROTOCOL_VERSION, command, ...params };
   if (apiToken) {
     message.auth_token = apiToken;
   }
@@ -143,16 +168,17 @@ async function sendToApp(command, params = {}) {
 
     if (data && data.success) {
       connectionStatus = 'connected';
+      lastConnectionError = null;
       return data.data;
     } else {
-      throw new Error((data && data.error) || 'Unknown error');
+      throw new Error((data && (data.error_message || data.error)) || 'Unknown error');
     }
   } catch (error) {
     const msg = error.message || '';
     if (msg.includes('native messaging') || msg.includes('not found') ||
         msg.includes('timed out') || msg.includes('connect')) {
       connectionStatus = 'disconnected';
-      throw new Error('Cannot connect to PwdVault desktop app. Is it running?');
+      throw new Error(friendlyConnectionError(error));
     }
     throw error;
   }
@@ -171,11 +197,18 @@ async function checkConnection() {
     try {
       await sendToApp('is_vault_initialized');
       connectionStatus = 'connected';
+      lastConnectionError = null;
       return connectionStatus;
-    } catch {
-      // Token rejected or app unreachable — clear it so a fresh pairing
-      // can be initiated.
-      saveToken(null);
+    } catch (error) {
+      lastConnectionError = friendlyConnectionError(error);
+      // Only authentication rejection invalidates a pairing token. A stopped
+      // desktop app or a temporary host failure must not force re-pairing.
+      if (isAuthenticationError(error)) {
+        saveToken(null);
+      } else {
+        connectionStatus = 'disconnected';
+        return connectionStatus;
+      }
     }
   }
   // No token — needs pairing. Do NOT call `pair` here: each `pair` call
@@ -223,7 +256,19 @@ async function unlockVault(password) {
 }
 
 async function lockVault() {
-  return sendToApp('lock_vault');
+  const result = await sendToApp('lock_vault');
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({});
+  } catch {
+    // Locking the desktop vault succeeded; tab cleanup is best effort.
+  }
+  await Promise.allSettled(tabs.map(tab => (
+    typeof tab.id === 'number'
+      ? chrome.tabs.sendMessage(tab.id, { type: 'VAULT_LOCKED' })
+      : Promise.resolve()
+  )));
+  return result;
 }
 
 async function createEntry(entry) {
@@ -294,6 +339,22 @@ async function getEntry(id) {
     password: secret ? secret.password : '',
     notes: secret ? secret.notes : null,
     last_used_at: secret ? secret.last_used_at : null,
+  };
+}
+
+async function getEntryForSender(id, senderUrl) {
+  // Fetch metadata first. Never request the secret until the entry URL has
+  // been proven to match the content script's browser-supplied tab URL.
+  const meta = await sendToApp('get_entry_meta', { id_param: id });
+  if (!meta || !entryMatchesSenderUrl(meta, senderUrl)) {
+    throw new Error('Entry is not authorized for this site');
+  }
+  const secret = await sendToApp('get_entry_secret', { id_param: id });
+  return {
+    ...meta,
+    password: secret?.password || '',
+    notes: secret?.notes ?? null,
+    last_used_at: secret?.last_used_at ?? null,
   };
 }
 
@@ -391,12 +452,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function handleMessage(message, sender) {
+  const authorization = authorizeMessage(message, sender, chrome.runtime.id);
+
   switch (message.type) {
     case 'GET_STATUS':
+      const status = await checkConnection();
       return {
-        status: await checkConnection(),
+        status,
         initialized: await isVaultInitialized().catch(() => false),
         unlocked: await isVaultUnlocked().catch(() => false),
+        error: lastConnectionError,
       };
 
     case 'INIT_VAULT':
@@ -415,10 +480,14 @@ async function handleMessage(message, sender) {
       return getEntries();
 
     case 'GET_ENTRIES_FOR_URL':
-      return getEntriesForUrl(message.url);
+      return getEntriesForUrl(
+        authorization.senderKind === 'content' ? authorization.senderUrl : message.url
+      );
 
     case 'GET_ENTRY':
-      return getEntry(message.id);
+      return authorization.senderKind === 'content'
+        ? getEntryForSender(message.id, authorization.senderUrl)
+        : getEntry(message.id);
 
     case 'GENERATE_PASSWORD':
       return generatePassword(message.options);
@@ -459,11 +528,11 @@ async function handleMessage(message, sender) {
       return { success: true };
 
     case 'CONNECT':
-      return { status: await checkConnection() };
+      return { status: await checkConnection(), error: lastConnectionError };
 
     case 'START_PAIRING':
       const pairResult = await startPairing();
-      return { result: pairResult, status: connectionStatus };
+      return { result: pairResult, status: connectionStatus, error: lastConnectionError };
 
     case 'PAIR_CONFIRM':
       const ok = await pairConfirm(message.code);
@@ -526,8 +595,8 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 chrome.runtime.onStartup.addListener(() => {
   setupContextMenu();
-  // Restore the persisted token when the browser starts so the user does
-  // not have to re-pair every browser launch.
+  // Restore when the selected browser storage area supports it. Session
+  // storage normally starts empty after a full browser restart.
   restoreToken();
 });
 

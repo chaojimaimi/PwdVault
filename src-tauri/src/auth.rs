@@ -36,6 +36,11 @@ pub fn regenerate_token() -> String {
     new_token
 }
 
+/// Invalidate extension access without returning the replacement token.
+pub fn revoke_extension_access() {
+    drop(regenerate_token());
+}
+
 /// Validate a Bearer token from the Authorization header.
 /// Returns true if the token matches the current in-memory token.
 pub fn validate_token(auth_header: &str) -> bool {
