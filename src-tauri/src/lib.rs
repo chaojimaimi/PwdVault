@@ -16,6 +16,7 @@ pub mod service;
 pub mod session;
 #[cfg(test)]
 pub mod test_infra;
+pub mod validation;
 pub mod vault_header;
 
 use redb::Database;
@@ -40,6 +41,8 @@ use database::{Group, PasswordEntry, Settings};
 #[cfg(test)]
 use database::{count_entries, delete_entry, list_entries, load_entry, save_entry};
 
+type UpdateLockMenuFn = Box<dyn Fn(&str) + Send + Sync>;
+
 // ============================================================================
 // Application State
 // ============================================================================
@@ -54,7 +57,7 @@ pub struct AppState {
     /// auto-lock. (§5.1.1)
     pub session: session::VaultSession,
     /// Closure to update the tray lock/unlock menu item text
-    pub update_lock_menu_fn: Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>>,
+    pub update_lock_menu_fn: Mutex<Option<UpdateLockMenuFn>>,
     /// Closure to reload the main window (for auto-lock)
     pub reload_window_fn: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
     /// Dynamic auto-lock timeout in seconds (loaded from settings)
@@ -142,6 +145,7 @@ pub enum VaultError {
     DatabaseError(String),
     InternalError(String),
     InvalidBackup(String),
+    InvalidInput { code: String, message: String },
     RateLimited { retry_after_secs: u64 },
 }
 
@@ -190,6 +194,7 @@ impl std::fmt::Display for VaultError {
             VaultError::DatabaseError(e) => write!(f, "Database error: {}", e),
             VaultError::InternalError(e) => write!(f, "Internal error: {}", e),
             VaultError::InvalidBackup(e) => write!(f, "Invalid backup: {}", e),
+            VaultError::InvalidInput { code, message } => write!(f, "{}: {}", code, message),
             VaultError::RateLimited { retry_after_secs } => {
                 write!(
                     f,
@@ -215,6 +220,7 @@ impl VaultError {
                 format!("Too many attempts. Retry in {}s", retry_after_secs)
             }
             VaultError::InvalidBackup(_) => "Invalid backup file".to_string(),
+            VaultError::InvalidInput { code, message } => format!("{}: {}", code, message),
             VaultError::EncryptionFailed(_)
             | VaultError::DecryptionFailed(_)
             | VaultError::DatabaseError(_)
@@ -350,6 +356,38 @@ pub struct CreateEntryRequest {
     pub group_id: Option<String>,
 }
 
+/// Patch request for an existing entry. Sensitive fields are optional so a
+/// metadata-only edit never needs to decrypt and resubmit the old secret.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateEntryRequest {
+    pub title: String,
+    pub url: Option<String>,
+    pub username: String,
+    #[serde(default)]
+    pub password: Option<Zeroizing<String>>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub update_notes: bool,
+    pub tags: Vec<String>,
+    pub group_id: Option<String>,
+}
+
+impl From<CreateEntryRequest> for UpdateEntryRequest {
+    fn from(request: CreateEntryRequest) -> Self {
+        Self {
+            title: request.title,
+            url: request.url,
+            username: request.username,
+            password: Some(request.password),
+            notes: request.notes,
+            update_notes: true,
+            tags: request.tags,
+            group_id: request.group_id,
+        }
+    }
+}
+
 /// Decrypted secrets for a password entry.
 /// Returned only by explicit secret-fetch endpoints so plaintext fields are not
 /// kept in memory longer than necessary.
@@ -417,7 +455,7 @@ fn list_all_entries(state: State<'_, Arc<AppState>>) -> Result<Vec<EntrySummary>
 #[tauri::command]
 fn update_entry(
     id: String,
-    request: CreateEntryRequest,
+    request: UpdateEntryRequest,
     state: State<'_, Arc<AppState>>,
 ) -> Result<EntrySummary, VaultError> {
     service::update_entry(state.inner(), id, request)
@@ -469,6 +507,13 @@ fn update_settings(
 }
 
 #[tauri::command]
+fn revoke_extension_access() -> bool {
+    auth::revoke_extension_access();
+    pairing::cancel_all_sessions();
+    true
+}
+
+#[tauri::command]
 fn remove_entry(id: String, state: State<'_, Arc<AppState>>) -> Result<bool, VaultError> {
     service::remove_entry(state.inner(), id)
 }
@@ -506,10 +551,16 @@ pub struct BackupPayload {
 }
 
 /// Encrypted backup file format
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultBackup {
     pub version: u32,
     pub created_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub magic: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kdf_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cipher_name: Option<String>,
     pub salt: String, // base64
     pub kdf_memory: u32,
     pub kdf_iterations: u32,
@@ -644,16 +695,10 @@ fn register_native_host(app: &tauri::App) {
         }
     }
 
-    // Read extension IDs from a config file next to the database. This file is
-    // created by the registration script (install-native-host.sh) or manually.
-    // Without valid IDs we cannot write a usable manifest.
-    let ids = match load_extension_ids() {
-        Some(ids) if !ids.chrome.is_empty() => ids,
-        _ => {
-            // IDs not configured yet — skip silently. Use the install script.
-            return;
-        }
-    };
+    // Always register the stable packaged extension IDs. A valid ID from the
+    // legacy development config is retained as an additional Chrome origin so
+    // upgrading the extension does not abruptly disconnect an existing copy.
+    let ids = load_extension_ids();
 
     native_host_setup::register(&host_path, &ids);
 }
@@ -661,24 +706,39 @@ fn register_native_host(app: &tauri::App) {
 /// Load extension IDs from a JSON config file placed next to the vault
 /// database (e.g. ~/Library/Application Support/com.pwdvault.app/native-host.json).
 /// Format: {"chrome": "<id>", "firefox": "<id>"}
-fn load_extension_ids() -> Option<native_host_setup::ExtensionIds> {
-    let config_path = paths::get_db_path().parent()?.join("native-host.json");
-    let content = std::fs::read_to_string(&config_path).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
-    Some(native_host_setup::ExtensionIds {
-        chrome: value.get("chrome")?.as_str()?.to_string(),
-        firefox: value
-            .get("firefox")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-    })
+fn load_extension_ids() -> native_host_setup::ExtensionIds {
+    let mut ids = native_host_setup::ExtensionIds::default();
+    let Some(parent) = paths::get_db_path().parent().map(|path| path.to_path_buf()) else {
+        return ids;
+    };
+    let config_path = parent.join("native-host.json");
+    let _ = paths::secure_file(&config_path);
+    let Some(value) = std::fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+    else {
+        return ids;
+    };
+
+    if let Some(chrome) = value.get("chrome").and_then(|value| value.as_str()) {
+        if native_host_setup::is_valid_chrome_extension_id(chrome)
+            && !ids.chrome.iter().any(|existing| existing == chrome)
+        {
+            ids.chrome.push(chrome.to_string());
+        }
+    }
+    if let Some(firefox) = value.get("firefox").and_then(|value| value.as_str()) {
+        if !firefox.is_empty() && !firefox.contains(['\r', '\n']) {
+            ids.firefox = firefox.to_string();
+        }
+    }
+    ids
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize structured logging to a daily-rotated file under the app data dir.
-    let file_appender = tracing_appender::rolling::daily(&paths::log_dir(), "pwdvault.log");
+    let file_appender = tracing_appender::rolling::daily(paths::log_dir(), "pwdvault.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -827,6 +887,7 @@ pub fn run() {
             // Settings
             get_settings,
             update_settings,
+            revoke_extension_access,
             // Import/Export
             export_vault,
             import_vault,
@@ -864,8 +925,8 @@ mod tests {
 
         let salt = crypto::kdf::generate_salt();
         let (master_key, params) = crypto::kdf::derive_key(password, &salt).expect("derive key");
-        let verification = create_verification_header(&master_key, salt.clone(), params)
-            .expect("create verification");
+        let verification =
+            create_verification_header(&master_key, salt, params).expect("create verification");
         let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &salt);
 
         let db = state
@@ -1127,6 +1188,49 @@ mod tests {
             bincode::deserialize(loaded.encrypted_notes.as_ref().unwrap()).unwrap();
         let notes = String::from_utf8(decrypt(&key, &enc).unwrap()).unwrap();
         assert_eq!(notes, "my notes");
+    }
+
+    #[test]
+    fn metadata_patch_preserves_existing_secrets() {
+        let (state, _temp) = setup_test_state();
+        init_test_vault(&state, "master123");
+
+        let created = service::create_entry(
+            &state,
+            CreateEntryRequest {
+                title: "Before".to_string(),
+                url: None,
+                username: "user".to_string(),
+                password: Zeroizing::new("secret-password".to_string()),
+                notes: Some("private notes".to_string()),
+                tags: vec![],
+                group_id: None,
+            },
+        )
+        .expect("create entry");
+
+        service::update_entry(
+            &state,
+            created.id.clone(),
+            UpdateEntryRequest {
+                title: "After".to_string(),
+                url: Some("https://example.com".to_string()),
+                username: "user".to_string(),
+                password: None,
+                notes: None,
+                update_notes: false,
+                tags: vec!["updated".to_string()],
+                group_id: None,
+            },
+        )
+        .expect("metadata patch");
+
+        let secret = service::get_entry_secret(&state, created.id).expect("read secret");
+        assert_eq!(secret.password.as_str(), "secret-password");
+        assert_eq!(
+            secret.notes.as_deref().map(String::as_str),
+            Some("private notes")
+        );
     }
 
     #[test]

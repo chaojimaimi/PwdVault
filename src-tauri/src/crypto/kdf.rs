@@ -89,8 +89,46 @@ impl AdaptiveParams {
 
     /// Convert to Argon2 Params
     pub fn to_argon2_params(&self) -> Result<Params, KdfError> {
+        KdfPolicy::validate(self)?;
         Params::new(self.m_cost, self.t_cost, self.p_cost, None)
             .map_err(|e| KdfError::InvalidParams(e.to_string()))
+    }
+}
+
+/// Product-level bounds applied before Argon2 allocates memory or starts work.
+pub struct KdfPolicy;
+
+impl KdfPolicy {
+    pub const MIN_MEMORY_KIB: u32 = 16 * 1024;
+    pub const MAX_MEMORY_KIB: u32 = 256 * 1024;
+    pub const MIN_ITERATIONS: u32 = 1;
+    pub const MAX_ITERATIONS: u32 = 10;
+    pub const MIN_PARALLELISM: u32 = 1;
+    pub const MAX_PARALLELISM: u32 = 8;
+    pub const MAX_MEMORY_TIME_COST: u64 = 1024 * 1024;
+
+    pub fn validate(params: &AdaptiveParams) -> Result<(), KdfError> {
+        if !(Self::MIN_MEMORY_KIB..=Self::MAX_MEMORY_KIB).contains(&params.m_cost) {
+            return Err(KdfError::InvalidParams(
+                "memory cost outside product policy".into(),
+            ));
+        }
+        if !(Self::MIN_ITERATIONS..=Self::MAX_ITERATIONS).contains(&params.t_cost) {
+            return Err(KdfError::InvalidParams(
+                "iteration cost outside product policy".into(),
+            ));
+        }
+        if !(Self::MIN_PARALLELISM..=Self::MAX_PARALLELISM).contains(&params.p_cost) {
+            return Err(KdfError::InvalidParams(
+                "parallelism outside product policy".into(),
+            ));
+        }
+        if u64::from(params.m_cost) * u64::from(params.t_cost) > Self::MAX_MEMORY_TIME_COST {
+            return Err(KdfError::InvalidParams(
+                "combined KDF cost outside product policy".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -176,5 +214,17 @@ mod tests {
 
         // Keys should match for same password, salt, and params
         assert_eq!(key1, key2);
+    }
+
+    #[test]
+    fn test_extreme_params_rejected_before_derivation() {
+        let params = AdaptiveParams {
+            m_cost: u32::MAX,
+            t_cost: u32::MAX,
+            p_cost: u32::MAX,
+        };
+        let start = Instant::now();
+        assert!(derive_key_with_params("password", &[0u8; SALT_SIZE], &params).is_err());
+        assert!(start.elapsed().as_millis() < 50);
     }
 }

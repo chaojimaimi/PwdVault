@@ -54,11 +54,13 @@ pub fn get_db(state: &Arc<AppState>) -> Result<Arc<redb::Database>, VaultError> 
 }
 
 /// Get the MAC key from the vault session.
+#[cfg(test)]
 pub fn get_mac_key(state: &Arc<AppState>) -> Result<[u8; 32], VaultError> {
     state.session.get_mac_key()
 }
 
 /// Get the encryption key from the vault session.
+#[cfg(test)]
 pub fn get_enc_key(state: &Arc<AppState>) -> Result<[u8; 32], VaultError> {
     state.session.get_enc_key()
 }
@@ -80,6 +82,7 @@ pub fn is_unlocked(state: &Arc<AppState>) -> bool {
 }
 
 pub fn init_vault(state: &Arc<AppState>, password: Zeroizing<String>) -> Result<(), VaultError> {
+    crate::validation::master_password(password.as_str())?;
     if state
         .verification_data
         .lock()
@@ -96,21 +99,24 @@ pub fn init_vault(state: &Arc<AppState>, password: Zeroizing<String>) -> Result<
 
     let salt = crypto::kdf::generate_salt();
     let (master_key, params) = crypto::kdf::derive_key(password.as_str(), &salt)?;
+    let master_key = Zeroizing::new(master_key);
 
     // `password` zeroizes on drop here.
 
     let verification_data = create_verification_header(&master_key, salt, params)?;
 
     let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &verification_data.salt);
+    let enc_key = crypto::SecretKey::new(enc_key);
+    let mac_key = crypto::SecretKey::new(mac_key);
 
     // Single transaction: verification data + header + settings + digest (§5.1.2, §5.1.4)
     let default_settings = Settings::default();
     let header = crate::vault_header::VaultHeader::new_initial();
     {
         let store = database::vault_store::VaultStore::new(&db);
-        store.write(&mac_key, |txn| {
+        store.write(mac_key.as_ref(), |txn| {
             database::vault_store::save_verification_data_in_txn(txn, &verification_data)?;
-            crate::vault_header::save_header_in_txn(txn, &header, &enc_key)?;
+            crate::vault_header::save_header_in_txn(txn, &header, enc_key.as_ref())?;
             database::vault_store::save_settings_in_txn(txn, &default_settings)?;
             Ok(())
         })?;
@@ -167,7 +173,15 @@ pub fn unlock_vault(
     // Step 4: Read and verify the AEAD-authenticated vault header (§5.1.4).
     // The header determines whether this is a legacy DB that needs migration,
     // or a modern DB that must fail-closed on integrity issues.
-    let header = crate::vault_header::load_header(&db, &enc_key)?;
+    let header = crate::vault_header::load_header(&db, enc_key.as_ref())?;
+    if header
+        .as_ref()
+        .is_some_and(|value| !crate::vault_header::is_supported(value))
+    {
+        return Err(VaultError::InvalidBackup(
+            "Database format is newer than this application".to_string(),
+        ));
+    }
     let integrity_required = crate::vault_header::is_integrity_required(header.as_ref());
 
     // Step 5-6: Verify integrity and migrate if needed.
@@ -187,7 +201,7 @@ pub fn unlock_vault(
                 "Database integrity check failed".to_string(),
             ));
         }
-        if !database::integrity::verify_integrity(&db, &mac_key)? {
+        if !database::integrity::verify_integrity(&db, mac_key.as_ref())? {
             // Digest mismatch → tampering detected → REJECT
             return Err(VaultError::InvalidBackup(
                 "Database integrity check failed".to_string(),
@@ -197,12 +211,18 @@ pub fn unlock_vault(
         // Legacy database (no header, or header with integrity_required=false).
         // Migration is triggered by the explicit absence of integrity protection.
         tracing::info!("migrating database from legacy format");
+        let steps = database::migrations::plan(0, crate::vault_header::VAULT_FORMAT_VERSION)?;
+        if steps != vec![database::migrations::MigrationStep::LegacyToV1] {
+            return Err(VaultError::InvalidBackup(
+                "Unsupported database migration path".to_string(),
+            ));
+        }
         let (mut master_key, _) = crypto::kdf::derive_key_with_params(
             password.as_str(),
             &verification_data.salt,
             &verification_data.params,
         )?;
-        let migrate_result = migrate_database(&db, &master_key, &enc_key, &mac_key);
+        let migrate_result = migrate_database(&db, &master_key, enc_key.as_ref(), mac_key.as_ref());
         master_key.zeroize();
         migrate_result?; // Error = stay Locked
     }
@@ -391,4 +411,215 @@ pub fn setup_vault(state: &Arc<AppState>) -> Result<bool, VaultError> {
     }
 
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::kdf::AdaptiveParams;
+    use redb::ReadableTable;
+    use tempfile::TempDir;
+
+    const TEST_PASSWORD: &str = "phase-one-test-password";
+    const TEST_SALT: [u8; 16] = [0x31; 16];
+
+    struct ModernVault {
+        state: Arc<AppState>,
+        _dir: TempDir,
+        entry_ids: Vec<String>,
+    }
+
+    fn create_modern_vault(entry_count: usize) -> ModernVault {
+        let dir = TempDir::new().unwrap();
+        let db = Arc::new(database::init_database(dir.path().join("modern.db")).unwrap());
+        let params = AdaptiveParams {
+            m_cost: 16384,
+            t_cost: 1,
+            p_cost: 1,
+        };
+        let (master_key, _) =
+            crypto::kdf::derive_key_with_params(TEST_PASSWORD, &TEST_SALT, &params).unwrap();
+        let verification = create_verification_header(&master_key, TEST_SALT, params).unwrap();
+        let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &TEST_SALT);
+        let mut entries = Vec::new();
+        let mut entry_ids = Vec::new();
+        for index in 0..entry_count {
+            let mut entry = database::PasswordEntry::new(
+                format!("Entry {index}"),
+                None,
+                format!("user-{index}"),
+            );
+            let encrypted =
+                crypto::encrypt(&enc_key, format!("secret-{index}").as_bytes()).unwrap();
+            entry.encrypted_password = bincode::serialize(&encrypted).unwrap();
+            entry_ids.push(entry.id.clone());
+            entries.push(entry);
+        }
+
+        let store = database::vault_store::VaultStore::new(&db);
+        store
+            .write(&mac_key, |txn| {
+                database::vault_store::save_verification_data_in_txn(txn, &verification)?;
+                crate::vault_header::save_header_in_txn(
+                    txn,
+                    &crate::vault_header::VaultHeader::new_initial(),
+                    &enc_key,
+                )?;
+                database::vault_store::save_settings_in_txn(txn, &Settings::default())?;
+                for entry in &entries {
+                    database::vault_store::save_entry_in_txn(txn, &enc_key, entry)?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+        let state = Arc::new(AppState::default());
+        *state.database.lock().unwrap() = Some(db);
+        *state.verification_data.lock().unwrap() = Some(verification);
+        ModernVault {
+            state,
+            _dir: dir,
+            entry_ids,
+        }
+    }
+
+    fn assert_tamper_rejected<F>(entry_count: usize, tamper: F)
+    where
+        F: FnOnce(&redb::Database, &[String]),
+    {
+        let vault = create_modern_vault(entry_count);
+        let db = get_db(&vault.state).unwrap();
+        tamper(&db, &vault.entry_ids);
+
+        let result = unlock_vault(&vault.state, Zeroizing::new(TEST_PASSWORD.to_string()));
+        assert!(result.is_err());
+        assert!(!vault.state.is_unlocked());
+        assert!(vault.state.session.get_enc_key().is_err());
+        assert!(vault.state.session.get_mac_key().is_err());
+    }
+
+    #[test]
+    fn missing_digest_is_rejected_without_publishing_keys() {
+        assert_tamper_rejected(1, |db, _| {
+            let txn = db.begin_write().unwrap();
+            {
+                let mut table = txn.open_table(database::integrity::META_TABLE).unwrap();
+                table.remove(database::integrity::DB_DIGEST_KEY).unwrap();
+            }
+            txn.commit().unwrap();
+        });
+    }
+
+    #[test]
+    fn unknown_digest_version_is_rejected_without_publishing_keys() {
+        assert_tamper_rejected(1, |db, _| {
+            let txn = db.begin_write().unwrap();
+            {
+                let mut table = txn.open_table(database::integrity::META_TABLE).unwrap();
+                table
+                    .insert(
+                        database::integrity::DB_DIGEST_VERSION_KEY,
+                        u32::MAX.to_le_bytes().as_slice(),
+                    )
+                    .unwrap();
+            }
+            txn.commit().unwrap();
+        });
+    }
+
+    #[test]
+    fn deleted_record_is_rejected_without_publishing_keys() {
+        assert_tamper_rejected(1, |db, ids| {
+            let txn = db.begin_write().unwrap();
+            {
+                let mut table = txn.open_table(database::ENTRIES_TABLE).unwrap();
+                table.remove(ids[0].as_str()).unwrap();
+            }
+            txn.commit().unwrap();
+        });
+    }
+
+    #[test]
+    fn swapped_record_blobs_are_rejected_without_publishing_keys() {
+        assert_tamper_rejected(2, |db, ids| {
+            let txn = db.begin_write().unwrap();
+            {
+                let mut table = txn.open_table(database::ENTRIES_TABLE).unwrap();
+                let first = table
+                    .get(ids[0].as_str())
+                    .unwrap()
+                    .unwrap()
+                    .value()
+                    .to_vec();
+                let second = table
+                    .get(ids[1].as_str())
+                    .unwrap()
+                    .unwrap()
+                    .value()
+                    .to_vec();
+                table.insert(ids[0].as_str(), second.as_slice()).unwrap();
+                table.insert(ids[1].as_str(), first.as_slice()).unwrap();
+            }
+            txn.commit().unwrap();
+        });
+    }
+
+    #[test]
+    fn legacy_fixture_migrates_once_and_unlocks_again_without_remigration() {
+        let (_dir, db_path, _) = crate::fixtures::create_pre_v1_0_5(3);
+        let db = Arc::new(redb::Database::open(db_path).unwrap());
+        let verification = database::load_verification_data(&db).unwrap().unwrap();
+        let state = Arc::new(AppState::default());
+        *state.database.lock().unwrap() = Some(Arc::clone(&db));
+        *state.verification_data.lock().unwrap() = Some(verification);
+
+        assert!(unlock_vault(
+            &state,
+            Zeroizing::new(crate::fixtures::FIXTURE_PASSWORD.to_string())
+        )
+        .unwrap());
+        let first_header =
+            crate::vault_header::load_header(&db, &state.session.get_enc_key().unwrap())
+                .unwrap()
+                .unwrap();
+        assert_eq!(first_header.migration_generation, 1);
+
+        lock_vault(&state);
+        assert!(unlock_vault(
+            &state,
+            Zeroizing::new(crate::fixtures::FIXTURE_PASSWORD.to_string())
+        )
+        .unwrap());
+        let second_header =
+            crate::vault_header::load_header(&db, &state.session.get_enc_key().unwrap())
+                .unwrap()
+                .unwrap();
+        assert_eq!(second_header.migration_generation, 1);
+    }
+
+    #[test]
+    fn failed_legacy_migration_keeps_session_locked() {
+        let (_dir, db_path, _) = crate::fixtures::create_pre_v1_0_5(1);
+        let db = Arc::new(redb::Database::open(db_path).unwrap());
+        let verification = database::load_verification_data(&db).unwrap().unwrap();
+        let ids = database::list_entries(&db).unwrap();
+        let txn = db.begin_write().unwrap();
+        {
+            let mut table = txn.open_table(database::ENTRIES_TABLE).unwrap();
+            table.insert(ids[0].as_str(), &[0xFF][..]).unwrap();
+        }
+        txn.commit().unwrap();
+
+        let state = Arc::new(AppState::default());
+        *state.database.lock().unwrap() = Some(db);
+        *state.verification_data.lock().unwrap() = Some(verification);
+        assert!(unlock_vault(
+            &state,
+            Zeroizing::new(crate::fixtures::FIXTURE_PASSWORD.to_string())
+        )
+        .is_err());
+        assert!(!state.is_unlocked());
+        assert!(state.session.get_enc_key().is_err());
+        assert!(state.session.get_mac_key().is_err());
+    }
 }

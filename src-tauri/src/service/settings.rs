@@ -1,45 +1,32 @@
 use std::sync::Arc;
 
 use crate::database::{load_settings, vault_store, Settings};
-use crate::service::vault::{get_db, get_mac_key};
+use crate::service::vault::get_db;
 use crate::{AppState, VaultError};
 
 pub fn get_settings(state: &Arc<AppState>) -> Result<Settings, VaultError> {
-    if !state.session.is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
+    let lease = state.lease()?;
     let db = get_db(state)?;
     let settings = load_settings(&db)?;
-    state.touch_activity();
+    lease.touch_activity();
     Ok(settings)
 }
 
 pub fn update_settings(state: &Arc<AppState>, settings: Settings) -> Result<Settings, VaultError> {
-    if !state.session.is_unlocked() {
-        return Err(VaultError::VaultLocked);
-    }
-    if settings.auto_lock_secs < 30 || settings.auto_lock_secs > 3600 {
-        return Err(VaultError::InternalError(
-            "Auto-lock timeout must be between 30 and 3600 seconds".to_string(),
-        ));
-    }
-    if settings.default_length < 4 || settings.default_length > 128 {
-        return Err(VaultError::InternalError(
-            "Password length must be between 4 and 128".to_string(),
-        ));
-    }
+    let lease = state.lease()?;
+    crate::validation::settings(&settings)?;
     let db = get_db(state)?;
-    let mac_key = get_mac_key(state)?;
+    let mac_key = lease.mac_key()?;
 
     // Single transaction: settings write + digest refresh (§5.1.2)
     let store = vault_store::VaultStore::new(&db);
-    store.write(&mac_key, |txn| {
+    store.write(mac_key, |txn| {
         vault_store::save_settings_in_txn(txn, &settings)?;
         Ok(())
     })?;
 
     // Apply auto-lock timeout immediately
     *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
-    state.touch_activity();
+    lease.touch_activity();
     Ok(settings)
 }

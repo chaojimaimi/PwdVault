@@ -21,6 +21,7 @@ pub(crate) const SETTINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition:
 pub mod entry_codec;
 pub mod group_codec;
 pub mod integrity;
+pub mod migrations;
 pub mod vault_store;
 
 // ============================================================================
@@ -30,19 +31,19 @@ pub mod vault_store;
 #[derive(Error, Debug)]
 pub enum DatabaseError {
     #[error("Database error: {0}")]
-    DatabaseError(#[from] redb::DatabaseError),
+    DatabaseError(Box<redb::DatabaseError>),
 
     #[error("Storage error: {0}")]
-    StorageError(#[from] redb::StorageError),
+    StorageError(Box<redb::StorageError>),
 
     #[error("Table error: {0}")]
-    TableError(#[from] redb::TableError),
+    TableError(Box<redb::TableError>),
 
     #[error("Transaction error: {0}")]
-    TransactionError(#[from] redb::TransactionError),
+    TransactionError(Box<redb::TransactionError>),
 
     #[error("Commit error: {0}")]
-    CommitError(#[from] CommitError),
+    CommitError(Box<CommitError>),
 
     #[error("Serialization error: {0}")]
     SerializationError(String),
@@ -61,6 +62,39 @@ pub enum DatabaseError {
 
     #[error("Vault not initialized")]
     VaultNotInitialized,
+
+    #[error("I/O error: {0}")]
+    IoError(#[from] std::io::Error),
+}
+
+impl From<redb::DatabaseError> for DatabaseError {
+    fn from(error: redb::DatabaseError) -> Self {
+        Self::DatabaseError(Box::new(error))
+    }
+}
+
+impl From<redb::StorageError> for DatabaseError {
+    fn from(error: redb::StorageError) -> Self {
+        Self::StorageError(Box::new(error))
+    }
+}
+
+impl From<redb::TableError> for DatabaseError {
+    fn from(error: redb::TableError) -> Self {
+        Self::TableError(Box::new(error))
+    }
+}
+
+impl From<redb::TransactionError> for DatabaseError {
+    fn from(error: redb::TransactionError) -> Self {
+        Self::TransactionError(Box::new(error))
+    }
+}
+
+impl From<CommitError> for DatabaseError {
+    fn from(error: CommitError) -> Self {
+        Self::CommitError(Box::new(error))
+    }
 }
 
 // ============================================================================
@@ -149,6 +183,33 @@ pub struct Settings {
     pub check_updates: bool,
 }
 
+/// Settings layout written by PwdVault versions before `check_updates` was
+/// added. Bincode encodes structs positionally, so serde's field default does
+/// not make a six-field record readable as the current seven-field struct.
+#[derive(Debug, Deserialize)]
+struct LegacySettingsV1 {
+    auto_lock_secs: u64,
+    default_length: usize,
+    default_include_uppercase: bool,
+    default_include_lowercase: bool,
+    default_include_numbers: bool,
+    default_include_symbols: bool,
+}
+
+impl From<LegacySettingsV1> for Settings {
+    fn from(legacy: LegacySettingsV1) -> Self {
+        Self {
+            auto_lock_secs: legacy.auto_lock_secs,
+            default_length: legacy.default_length,
+            default_include_uppercase: legacy.default_include_uppercase,
+            default_include_lowercase: legacy.default_include_lowercase,
+            default_include_numbers: legacy.default_include_numbers,
+            default_include_symbols: legacy.default_include_symbols,
+            check_updates: true,
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
@@ -173,7 +234,9 @@ impl Default for Settings {
 
 /// Initialize the database at the given path
 pub fn init_database<P: AsRef<Path>>(path: P) -> Result<Database, DatabaseError> {
-    let db = Database::create(path)?;
+    crate::paths::prepare_sensitive_file(path.as_ref())?;
+    let db = Database::create(path.as_ref())?;
+    crate::paths::secure_file(path.as_ref())?;
 
     // Create tables if they don't exist
     let write_txn = db.begin_write()?;
@@ -367,13 +430,18 @@ pub fn load_settings(db: &Database) -> Result<Settings, DatabaseError> {
     match table.get("current")? {
         Some(value) => {
             let data = value.value();
-            // Try JSON first (current format), then bincode (legacy format)
+            // Try JSON first (current format), then both bincode layouts used
+            // by released versions. Keep malformed data fail-closed.
             if let Ok(settings) = serde_json::from_slice::<Settings>(data) {
                 Ok(settings)
             } else if let Ok(settings) = bincode::deserialize::<Settings>(data) {
                 Ok(settings)
+            } else if let Ok(settings) = bincode::deserialize::<LegacySettingsV1>(data) {
+                Ok(settings.into())
             } else {
-                Ok(Settings::default())
+                Err(DatabaseError::DeserializationError(
+                    "settings record is corrupt".to_string(),
+                ))
             }
         }
         None => Ok(Settings::default()),
@@ -433,6 +501,52 @@ mod tests {
         let deleted = delete_entry(&db, &entry.id).unwrap();
         assert!(deleted);
         assert!(load_entry(&db, &TEST_KEY, &entry.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn corrupt_settings_do_not_fall_back_to_defaults() {
+        let (db, _temp) = get_test_db();
+        let txn = db.begin_write().unwrap();
+        {
+            let mut table = txn.open_table(SETTINGS_TABLE).unwrap();
+            table.insert("current", &[0xFF, 0x00][..]).unwrap();
+        }
+        txn.commit().unwrap();
+        assert!(load_settings(&db).is_err());
+    }
+
+    #[test]
+    fn legacy_bincode_settings_without_check_updates_are_supported() {
+        let (db, _temp) = get_test_db();
+        let legacy = LegacySettingsV1 {
+            auto_lock_secs: 300,
+            default_length: 24,
+            default_include_uppercase: true,
+            default_include_lowercase: true,
+            default_include_numbers: false,
+            default_include_symbols: true,
+        };
+        let encoded = bincode::serialize(&(
+            legacy.auto_lock_secs,
+            legacy.default_length,
+            legacy.default_include_uppercase,
+            legacy.default_include_lowercase,
+            legacy.default_include_numbers,
+            legacy.default_include_symbols,
+        ))
+        .unwrap();
+        let txn = db.begin_write().unwrap();
+        {
+            let mut table = txn.open_table(SETTINGS_TABLE).unwrap();
+            table.insert("current", encoded.as_slice()).unwrap();
+        }
+        txn.commit().unwrap();
+
+        let loaded = load_settings(&db).unwrap();
+        assert_eq!(loaded.auto_lock_secs, 300);
+        assert_eq!(loaded.default_length, 24);
+        assert!(!loaded.default_include_numbers);
+        assert!(loaded.check_updates);
     }
 
     #[test]

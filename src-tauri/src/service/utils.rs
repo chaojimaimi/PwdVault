@@ -9,8 +9,13 @@ pub fn generate_password(
     include_numbers: bool,
     include_symbols: bool,
 ) -> Result<String, VaultError> {
-    // Clamp length to sane bounds
-    let length = length.clamp(4, 128);
+    crate::validation::generator(
+        length,
+        include_uppercase,
+        include_lowercase,
+        include_numbers,
+        include_symbols,
+    )?;
 
     let mut charset = String::new();
     let mut required_chars = Vec::new();
@@ -31,12 +36,6 @@ pub fn generate_password(
     if include_symbols {
         charset.push_str("!@#$%^&*()_+-=[]{}|;:,.<>?");
         required_chars.push('!');
-    }
-
-    if charset.is_empty() {
-        return Err(VaultError::InternalError(
-            "At least one character type must be selected".to_string(),
-        ));
     }
 
     let mut rng = OsRng; // Use OS entropy source for better security

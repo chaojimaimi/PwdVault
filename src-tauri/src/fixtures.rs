@@ -63,7 +63,7 @@ pub fn create_v1_0_5_digest_v3(entry_count: usize) -> DbFixture {
     // re-derived mac_key in verification tests to differ from the one used
     // to build the fixture.
     let params = crypto::kdf::AdaptiveParams {
-        m_cost: 8192,
+        m_cost: 16384,
         t_cost: 1,
         p_cost: 1,
     };
@@ -267,6 +267,9 @@ pub fn create_backup_v1(entry_count: usize) -> (String, &'static str) {
     let backup = VaultBackup {
         version: 1,
         created_at: chrono::Utc::now().timestamp(),
+        magic: None,
+        kdf_name: None,
+        cipher_name: None,
         salt: b64.encode(salt),
         kdf_memory: params.m_cost,
         kdf_iterations: params.t_cost,
@@ -298,7 +301,7 @@ mod tests {
             FIXTURE_PASSWORD,
             &salt,
             &crypto::kdf::AdaptiveParams {
-                m_cost: 8192,
+                m_cost: 16384,
                 t_cost: 1,
                 p_cost: 1,
             },

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::{decrypt_with_aad, encrypt_with_aad, EncryptedData};
 use crate::database::{DatabaseError, VAULT_TABLE};
-use redb::{Database, ReadableTable, WriteTransaction};
+use redb::{Database, WriteTransaction};
 
 /// Current vault format version.
 pub const VAULT_FORMAT_VERSION: u32 = 1;
@@ -124,14 +124,19 @@ pub fn save_header_in_txn(
 /// with integrity_required=true). This is used by the unlock flow to decide
 /// whether missing/unknown digest versions should fail-closed.
 pub fn is_integrity_required(header: Option<&VaultHeader>) -> bool {
-    header.map_or(false, |h| h.integrity_required)
+    header.is_some_and(|h| h.integrity_required)
 }
 
 /// Check whether the stored digest version is known/compatible.
 pub fn is_digest_version_known(header: Option<&VaultHeader>) -> bool {
-    header.map_or(false, |h| {
-        h.digest_algorithm_version <= HEADER_DIGEST_VERSION
-    })
+    header.is_some_and(|h| h.digest_algorithm_version <= HEADER_DIGEST_VERSION)
+}
+
+pub fn is_supported(header: &VaultHeader) -> bool {
+    header.vault_format_version <= VAULT_FORMAT_VERSION
+        && header.schema_version <= HEADER_SCHEMA_VERSION
+        && header.record_format_version <= HEADER_RECORD_FORMAT_VERSION
+        && header.digest_algorithm_version <= HEADER_DIGEST_VERSION
 }
 
 #[cfg(test)]
@@ -146,7 +151,7 @@ mod tests {
         let sealed = header.seal(&TEST_KEY).unwrap();
         let opened = VaultHeader::open(&sealed, &TEST_KEY).unwrap();
         assert_eq!(opened.vault_format_version, header.vault_format_version);
-        assert_eq!(opened.integrity_required, true);
+        assert!(opened.integrity_required);
     }
 
     #[test]
@@ -173,5 +178,12 @@ mod tests {
         assert!(!is_integrity_required(None));
         let h = VaultHeader::new_initial();
         assert!(is_integrity_required(Some(&h)));
+    }
+
+    #[test]
+    fn future_format_is_not_supported() {
+        let mut header = VaultHeader::new_initial();
+        header.vault_format_version = VAULT_FORMAT_VERSION + 1;
+        assert!(!is_supported(&header));
     }
 }

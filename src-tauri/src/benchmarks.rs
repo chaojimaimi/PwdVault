@@ -39,7 +39,7 @@ fn setup_vault_with_entries(count: usize) -> (Arc<crate::AppState>, tempfile::Te
         "benchmark-password",
         &salt,
         &crypto::kdf::AdaptiveParams {
-            m_cost: 8192, // 8 MB — minimal for tests
+            m_cost: 16384, // Product-policy minimum for tests
             t_cost: 1,
             p_cost: 1,
         },

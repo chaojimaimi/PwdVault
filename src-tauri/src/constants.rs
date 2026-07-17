@@ -19,6 +19,9 @@ pub const MAX_NOTES_LENGTH: usize = 65536;
 /// Maximum HTTP request body size (10 MB).
 pub const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 
+/// Browser extension ↔ native host ↔ desktop protocol version.
+pub const NATIVE_PROTOCOL_VERSION: u16 = 1;
+
 // ---------------------------------------------------------------------------
 // Auto-lock
 // ---------------------------------------------------------------------------

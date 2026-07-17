@@ -15,6 +15,21 @@ export interface CreateEntryRequest {
   group_id?: string | null;
 }
 
+export interface UpdateEntryRequest {
+  title: string;
+  url?: string;
+  username: string;
+  /** Omit to preserve the encrypted password already stored by the backend. */
+  password?: string;
+  /** Omit with update_notes=false to preserve existing encrypted notes. */
+  notes?: string;
+  update_notes: boolean;
+  tags: string[];
+  group_id?: string | null;
+}
+
+export type ResourceStatus = 'idle' | 'loading' | 'success' | 'error';
+
 export interface EntrySecretResponse {
   password: string;
   notes?: string;
@@ -96,6 +111,9 @@ export const DEFAULT_SETTINGS: Settings = {
 export interface VaultBackup {
   version: number;
   created_at: number;
+  magic?: string;
+  kdf_name?: string;
+  cipher_name?: string;
   salt: string;
   kdf_memory: number;
   kdf_iterations: number;

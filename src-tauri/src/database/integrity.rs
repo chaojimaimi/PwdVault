@@ -10,8 +10,8 @@ use sha2::Sha256;
 use super::{DatabaseError, ENTRIES_TABLE, GROUPS_TABLE, SETTINGS_TABLE, VAULT_TABLE};
 
 pub const META_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
-const DB_DIGEST_KEY: &str = "db_digest";
-const DB_DIGEST_VERSION_KEY: &str = "db_digest_version";
+pub(crate) const DB_DIGEST_KEY: &str = "db_digest";
+pub(crate) const DB_DIGEST_VERSION_KEY: &str = "db_digest_version";
 const SCHEMA_VERSION_KEY: &str = "schema_version";
 
 /// Schema versions
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn test_integrity_digest_changes_on_mutation() {
         let temp = TempDir::new().unwrap();
-        let db = init_database(&temp.path().join("t.db")).unwrap();
+        let db = init_database(temp.path().join("t.db")).unwrap();
         let mac_key = [1u8; 32];
 
         let digest1 = compute_db_digest(&db, &mac_key).unwrap();
