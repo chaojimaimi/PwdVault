@@ -1,0 +1,31 @@
+name: CodeQL
+
+# §5.6.4 SAST analysis. Runs on PR and weekly schedule.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'  # Monday 06:00 UTC
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript]
+    steps:
+      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
+      - uses: github/codeql-action/init@fca7ace96375eb1b73c5c2b73b5a2f6d7e9ac7a9 # v3
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/analyze@fca7ace96375eb1b73c5c2b73b5a2f6d7e9ac7a9 # v3
+        with:
+          category: '/language:${{ matrix.language }}'

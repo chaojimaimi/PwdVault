@@ -1,12 +1,14 @@
 name: Quality Gates
 
-# Runs on every push to main and on every PR. These gates MUST pass before
-# any stable release tag is accepted. Development/nightly builds are not
-# affected — they are produced by the release.yml workflow_dispatch path.
+# §5.6.4 unified quality pipeline. Runs on every push to main and on every PR.
+# These gates MUST pass before any stable release tag is accepted.
 #
-# (Phase 0 of the Comprehensive Optimization Plan v1.0.5)
-# This workflow establishes the regression baseline. The release.yml workflow
-# will be wired to require these gates once Phase 6 lands.
+# Jobs:
+#   quality-frontend  — Node/pnpm pinned, tsc, vitest, ESLint
+#   quality-rust      — fmt, clippy -D warnings, test --locked (workspace)
+#   quality-native-host — fmt, clippy, test (native host binary)
+#   security          — cargo deny, cargo audit, pnpm audit, gitleaks
+#   version-consistency — 7-source version alignment
 
 on:
   push:
@@ -18,6 +20,12 @@ concurrency:
   group: quality-${{ github.ref }}
   cancel-in-progress: true
 
+# Pinned versions (§5.6.4): exact Node and pnpm major.minor to avoid
+# drift between CI runs.
+env:
+  NODE_VERSION: '20'
+  PNPM_VERSION: '9'
+
 jobs:
   # ---------------------------------------------------------------------------
   # Frontend: type-check, lint, test
@@ -25,42 +33,44 @@ jobs:
   quality-frontend:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
+      - uses: pnpm/action-setup@fe1f81f874a0c52c5a46f579b07807c8733132c5 # v4
         with:
-          version: latest
-      - uses: actions/setup-node@v4
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@1e60f620b9521f160767bc8cbe53c66c3d8d6c1b # v4
         with:
-          node-version: lts/*
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: TypeScript type-check
         run: pnpm tsc --noEmit
+      - name: ESLint
+        run: pnpm lint
       - name: Frontend tests
         run: pnpm test
 
   # ---------------------------------------------------------------------------
-  # Rust main app: fmt, clippy, test
+  # Rust workspace: fmt, clippy, test
   # ---------------------------------------------------------------------------
   quality-rust:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
+      - uses: dtolnay/rust-toolchain@1482605bfc571978aded9373ebabf15505c99e91 # stable
         with:
           components: rustfmt, clippy
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@a17f7ea6f727532c2c3b457b08a76588992d0231 # v2
         with:
           workspaces: './src-tauri -> target'
       - name: Check formatting
         working-directory: src-tauri
-        run: cargo fmt --check
-      - name: Clippy (deny warnings)
+        run: cargo fmt --check --all
+      - name: Clippy (deny warnings, all targets)
         working-directory: src-tauri
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Run tests
         working-directory: src-tauri
-        run: cargo test --locked
+        run: cargo test --workspace --locked
 
   # ---------------------------------------------------------------------------
   # Rust native host: fmt, clippy, test
@@ -68,8 +78,8 @@ jobs:
   quality-native-host:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
+      - uses: dtolnay/rust-toolchain@1482605bfc571978aded9373ebabf15505c99e91 # stable
         with:
           components: rustfmt, clippy
       - name: Check formatting (native host)
@@ -83,62 +93,57 @@ jobs:
         run: cargo test --locked
 
   # ---------------------------------------------------------------------------
-  # Security audit
+  # Security: cargo deny (advisories + licenses), cargo audit, pnpm audit,
+  # gitleaks secret scan
   # ---------------------------------------------------------------------------
-  security-audit:
-    runs-on: macos-latest
+  security:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
+      - uses: dtolnay/rust-toolchain@1482605bfc571978aded9373ebabf15505c99e91 # stable
+
+      # cargo-deny: advisories (RUSTSEC allowlist in deny.toml) + licenses
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+      - name: cargo deny check (main app)
+        working-directory: src-tauri
+        run: cargo deny check --config ../deny.toml
+      - name: cargo deny check (native host)
+        working-directory: extensions/native-host
+        run: cargo deny check --config ../../deny.toml
+
+      # cargo-audit: additional vulnerability database cross-check
       - name: Install cargo-audit
         run: cargo install cargo-audit
-      - name: Audit main app
+      - name: cargo audit (main app)
         working-directory: src-tauri
         run: cargo audit
-      - name: Audit native host
+      - name: cargo audit (native host)
         working-directory: extensions/native-host
         run: cargo audit
 
+      # pnpm audit: frontend dependency vulnerabilities
+      - uses: pnpm/action-setup@fe1f81f874a0c52c5a46f579b07807c8733132c5 # v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@1e60f620b9521f160767bc8cbe53c66c3d8d6c1b # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: pnpm audit (production deps)
+        run: pnpm audit --prod --audit-level moderate
+
+      # Gitleaks: scan for committed secrets
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@8e61c1f0c6dbb2c0f33f7d2d1be603b698467889 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # ---------------------------------------------------------------------------
-  # Version consistency: ensure all 8 version sources agree
+  # Version consistency: ensure all 7 version sources agree
   # ---------------------------------------------------------------------------
   version-consistency:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Check version consistency across all sources
-        run: |
-          set -euo pipefail
-
-          # Extract versions from each source (all use 3-part X.Y.Z)
-          VERSION_FILE=$(cat VERSION | tr -d '[:space:]')
-          PKG_JSON=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
-          CARGO_MAIN=$(python3 -c "import toml; print(toml.load(open('src-tauri/Cargo.toml'))['package']['version'])" 2>/dev/null || \
-            grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          TAURI_CONF=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
-          CARGO_HOST=$(grep '^version' extensions/native-host/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          CHROME_MANIFEST=$(python3 -c "import json; print(json.load(open('extensions/chrome/manifest.json'))['version'])")
-          FIREFOX_MANIFEST=$(python3 -c "import json; print(json.load(open('extensions/firefox/manifest.json'))['version'])")
-
-          echo "VERSION file:        $VERSION_FILE"
-          echo "package.json:        $PKG_JSON"
-          echo "Cargo.toml (main):   $CARGO_MAIN"
-          echo "tauri.conf.json:     $TAURI_CONF"
-          echo "Cargo.toml (host):   $CARGO_HOST"
-          echo "chrome manifest:     $CHROME_MANIFEST"
-          echo "firefox manifest:    $FIREFOX_MANIFEST"
-
-          # All product components must agree — including the native host.
-          # Per §5.6.5, the native host product version is part of the same
-          # release set as the desktop app; the only independent version is
-          # NATIVE_PROTOCOL_VERSION (constants.rs), which tracks wire format.
-          SOURCES=("$VERSION_FILE" "$PKG_JSON" "$CARGO_MAIN" "$TAURI_CONF" "$CHROME_MANIFEST" "$FIREFOX_MANIFEST" "$CARGO_HOST")
-          REFERENCE="$PKG_JSON"
-          for v in "${SOURCES[@]}"; do
-            if [ "$v" != "$REFERENCE" ]; then
-              echo "❌ Version mismatch: expected $REFERENCE, got $v"
-              exit 1
-            fi
-          done
-
-          echo "✅ Version consistency check passed (all 7 sources at $REFERENCE)"
+      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
+      - name: Check version consistency
+        run: bash scripts/bump-version.sh --check

@@ -1,0 +1,45 @@
+# cargo-deny configuration (§5.6.4 security + license policy).
+#
+# Run: cargo deny check
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+# RUSTSEC warnings are allowed but tracked. Unallowed advisories fail the
+# check. Each ignore entry below has a reason and should carry an expiry.
+# See docs/SECURITY-ADVISORY-ALLOWLIST.md for the full rationale table.
+db-urls = ["https://github.com/RustSec/advisory-db"]
+ignore = [
+    # bincode 1.x — unmaintained but no drop-in replacement available; used
+    # for redb value serialization. Tracked for migration to bincode 2 or
+    # postcard in a future release.
+    { id = "RUSTSEC-2024-0370", reason = "bincode 1.x unmaintained; no drop-in replacement yet; migration planned", until = "2026-12-31" },
+]
+yanked = "warn"
+
+[licenses]
+# Allow common permissive and weak-copyleft licenses. GPL/AGPL are rejected.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Warn on duplicate dependencies; don't fail (Tauri pulls many transitives).
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+# Only allow crates from crates.io.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

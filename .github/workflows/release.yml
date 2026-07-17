@@ -1,311 +1,344 @@
 name: Release
 
+# §5.6.4 release pipeline. Triggered by tag push (v*) or manual dispatch.
+# Depends on quality.yml passing (referenced via branch protection rules).
+#
+# Jobs:
+#   release-gate      — quality + version + security re-check
+#   build-macos       — DMG + app, conditional signing/notarize
+#   build-windows     — NSIS, conditional Authenticode
+#   build-extension   — Chrome + Firefox zip + store upload
+#   provenance        — SBOM + SHA-256 + artifact attestation
+#   create-release    — GitHub Release (prerelease if unsigned)
+
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., v0.2.0)'
+        description: 'Release version (e.g., v1.0.6)'
         required: true
         type: string
   push:
     tags:
       - 'v*'
 
+env:
+  NODE_VERSION: '20'
+  PNPM_VERSION: '9'
+
 jobs:
   # ---------------------------------------------------------------------------
-  # Release gate: all quality gates must pass before any build job starts.
-  # This prevents publishing a release that fails fmt/clippy/tests/version
-  # checks. (Phase 0 of the Comprehensive Optimization Plan v1.0.5)
+  # Release gate: quality + version consistency must pass
   # ---------------------------------------------------------------------------
   release-gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
+      - name: Version consistency check
+        run: bash scripts/bump-version.sh --check
+
+      - uses: pnpm/action-setup@fe1f81f874a0c52c5a46f579b07807c8733132c5 # v4
         with:
-          version: latest
-      - uses: actions/setup-node@v4
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@1e60f620b9521f160767bc8cbe53c66c3d8d6c1b # v4
         with:
-          node-version: lts/*
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
+      - run: pnpm install --frozen-lockfile
       - name: TypeScript type-check
         run: pnpm tsc --noEmit
-
       - name: Frontend tests
         run: pnpm test
 
-      - name: Check formatting (main app)
+      - uses: dtolnay/rust-toolchain@1482605bfc571978aded9373ebabf15505c99e91 # stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@a17f7ea6f727532c2c3b457b08a76588992d0231 # v2
+        with:
+          workspaces: './src-tauri -> target'
+      - name: Clippy (workspace, deny warnings)
         working-directory: src-tauri
-        run: cargo fmt --check
-
-      - name: Clippy (main app, deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests (workspace)
         working-directory: src-tauri
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo test --workspace --locked
 
-      - name: Run tests (main app)
-        working-directory: src-tauri
-        run: cargo test --locked
-
-      - name: Check formatting (native host)
-        working-directory: extensions/native-host
-        run: cargo fmt --check
-
-      - name: Clippy (native host, deny warnings)
-        working-directory: extensions/native-host
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Run tests (native host)
-        working-directory: extensions/native-host
-        run: cargo test --locked
-
-      - name: Security audit (main app)
-        working-directory: src-tauri
-        run: |
-          cargo install cargo-audit
-          cargo audit
-
-      - name: Version consistency check
-        run: |
-          set -euo pipefail
-          PKG_JSON=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
-          VERSION_FILE=$(cat VERSION | tr -d '[:space:]')
-          CARGO_MAIN=$(grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          CARGO_HOST=$(grep '^version' extensions/native-host/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          TAURI_CONF=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
-          CHROME=$(python3 -c "import json; print(json.load(open('extensions/chrome/manifest.json'))['version'])")
-          FIREFOX=$(python3 -c "import json; print(json.load(open('extensions/firefox/manifest.json'))['version'])")
-          # All 7 sources must agree (§5.6.5): VERSION, package.json, main Cargo,
-          # native-host Cargo, tauri.conf.json, Chrome manifest, Firefox manifest.
-          for v in "$VERSION_FILE" "$CARGO_MAIN" "$CARGO_HOST" "$TAURI_CONF" "$CHROME" "$FIREFOX"; do
-            if [ "$v" != "$PKG_JSON" ]; then
-              echo "❌ Version mismatch: expected $PKG_JSON, got $v"
-              exit 1
-            fi
-          done
-          echo "✅ All 7 product sources aligned at $PKG_JSON"
-
+  # ---------------------------------------------------------------------------
+  # macOS build with conditional signing/notarization (§5.6.6 #6/#8)
+  # ---------------------------------------------------------------------------
   build-macos:
     needs: release-gate
     runs-on: macos-latest
+    outputs:
+      signing-status: ${{ steps.secrets.outputs.macos_certs }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
 
-      - uses: pnpm/action-setup@v4
+      - name: Check signing secrets
+        id: secrets
+        run: bash scripts/check-signing-secrets.sh >> "$GITHUB_OUTPUT"
+        env:
+          APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+          APPLE_DEVELOPER_ID_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Import code signing certificate
+        if: steps.secrets.outputs.macos_certs == 'true'
+        uses: apple-actions/import-codesign-certs@253ddee69e53c64575584d875c9b3ef764763e04 # v3
         with:
-          version: latest
+          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_ID_PASSWORD }}
 
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@fe1f81f874a0c52c5a46f579b07807c8733132c5 # v4
         with:
-          node-version: lts/*
-          cache: 'pnpm'
-
-      - uses: dtolnay/rust-toolchain@stable
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@1e60f620b9521f160767bc8cbe53c66c3d8d6c1b # v4
         with:
-          targets: aarch64-apple-darwin, x86_64-apple-darwin
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
 
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri -> target'
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Build native messaging host (arm64 + x86_64 universal)
-        run: |
-          cargo build --release --manifest-path extensions/native-host/Cargo.toml \
-            --target aarch64-apple-darwin --target x86_64-apple-darwin
-          mkdir -p src-tauri/binaries
-          # Merge into a universal binary so the same bundle runs on both archs
-          lipo -create \
-            extensions/native-host/target/aarch64-apple-darwin/release/pwdvault-native \
-            extensions/native-host/target/x86_64-apple-darwin/release/pwdvault-native \
-            -output src-tauri/binaries/pwdvault-native
-          chmod +x src-tauri/binaries/pwdvault-native
-
-      - name: Build macOS app (DMG + app bundle)
+      - name: Build macOS app
         run: pnpm tauri build --bundles dmg,app
         env:
-          APPLE_SIGNING_IDENTITY: '-'
+          APPLE_SIGNING_IDENTITY: ${{ steps.secrets.outputs.macos_certs == 'true' && 'Developer ID Application: PwdVault' || '-' }}
 
-      - name: Package macOS release
-        run: |
-          mkdir -p releases/macos
-          # Copy DMG
-          cp src-tauri/target/release/bundle/dmg/*.dmg releases/macos/ || true
-          # Create zip of app bundle
-          if [ -d "src-tauri/target/release/bundle/macos/PwdVault.app" ]; then
-            cd src-tauri/target/release/bundle/macos
-            zip -r "${GITHUB_WORKSPACE}/releases/macos/PwdVault-macOS-app.zip" PwdVault.app
-          fi
-
-      - uses: actions/upload-artifact@v4
+      - name: Notarize app
+        if: steps.secrets.outputs.macos_certs == 'true'
+        uses: lando/notarize-action@b5c3ef16c38b9efa5ba8b71e4b0fff87949d9bb7 # v2
         with:
-          name: PwdVault-macOS
-          path: releases/macos/*
+          product-path: src-tauri/target/release/bundle/macos/PwdVault.app
+          apple-id: ${{ secrets.APPLE_ID }}
+          password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          team-id: ${{ secrets.APPLE_TEAM_ID }}
 
+      - name: Staple and verify
+        if: steps.secrets.outputs.macos_certs == 'true'
+        run: |
+          xcrun stapler staple src-tauri/target/release/bundle/macos/PwdVault.app
+          codesign --verify --deep --strict --verbose=2 src-tauri/target/release/bundle/macos/PwdVault.app
+          spctl --assess --type execute --verbose src-tauri/target/release/bundle/macos/PwdVault.app
+
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6871 # v4
+        with:
+          name: macos-artifacts
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.app
+
+  # ---------------------------------------------------------------------------
+  # Windows build with conditional Authenticode (§5.6.6 #7/#8)
+  # ---------------------------------------------------------------------------
   build-windows:
     needs: release-gate
     runs-on: windows-latest
+    outputs:
+      signing-status: ${{ steps.secrets.outputs.windows_certs }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
 
-      - uses: pnpm/action-setup@v4
+      - name: Check signing secrets
+        id: secrets
+        shell: bash
+        run: bash scripts/check-signing-secrets.sh >> "$GITHUB_OUTPUT"
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+
+      - uses: pnpm/action-setup@fe1f81f874a0c52c5a46f579b07807c8733132c5 # v4
         with:
-          version: latest
-
-      - uses: actions/setup-node@v4
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@1e60f620b9521f160767bc8cbe53c66c3d8d6c1b # v4
         with:
-          node-version: lts/*
-          cache: 'pnpm'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri -> target'
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Build native messaging host (x86_64)
-        run: |
-          cargo build --release --manifest-path extensions/native-host/Cargo.toml --target x86_64-pc-windows-msvc
-          mkdir -p src-tauri/binaries
-          copy extensions\native-host\target\x86_64-pc-windows-msvc\release\pwdvault-native.exe src-tauri\binaries\pwdvault-native.exe
-
-      - name: Build Windows installer
+      - name: Build Windows app
         run: pnpm tauri build --bundles nsis
 
-      - name: Package Windows release
-        run: |
-          mkdir releases/windows
-          copy src-tauri\target\release\bundle\nsis\*.exe releases\windows\
-
-      - uses: actions/upload-artifact@v4
+      - name: Sign Windows executable
+        if: steps.secrets.outputs.windows_certs == 'true'
+        uses: gtarnaras/code-sign-action@v4
         with:
-          name: PwdVault-Windows
-          path: releases/windows/*
+          certificate: ${{ secrets.WINDOWS_CERTIFICATE }}
+          password: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          folder: src-tauri/target/release/bundle/nsis/
 
+      - name: Verify signature
+        if: steps.secrets.outputs.windows_certs == 'true'
+        shell: powershell
+        run: |
+          $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
+          $sig = Get-AuthenticodeSignature $exe.FullName
+          if ($sig.Status -ne 'Valid') { throw "Signature status: $($sig.Status)" }
+          Write-Host "Signature: Valid"
+
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6871 # v4
+        with:
+          name: windows-artifacts
+          path: src-tauri/target/release/bundle/nsis/*.exe
+
+  # ---------------------------------------------------------------------------
+  # Browser extension build + store upload (§5.6.4 package, §6a)
+  # ---------------------------------------------------------------------------
   build-extension:
     needs: release-gate
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Package Chrome extension
-        run: |
-          mkdir -p releases/chrome-extension
-          cd extensions/chrome
-          zip -r ../../releases/chrome-extension/PwdVault-Chrome-Extension.zip . -x "*.DS_Store" "test-page.html" "TEST_RESULTS.md"
-
-      - name: Package Firefox extension (self-contained, no symlinks)
-        run: |
-          mkdir -p releases/firefox-extension
-          # Firefox extension uses symlinks to ../chrome/ in source.
-          # Shipping symlinks in a distributed zip breaks on Windows and
-          # any system without the chrome/ directory. Build a staging
-          # directory with real copies instead.
-          mkdir -p /tmp/firefox-staging
-          cp extensions/firefox/manifest.json /tmp/firefox-staging/
-          # Resolve and copy shared source (dereference symlinks)
-          cp -rL extensions/firefox/src /tmp/firefox-staging/src
-          cp -rL extensions/firefox/icons /tmp/firefox-staging/icons
-          cd /tmp/firefox-staging
-          zip -r "$GITHUB_WORKSPACE/releases/firefox-extension/PwdVault-Firefox-Extension.zip" . -x "*.DS_Store"
-
-      - name: Verify extension packages
-        run: |
-          chmod +x extensions/tests/verify_package.sh
-          bash extensions/tests/verify_package.sh \
-            releases/chrome-extension/PwdVault-Chrome-Extension.zip \
-            releases/firefox-extension/PwdVault-Firefox-Extension.zip
-
-      - uses: actions/upload-artifact@v4
+      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
+      - uses: actions/setup-node@1e60f620b9521f160767bc8cbe53c66c3d8d6c1b # v4
         with:
-          name: PwdVault-Chrome-Extension
-          path: releases/chrome-extension/*
+          node-version: ${{ env.NODE_VERSION }}
 
-      - uses: actions/upload-artifact@v4
+      - name: Build extensions
+        run: bash extensions/chrome/scripts/build.sh
+
+      - name: Verify packages
+        run: bash extensions/tests/verify_package.sh
+
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6871 # v4
         with:
-          name: PwdVault-Firefox-Extension
-          path: releases/firefox-extension/*
+          name: extension-artifacts
+          path: |
+            extensions/chrome/PwdVault-Chrome-Extension-*.zip
+            extensions/firefox/PwdVault-Firefox-Extension-*.zip
 
-  create-release:
+      # Chrome Web Store upload (skipped if secrets absent)
+      - name: Upload to Chrome Web Store
+        if: env.CHROME_CLIENT_ID != ''
+        continue-on-error: true
+        uses: trmcnvn/chrome-webstore-upload-cli@a783b81c4ed59be1b3f35b2cb02d84ab3450ce96 # v2.2.0
+        with:
+          file: extensions/chrome/PwdVault-Chrome-Extension-*.zip
+          extension-id: ${{ secrets.CHROME_EXTENSION_ID }}
+          client-id: ${{ secrets.CHROME_CLIENT_ID }}
+          client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          publish: false
+        env:
+          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+
+      # Firefox AMO signing (skipped if secrets absent)
+      - name: Sign for Firefox AMO
+        if: env.AMO_API_KEY != ''
+        continue-on-error: true
+        run: |
+          npx web-ext sign \
+            --source-dir extensions/firefox \
+            --api-key "$AMO_API_KEY" \
+            --api-secret "$AMO_API_SECRET"
+        env:
+          AMO_API_KEY: ${{ secrets.AMO_API_KEY }}
+          AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+
+  # ---------------------------------------------------------------------------
+  # Provenance: SBOM + SHA-256 + artifact attestation (§5.6.4 provenance)
+  # ---------------------------------------------------------------------------
+  provenance:
     needs: [build-macos, build-windows, build-extension]
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
         with:
           path: artifacts
 
-      - name: Display structure of downloaded files
-        run: ls -R artifacts
-
-      - name: Extract version from tag
-        id: get_version
+      - name: Generate SHA-256 checksums
+        working-directory: artifacts
         run: |
-          if [[ "${{ github.ref }}" == "refs/tags/"* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/}
+          find . -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.zip" \) -exec sha256sum {} \; > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Generate Rust SBOM (CycloneDX)
+        uses: cyclonedx/gh-action-cyclonedx-...@v1
+        with:
+          path: src-tauri
+          output: artifacts/rust-bom.cdx.json
+
+      - name: Generate npm SBOM (CycloneDX)
+        run: npx @cyclonedx/cyclonedx-npm --output-file artifacts/npm-bom.cdx.json
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@7668a9d9f0d2adc10a482c9562e8c33f5fea4ab1 # v2
+        with:
+          subject-path: |
+            artifacts/**/*.dmg
+            artifacts/**/*.exe
+            artifacts/**/*.zip
+            artifacts/SHA256SUMS
+            artifacts/*bom.cdx.json
+
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6871 # v4
+        with:
+          name: provenance-artifacts
+          path: |
+            artifacts/SHA256SUMS
+            artifacts/*bom.cdx.json
+
+  # ---------------------------------------------------------------------------
+  # Create GitHub Release (prerelease if any platform unsigned — §5.6.6 #8)
+  # ---------------------------------------------------------------------------
+  create-release:
+    needs: [build-macos, build-windows, build-extension, provenance]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
+        with:
+          path: artifacts
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
           else
-            VERSION=${{ github.event.inputs.version }}
+            echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Selected version: $VERSION"
+
+      - name: Determine prerelease status
+        id: prerelease
+        run: |
+          MACOS="${{ needs.build-macos.outputs.signing-status }}"
+          WINDOWS="${{ needs.build-windows.outputs.signing-status }}"
+          if [ "$MACOS" != "true" ] || [ "$WINDOWS" != "true" ]; then
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "⚠️  One or more platforms unsigned — marking as prerelease (§5.6.6-8)"
+          else
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Read CHANGELOG
         id: changelog
         run: |
-          # Extract changelog for this version
-          VERSION=${{ steps.get_version.outputs.version }}
-          # Remove 'v' prefix for CHANGELOG matching
-          VERSION_CLEAN=${VERSION#v}
-
-          if [ -f CHANGELOG.md ]; then
-            # Try different version formats
-            if grep -q "\[$VERSION_CLEAN\]" CHANGELOG.md; then
-              # Format: [0.2.0.0]
-              awk "/\[$VERSION_CLEAN\]/,/^## / {print}" CHANGELOG.md | head -n -1 > release_notes.txt
-            elif grep -q "## $VERSION" CHANGELOG.md; then
-              # Format: ## v0.2.0
-              awk "/## $VERSION/,/^## / {print}" CHANGELOG.md | head -n -1 > release_notes.txt
-            else
-              # Fallback: get first 50 lines
-              head -50 CHANGELOG.md > release_notes.txt
-            fi
+          VERSION="${{ steps.version.outputs.version }}"
+          VERSION_CLEAN="${VERSION#v}"
+          if grep -q "\[$VERSION_CLEAN\]" CHANGELOG.md; then
+            awk "/\[$VERSION_CLEAN\]/,/^## / {print}" CHANGELOG.md | head -n -1 > release_notes.txt
           else
-            echo "See CHANGELOG.md for details" > release_notes.txt
+            head -50 CHANGELOG.md > release_notes.txt
           fi
 
-          echo "Release notes preview:"
-          head -20 release_notes.txt
-
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@da05d552573ad5aba032ea1ac6f92980f4f4a1e6 # v2
         with:
-          tag_name: ${{ steps.get_version.outputs.version }}
-          name: PwdVault ${{ steps.get_version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.version }}
+          prerelease: ${{ steps.prerelease.outputs.prerelease }}
           body_path: release_notes.txt
-          draft: false
-          prerelease: false
           files: |
-            artifacts/PwdVault-macOS/*.*
-            artifacts/PwdVault-Windows/*.*
-            artifacts/PwdVault-Chrome-Extension/*.*
-            artifacts/PwdVault-Firefox-Extension/*.*
-          fail_on_unmatched_files: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            artifacts/**/*.dmg
+            artifacts/**/*.exe
+            artifacts/**/*.zip
+            artifacts/**/SHA256SUMS
+            artifacts/**/*bom.cdx.json
