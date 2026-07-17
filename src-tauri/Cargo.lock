@@ -3231,6 +3231,7 @@ dependencies = [
  "hkdf",
  "hmac",
  "once_cell",
+ "pwdvault-domain",
  "rand 0.8.6",
  "redb",
  "semver",
@@ -3252,6 +3253,19 @@ dependencies = [
  "ureq",
  "uuid",
  "winreg",
+ "zeroize",
+]
+
+[[package]]
+name = "pwdvault-domain"
+version = "1.0.5"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
  "zeroize",
 ]
 

@@ -1,0 +1,18 @@
+[package]
+name = "pwdvault-domain"
+version = "1.0.5"
+edition = "2021"
+description = "PwdVault domain model — entities, DTOs, validation policy, error codes"
+
+[lib]
+name = "pwdvault_domain"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+zeroize = { version = "1", features = ["derive", "serde"] }
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }

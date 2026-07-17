@@ -9,6 +9,18 @@ edition = "2021"
 name = "pwdvault_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# ---------------------------------------------------------------------------
+# Workspace (§5.6.3) — PwdVault is progressively split into domain /
+# infrastructure / application / tauri-app / native-host crates. The main
+# `pwdvault` crate remains the Tauri binary while members migrate.
+# ---------------------------------------------------------------------------
+[workspace]
+members = ["crates/domain"]
+
+# The main crate currently still owns the Tauri binary + legacy src/ tree.
+# As modules migrate into workspace members, they will be re-exported from
+# here until the split is complete.
+
 # Required for production binaries to serve the embedded frontend through
 # Tauri's application protocol instead of trying the Vite development URL.
 [features]
@@ -18,6 +30,9 @@ custom-protocol = ["tauri/custom-protocol"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# Workspace members
+pwdvault-domain = { path = "crates/domain" }
+
 # Tauri
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
