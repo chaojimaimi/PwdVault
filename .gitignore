@@ -44,6 +44,20 @@ vault.db
 /releases/PwdVault-*-Extension-*/
 /releases/pwdvault-native-*/
 /releases/pairing-toast-*.html
+# Release bundles and expanded subdirectories (any versioned subfolder)
+/releases/*/
+/releases/**/*.zip
+/releases/**/*.dmg
+/releases/**/*.exe
+/releases/**/pwdvault-native*
+/releases/**/PwdVault-*-Extension-*/
+
+# Python bytecode / caches (Phase 5 automation)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
 
 # Environment variables
 .env
