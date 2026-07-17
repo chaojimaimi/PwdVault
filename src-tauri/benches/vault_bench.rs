@@ -13,9 +13,10 @@
 //! extrapolated or added once seeding is amortized).
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use pwdvault_lib::database::{self, PasswordEntry};
-use pwdvault_lib::database::integrity;
-use pwdvault_lib::database::vault_store::VaultStore;
+use pwdvault_infrastructure::database::{self, PasswordEntry};
+use pwdvault_infrastructure::database::integrity;
+use pwdvault_infrastructure::database::vault_store::VaultStore;
+use pwdvault_infrastructure::crypto;
 use redb::Database;
 use tempfile::TempDir;
 
@@ -46,7 +47,7 @@ fn build_db(n: usize) -> (Database, [u8; 32], [u8; 32], TempDir) {
                 format!("user{}", i),
             );
             entry.encrypted_password =
-                pwdvault_lib::crypto::encrypt(&enc_key, b"bench-password")
+                crypto::encrypt(&enc_key, b"bench-password")
                     .ok()
                     .and_then(|d| bincode::serialize(&d).ok())
                     .unwrap_or_default();

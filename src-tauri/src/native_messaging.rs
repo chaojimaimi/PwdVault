@@ -12,11 +12,11 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use zeroize::Zeroizing;
 
-use crate::auth;
-use crate::constants;
-use crate::database;
-use crate::service;
-use crate::{AppState, CreateEntryRequest, UpdateEntryRequest, VaultBackup, VaultError};
+use pwdvault_infrastructure::auth;
+use pwdvault_domain::constants;
+use pwdvault_infrastructure::database;
+use pwdvault_application::service;
+use pwdvault_application::{AppState, CreateEntryRequest, UpdateEntryRequest, VaultBackup, VaultError};
 
 const HTTP_WORKERS: usize = 8;
 const HTTP_QUEUE_CAPACITY: usize = 64;
@@ -518,7 +518,7 @@ fn execute_command(
 
         "revoke_extension_access" => {
             auth::revoke_extension_access();
-            crate::pairing::cancel_all_sessions();
+            pwdvault_infrastructure::pairing::cancel_all_sessions();
             Ok(serde_json::json!(true))
         }
 
@@ -566,7 +566,7 @@ fn execute_command(
                 *pair_count += 1;
             }
 
-            let challenge = crate::pairing::create_session(caller);
+            let challenge = pwdvault_infrastructure::pairing::create_session(caller);
             // Notify desktop UI to display the pairing code.
             if let Some(handle) = app_handle {
                 let _ = handle.emit("pair-request", &challenge.code);
@@ -581,7 +581,7 @@ fn execute_command(
             let caller = caller.as_deref().ok_or("Browser caller required")?;
             let session_nonce = req.session_nonce.ok_or("Pairing session required")?;
             let user_code = req.code.ok_or("Code required")?;
-            if crate::pairing::verify(caller, session_nonce.as_str(), user_code.as_str()) {
+            if pwdvault_infrastructure::pairing::verify(caller, session_nonce.as_str(), user_code.as_str()) {
                 let token = auth::get_token();
                 Ok(serde_json::json!({ "token": token }))
             } else {
@@ -772,7 +772,7 @@ fn execute_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto;
+    use pwdvault_infrastructure::crypto;
     use tempfile::TempDir;
 
     /// Helper: create a test AppState with a temp database
@@ -915,7 +915,7 @@ mod tests {
     fn test_pair_confirm_success() {
         let (state, _temp) = setup_test_state();
         let caller = "chrome-extension://confirm-success";
-        let challenge = crate::pairing::create_session(caller);
+        let challenge = pwdvault_infrastructure::pairing::create_session(caller);
         let confirm_req = NativeRequest {
             id: 1,
             command: "pair_confirm".to_string(),
@@ -931,7 +931,7 @@ mod tests {
     fn test_pair_confirm_wrong_code_fails() {
         let (state, _temp) = setup_test_state();
         let caller = "chrome-extension://confirm-wrong-code";
-        let challenge = crate::pairing::create_session(caller);
+        let challenge = pwdvault_infrastructure::pairing::create_session(caller);
         let req = NativeRequest {
             id: 1,
             command: "pair_confirm".to_string(),
@@ -1197,8 +1197,9 @@ mod tests {
 
         // Verify password was re-encrypted
         let db = state.database.lock().expect("db lock").clone().expect("db");
-        let key = state.session.get_enc_key().unwrap();
-        let entry = database::load_entry(&db, &key, result["id"].as_str().unwrap())
+        let lease = state.lease().unwrap();
+        let key = lease.enc_key().unwrap();
+        let entry = database::load_entry(&db, key, result["id"].as_str().unwrap())
             .unwrap()
             .unwrap();
         let enc: crypto::EncryptedData = bincode::deserialize(&entry.encrypted_password).unwrap();
