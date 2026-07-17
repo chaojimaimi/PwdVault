@@ -1,4 +1,5 @@
 import React from 'react';
+import { AccessibleDialog } from './AccessibleDialog';
 
 export interface ChangeItem {
   fieldId: string;
@@ -34,11 +35,15 @@ export function ConfirmationModal({
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true">
-      <div className="confirm-modal">
+    <AccessibleDialog
+      isOpen={isOpen}
+      onClose={() => { if (!isSaving) onCancel(); }}
+      labelledBy="changes-dialog-title"
+      describedBy="changes-dialog-description"
+      className="confirm-modal"
+      closeOnOverlay={!isSaving}
+    >
         <div className="confirm-modal-header">
           <div className="confirm-modal-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -46,8 +51,8 @@ export function ConfirmationModal({
             </svg>
           </div>
           <div>
-            <h3 className="confirm-modal-title">{title}</h3>
-            <p className="confirm-modal-subtitle">{changes.length} {changes.length === 1 ? 'change' : 'changes'} to review</p>
+            <h3 className="confirm-modal-title" id="changes-dialog-title">{title}</h3>
+            <p className="confirm-modal-subtitle" id="changes-dialog-description">{changes.length} {changes.length === 1 ? 'change' : 'changes'} to review</p>
           </div>
         </div>
 
@@ -99,8 +104,7 @@ export function ConfirmationModal({
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </AccessibleDialog>
   );
 }
 

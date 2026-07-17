@@ -4,38 +4,9 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0F0F14" />
+    <meta name="theme-color" content="#F8FAFC" />
     <title>PwdVault</title>
-    <!-- Google Fonts: Classic + Hybrid -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-    <!-- Google Fonts: Cyber -->
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-    <script>
-      // Apply saved theme before render to prevent flash
-      (function() {
-        var theme = localStorage.getItem('pwdvault-theme') || 'classic';
-        document.documentElement.setAttribute('data-theme', theme);
-      })();
-    </script>
-    <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
-      body {
-        font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-        background: var(--color-bg, #0F0F14);
-        color: var(--color-text, #E8E8ED);
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-      }
-      #root {
-        min-height: 100vh;
-      }
-    </style>
+    <script type="module" src="/src/theme-bootstrap.ts"></script>
   </head>
   <body>
     <div id="root"></div>

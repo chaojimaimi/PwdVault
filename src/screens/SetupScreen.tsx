@@ -41,7 +41,7 @@ export function SetupScreen() {
           <p>Create your master password</p>
         </div>
 
-        {error && <div className="error-message">{error}</div>}
+        {error && <div className="error-message" id="setup-error" role="alert">{error}</div>}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -55,6 +55,8 @@ export function SetupScreen() {
               placeholder="Enter master password"
               autoFocus
               disabled={state.isLoading}
+              aria-invalid={!!error}
+              aria-describedby={error ? 'setup-error' : undefined}
             />
           </div>
 
@@ -68,6 +70,8 @@ export function SetupScreen() {
               onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder="Confirm master password"
               disabled={state.isLoading}
+              aria-invalid={!!error}
+              aria-describedby={error ? 'setup-error' : undefined}
             />
           </div>
 

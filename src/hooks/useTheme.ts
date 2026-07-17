@@ -1,33 +1,56 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
-export type ThemeName = 'light' | 'dark';
+export type ThemeName = 'system' | 'light' | 'dark';
 
 const STORAGE_KEY = 'pwdvault-theme';
-const THEMES: ThemeName[] = ['light', 'dark'];
+const THEMES: ThemeName[] = ['system', 'light', 'dark'];
+let sessionTheme: ThemeName | null = null;
 
-function getSystemPreference(): ThemeName {
+function getSystemPreference(): 'light' | 'dark' {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
 function getSnapshot(): ThemeName {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (THEMES.includes(stored as ThemeName)) return stored as ThemeName;
-  return getSystemPreference();
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (THEMES.includes(stored as ThemeName)) return stored as ThemeName;
+  } catch {
+    // Fall through to System when storage is unavailable.
+  }
+  return sessionTheme ?? 'system';
 }
 
 function getServerSnapshot(): ThemeName {
-  return 'light';
+  return 'system';
 }
 
 function subscribe(callback: () => void): () => void {
-  window.addEventListener('storage', callback);
-  return () => window.removeEventListener('storage', callback);
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const notify = () => {
+    if (getSnapshot() === 'system') applyTheme('system');
+    callback();
+  };
+  window.addEventListener('storage', notify);
+  media.addEventListener('change', notify);
+  return () => {
+    window.removeEventListener('storage', notify);
+    media.removeEventListener('change', notify);
+  };
+}
+
+function resolveTheme(theme: ThemeName): 'light' | 'dark' {
+  return theme === 'system' ? getSystemPreference() : theme;
 }
 
 function applyTheme(theme: ThemeName): void {
+  const resolved = resolveTheme(theme);
   const root = document.documentElement;
   root.classList.add('theme-transitioning');
-  root.setAttribute('data-theme', theme);
+  root.setAttribute('data-theme', resolved);
+  root.setAttribute('data-theme-mode', theme);
+  root.style.colorScheme = resolved;
+  const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (themeColor) themeColor.content = resolved === 'dark' ? '#020203' : '#F8FAFC';
   setTimeout(() => root.classList.remove('theme-transitioning'), 300);
 }
 
@@ -39,14 +62,19 @@ export function useTheme() {
   }, [theme]);
 
   const setTheme = useCallback((newTheme: ThemeName) => {
-    localStorage.setItem(STORAGE_KEY, newTheme);
+    sessionTheme = newTheme;
+    try {
+      localStorage.setItem(STORAGE_KEY, newTheme);
+    } catch {
+      // The selected theme still applies for the current session.
+    }
     applyTheme(newTheme);
     window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY }));
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setTheme(theme === 'light' ? 'dark' : 'light');
+    setTheme(resolveTheme(theme) === 'light' ? 'dark' : 'light');
   }, [theme, setTheme]);
 
-  return { theme, setTheme, toggleTheme, themes: THEMES };
+  return { theme, resolvedTheme: resolveTheme(theme), setTheme, toggleTheme, themes: THEMES };
 }

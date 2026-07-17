@@ -44,6 +44,7 @@
 :root,
 [data-theme="light"] {
   --color-primary: #1E3A5F;
+  --color-on-primary: #FFFFFF;
   --color-primary-hover: #153050;
   --color-primary-dim: rgba(30, 58, 95, 0.07);
   --color-primary-border: rgba(30, 58, 95, 0.20);
@@ -56,12 +57,14 @@
   --color-input: #EDEEF2;
   --color-text: #0F172A;
   --color-text-secondary: #475569;
-  --color-text-muted: #94A3B8;
+  --color-text-muted: #64748B;
   --color-border: rgba(0, 0, 0, 0.06);
   --color-border-light: rgba(0, 0, 0, 0.10);
 
   --color-success: #059669;
+  --color-on-success: #FFFFFF;
   --color-danger: #DC2626;
+  --color-on-danger: #FFFFFF;
   --color-danger-hover: #B91C1C;
   --color-danger-dim: rgba(220, 38, 38, 0.07);
   --color-warning: #D97706;
@@ -72,6 +75,7 @@
 /* === Dark — Modern Deep === */
 [data-theme="dark"] {
   --color-primary: #14B8A6;
+  --color-on-primary: #02110F;
   --color-primary-hover: #0D9488;
   --color-primary-dim: rgba(20, 184, 166, 0.10);
   --color-primary-border: rgba(20, 184, 166, 0.25);
@@ -84,12 +88,14 @@
   --color-input: #16161E;
   --color-text: #EDEDEF;
   --color-text-secondary: #8A8F98;
-  --color-text-muted: #5C6370;
+  --color-text-muted: #8A93A3;
   --color-border: rgba(255, 255, 255, 0.08);
   --color-border-light: rgba(255, 255, 255, 0.12);
 
   --color-success: #34D399;
+  --color-on-success: #02130D;
   --color-danger: #F87171;
+  --color-on-danger: #220505;
   --color-danger-hover: #EF4444;
   --color-danger-dim: rgba(248, 113, 113, 0.10);
   --color-warning: #FBBF24;

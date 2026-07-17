@@ -70,7 +70,7 @@ export default function GroupManager() {
     state.entries.filter((e) => e.group_id === groupId).length;
 
   return (
-    <div className="group-manager">
+    <div className="group-manager screen-shell">
       <BackHeader
         title="Groups"
         onBack={handleBack}
@@ -87,8 +87,8 @@ export default function GroupManager() {
         }
       />
 
-      <div className="group-manager-content">
-        {error && <div className="error-message">{error}</div>}
+      <div className="group-manager-content screen-scroll-region">
+        {error && <div className="error-message" role="alert">{error}</div>}
 
         {isCreating && (
           <div className="group-create-bar">

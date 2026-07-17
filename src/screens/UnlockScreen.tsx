@@ -32,7 +32,7 @@ export function UnlockScreen() {
           <p>Enter your master password to unlock</p>
         </div>
 
-        {error && <div className="error-message">{error}</div>}
+        {error && <div className="error-message" id="unlock-error" role="alert">{error}</div>}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -46,6 +46,8 @@ export function UnlockScreen() {
               placeholder="Enter master password"
               autoFocus
               disabled={state.isLoading}
+              aria-invalid={!!error}
+              aria-describedby={error ? 'unlock-error' : undefined}
             />
           </div>
 

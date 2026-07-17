@@ -14,6 +14,8 @@ function ensureContainer(): HTMLDivElement {
   if (!toastContainer || !document.body.contains(toastContainer)) {
     toastContainer = document.createElement('div');
     toastContainer.id = 'toast-container';
+    toastContainer.setAttribute('aria-live', 'polite');
+    toastContainer.setAttribute('aria-atomic', 'false');
     document.body.appendChild(toastContainer);
   }
   return toastContainer;
@@ -30,6 +32,7 @@ export function showToast(message: string, duration: number = TOAST_DURATION_MS)
 
   const toast = document.createElement('div');
   toast.className = 'toast';
+  toast.setAttribute('role', 'status');
   toast.textContent = message;
 
   container.appendChild(toast);
@@ -61,6 +64,7 @@ export function showToastWithType(
 
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
+  toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
   toast.textContent = message;
 
   container.appendChild(toast);
@@ -98,6 +102,7 @@ export function showPairingCodeToast(
 
   const toast = document.createElement('div');
   toast.className = 'toast pairing-toast';
+  toast.setAttribute('role', 'status');
 
   // Format code as "XXX XXX" for readability.
   const formatted = code.length === 6

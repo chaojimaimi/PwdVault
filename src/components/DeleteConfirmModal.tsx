@@ -1,3 +1,5 @@
+import { AccessibleDialog } from './AccessibleDialog';
+
 interface Props {
   isOpen: boolean;
   message: string;
@@ -7,11 +9,16 @@ interface Props {
 }
 
 export default function DeleteConfirmModal({ isOpen, message, onConfirm, onCancel, isDeleting = false }: Props) {
-  if (!isOpen) return null;
-
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true">
-      <div className="confirm-modal">
+    <AccessibleDialog
+      isOpen={isOpen}
+      onClose={() => { if (!isDeleting) onCancel(); }}
+      labelledBy="delete-dialog-title"
+      describedBy="delete-dialog-description"
+      className="confirm-modal"
+      initialFocusSelector="[data-dialog-cancel]"
+      closeOnOverlay={!isDeleting}
+    >
         <div className="confirm-modal-header">
           <div className="confirm-modal-icon confirm-modal-icon-danger">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -22,18 +29,18 @@ export default function DeleteConfirmModal({ isOpen, message, onConfirm, onCance
             </svg>
           </div>
           <div>
-            <h3 className="confirm-modal-title">Confirm Delete</h3>
+            <h3 className="confirm-modal-title" id="delete-dialog-title">Confirm Delete</h3>
             <p className="confirm-modal-subtitle">This action cannot be undone</p>
           </div>
         </div>
 
         <div className="confirm-modal-body">
-          <p className="confirm-delete-message">{message}</p>
+          <p className="confirm-delete-message" id="delete-dialog-description">{message}</p>
         </div>
 
         <div className="confirm-modal-footer">
           <div className="confirm-modal-actions">
-            <button className="btn btn-secondary" onClick={onCancel} disabled={isDeleting}>
+            <button className="btn btn-secondary" data-dialog-cancel onClick={onCancel} disabled={isDeleting}>
               Cancel
             </button>
             <button className="btn btn-danger" onClick={onConfirm} disabled={isDeleting}>
@@ -48,7 +55,6 @@ export default function DeleteConfirmModal({ isOpen, message, onConfirm, onCance
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </AccessibleDialog>
   );
 }

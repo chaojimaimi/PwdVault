@@ -6,7 +6,10 @@
 .vault-container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: var(--color-bg);
 }
 
@@ -19,6 +22,7 @@
   padding: var(--space-md) var(--space-lg);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
+  flex: 0 0 auto;
 }
 
 .vault-header h1 {
@@ -120,8 +124,8 @@
 
 .group-manage-btn {
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
   padding: 0;
   display: flex;
   align-items: center;
@@ -167,7 +171,8 @@
 /* --- Entry list --- */
 
 .entry-list {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--space-sm);
 }
@@ -175,13 +180,30 @@
 .entry-item {
   display: flex;
   align-items: center;
-  padding: var(--space-md);
+  padding: 0;
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: background var(--duration-fast);
 }
 
-.entry-item:hover {
+.entry-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  padding: var(--space-md);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.entry-item:hover,
+.entry-main:hover {
   background: var(--color-input);
 }
 
@@ -195,7 +217,7 @@
   justify-content: center;
   font-weight: 600;
   font-size: 13px;
-  color: #fff;
+  color: var(--color-on-primary);
   margin-right: 11px;
   text-transform: uppercase;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
@@ -206,13 +228,15 @@
   min-width: 0;
 }
 
-.entry-info h3 {
+.entry-title {
+  display: block;
   font-size: var(--text-body);
   font-weight: 500;
   margin-bottom: var(--space-xs);
 }
 
-.entry-info p {
+.entry-username {
+  display: block;
   font-size: var(--text-micro);
   color: var(--color-text-secondary);
 }
@@ -229,8 +253,8 @@
 }
 
 .btn-copy {
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   padding: 0.25rem;
   display: flex;
   align-items: center;
@@ -238,6 +262,34 @@
   border-radius: var(--radius-sm);
 }
 
+@media (max-width: 370px) {
+  .vault-header,
+  .search-bar,
+  .group-tabs {
+    padding-left: var(--space-md);
+    padding-right: var(--space-md);
+  }
+
+  .header-actions {
+    gap: 0;
+  }
+
+  .entry-icon {
+    width: 32px;
+    height: 32px;
+  }
+}
+
 .btn-copy.copied {
   color: var(--color-success);
+}
+.resource-error-compact {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: var(--space-sm) var(--space-lg);
+  font-size: var(--text-label);
+  color: var(--color-danger);
 }

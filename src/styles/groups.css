@@ -3,16 +3,34 @@
    ============================================ */
 
 .group-manager {
-  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: var(--color-bg);
   display: flex;
   flex-direction: column;
 }
 
 .group-manager-content {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--space-lg);
+}
+
+@media (max-width: 370px) {
+  .group-create-bar,
+  .group-card-edit {
+    flex-wrap: wrap;
+  }
+
+  .group-create-input,
+  .group-edit-input {
+    min-width: 0;
+    flex-basis: calc(100% - 3rem);
+  }
 }
 
 /* --- Create bar --- */
@@ -155,9 +173,9 @@
 
 .group-action-rename,
 .group-action-delete {
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
