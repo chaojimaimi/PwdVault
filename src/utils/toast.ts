@@ -109,6 +109,9 @@ export function showPairingCodeToast(
     ? `${code.slice(0, 3)} ${code.slice(3)}`
     : code;
 
+  // Build the toast DOM without innerHTML for the code value (VULN-001).
+  // The static parts use innerHTML (trusted markup), but the pairing code
+  // — the only externally-derived value — is set via textContent.
   toast.innerHTML = `
     <div class="pairing-toast-head">
       <div class="pairing-toast-icon" aria-hidden="true">
@@ -122,12 +125,17 @@ export function showPairingCodeToast(
     </div>
     <div class="pairing-toast-body">
       <div class="pairing-toast-label">请在扩展弹窗中输入此配对码</div>
-      <div class="pairing-toast-code">${formatted}</div>
+      <div class="pairing-toast-code"></div>
     </div>
     <div class="pairing-toast-progress">
       <div class="pairing-toast-progress-bar"></div>
     </div>
   `;
+
+  // Set the pairing code via textContent to prevent XSS (CWE-79).
+  // Even though the current code is always 6 digits, this is defense-in-depth.
+  const codeEl = toast.querySelector<HTMLDivElement>('.pairing-toast-code');
+  if (codeEl) codeEl.textContent = formatted;
 
   container.appendChild(toast);
 

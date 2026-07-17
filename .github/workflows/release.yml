@@ -161,6 +161,9 @@ jobs:
 
       - name: Sign Windows executable
         if: steps.secrets.outputs.windows_certs == 'true'
+        # VULN-002: pin to commit SHA when certificate is provisioned.
+        # Replace @v4 with @<full-40-char-SHA> from the v4 tag before first
+        # stable release that actually signs Windows builds.
         uses: gtarnaras/code-sign-action@v4
         with:
           certificate: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -259,7 +262,8 @@ jobs:
           cat SHA256SUMS
 
       - name: Generate Rust SBOM (CycloneDX)
-        uses: cyclonedx/gh-action-cyclonedx-...@v1
+        # VULN-002: pin to commit SHA before stable release.
+        uses: CycloneDX/gh-cdxgen@v1
         with:
           path: src-tauri
           output: artifacts/rust-bom.cdx.json
