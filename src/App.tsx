@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { AppProvider, useApp } from './context/AppContext';
+import { AppProvider, useAuth } from './context/AppContext';
 import { SetupScreen } from './screens/SetupScreen';
 import { UnlockScreen } from './screens/UnlockScreen';
 import { VaultScreen } from './screens/VaultScreen';
@@ -20,7 +20,9 @@ import './styles/groups.css';
 import './styles/settings.css';
 
 function AppContent() {
-  const { state, actions } = useApp();
+  // AppContent subscribes only to AuthContext (§5.6.1). Screen routing depends
+  // solely on auth state; the screens themselves pull vault/settings directly.
+  const { state, actions } = useAuth();
 
   if (state.isLoading) {
     return (

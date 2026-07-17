@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
-import { useApp } from '../context/AppContext';
+import { useEffect, useMemo, useState } from 'react';
+import { useAuth, useVault } from '../context/AppContext';
 import { BackHeader } from '../components/BackHeader';
 import { PlusIcon, CloseIcon, FolderIcon, EditIcon, TrashIcon } from '../components/Icons';
 import DeleteConfirmModal from '../components/DeleteConfirmModal';
 
 export default function GroupManager() {
-  const { state, actions } = useApp();
+  const { actions: authActions } = useAuth();
+  const { state, actions } = useVault();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
@@ -63,11 +64,18 @@ export default function GroupManager() {
   };
 
   const handleBack = () => {
-    actions.navigate('vault');
+    authActions.navigate('vault');
   };
 
-  const groupCount = (groupId: string) =>
-    state.entries.filter((e) => e.group_id === groupId).length;
+  // §5.6.1: build the group→count map once per entries change instead of
+  // filtering the full entries array for every group on every render.
+  const groupCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const e of state.entries) {
+      if (e.group_id) counts.set(e.group_id, (counts.get(e.group_id) ?? 0) + 1);
+    }
+    return counts;
+  }, [state.entries]);
 
   return (
     <div className="group-manager screen-shell">
@@ -148,7 +156,7 @@ export default function GroupManager() {
                     </div>
                     <div className="group-card-text">
                       <span className="group-card-name">{g.name}</span>
-                      <span className="group-card-count">{groupCount(g.id)} {groupCount(g.id) === 1 ? 'entry' : 'entries'}</span>
+                      <span className="group-card-count">{groupCounts.get(g.id) ?? 0} {groupCounts.get(g.id) === 1 ? 'entry' : 'entries'}</span>
                     </div>
                   </div>
                   <div className="group-card-actions">

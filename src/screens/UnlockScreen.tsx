@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AppContext';
 
 export function UnlockScreen() {
-  const { state, actions } = useApp();
+  const { state, actions } = useAuth();
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
 

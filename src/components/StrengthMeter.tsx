@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { getPasswordStrength } from '../utils/passwordStrength';
 
 interface StrengthMeterProps {
@@ -5,9 +6,11 @@ interface StrengthMeterProps {
 }
 
 export function StrengthMeter({ password }: StrengthMeterProps) {
-  if (!password) return null;
+  // §5.6.1: memoize the strength calculation so it only recomputes when the
+  // password changes, not on every parent re-render.
+  const strength = useMemo(() => password ? getPasswordStrength(password) : null, [password]);
+  if (!strength) return null;
 
-  const strength = getPasswordStrength(password);
   const strengthClass = strength.label.toLowerCase().replace(/\s+/g, '-');
 
   return (

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useApp } from '../context/AppContext';
+import { useAuth, useVault } from '../context/AppContext';
 import { generatePassword } from '../api/vault';
 import { copyWithTimeout } from '../utils/clipboard';
 import { showToast } from '../utils/toast';
@@ -14,7 +14,8 @@ import { AccessibleDialog } from '../components/AccessibleDialog';
 import type { CreateEntryRequest, EntrySummary, UpdateEntryRequest } from '../types';
 
 export function EntryScreen() {
-  const { state, actions } = useApp();
+  const { actions: authActions } = useAuth();
+  const { state, actions } = useVault();
   const isEditing = !!state.selectedEntry?.id;
   const isNew = !state.selectedEntry;
 
@@ -119,7 +120,7 @@ export function EntryScreen() {
 
   const leaveEntry = () => {
     actions.selectEntry(null);
-    actions.navigate('vault');
+    authActions.navigate('vault');
   };
 
   const handleSave = async () => {

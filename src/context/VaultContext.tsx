@@ -1,6 +1,7 @@
-import { createContext, useContext, useReducer, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useReducer, useMemo, useEffect, useRef, type ReactNode } from 'react';
 import type { EntrySummary, EntrySecretResponse, Group, VaultBackup, ImportResult, ResourceStatus } from '../types';
 import * as api from '../api/vault';
+import { useAuth } from './AuthContext';
 
 // ---------------------------------------------------------------------------
 // State
@@ -92,6 +93,19 @@ export const VaultContext = createContext<VaultContextValue | null>(null);
 
 export function VaultProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(vaultReducer, initialVaultState);
+  // Watch auth.isUnlocked so a manual lock or auto-lock clears sensitive
+  // vault state (entries, groups, selectedEntry, searchQuery) from React
+  // memory. Previously this RESET was dispatched from the AppContext facade
+  // after lock returned; with the facade gone (§5.6.1), VaultProvider drives
+  // it directly by observing the locked transition.
+  const { state: authState } = useAuth();
+  const wasUnlocked = useRef(authState.isUnlocked);
+  useEffect(() => {
+    if (wasUnlocked.current && !authState.isUnlocked) {
+      dispatch({ type: 'RESET' });
+    }
+    wasUnlocked.current = authState.isUnlocked;
+  }, [authState.isUnlocked]);
 
   const actions = useMemo(() => ({
     loadEntries: async () => {

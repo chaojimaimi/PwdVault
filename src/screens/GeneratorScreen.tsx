@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useApp } from '../context/AppContext';
+import { useAuth, useSettings } from '../context/AppContext';
 import { generatePassword } from '../api/vault';
 import { copyWithTimeout } from '../utils/clipboard';
 import { showToast } from '../utils/toast';
@@ -8,14 +8,15 @@ import { StrengthMeter } from '../components/StrengthMeter';
 import type { PasswordGeneratorOptions } from '../types';
 
 export function GeneratorScreen() {
-  const { state, actions } = useApp();
+  const { actions: authActions } = useAuth();
+  const { state: settingsState } = useSettings();
   const [password, setPassword] = useState('');
   const [options, setOptions] = useState<PasswordGeneratorOptions>({
-    length: state.settings.default_length,
-    includeUppercase: state.settings.default_include_uppercase,
-    includeLowercase: state.settings.default_include_lowercase,
-    includeNumbers: state.settings.default_include_numbers,
-    includeSymbols: state.settings.default_include_symbols,
+    length: settingsState.settings.default_length,
+    includeUppercase: settingsState.settings.default_include_uppercase,
+    includeLowercase: settingsState.settings.default_include_lowercase,
+    includeNumbers: settingsState.settings.default_include_numbers,
+    includeSymbols: settingsState.settings.default_include_symbols,
   });
   const [copied, setCopied] = useState(false);
   const [pending, setPending] = useState(false);
@@ -47,7 +48,7 @@ export function GeneratorScreen() {
   };
 
   const handleBack = () => {
-    actions.navigate('vault');
+    authActions.navigate('vault');
   };
 
   const handleOptionChange = (key: keyof PasswordGeneratorOptions, value: boolean | number) => {

@@ -1,9 +1,4 @@
-import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { vi } from 'vitest';
-import * as AppCtx from '../../context/AppContext';
-import { VaultScreen } from '../VaultScreen';
-import * as api from '../../api/vault';
+import { test, expect } from 'vitest';
 
 const mockGroups = [
   { id: 'g1', name: 'Work', created_at: 1, updated_at: 1 },

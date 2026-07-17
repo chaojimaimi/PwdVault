@@ -1,49 +1,57 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useApp } from '../context/AppContext';
+import { useCallback, useEffect, useDeferredValue, useMemo, useState } from 'react';
+import { Virtuoso } from 'react-virtuoso';
+import { useAuth, useVault, useSettings } from '../context/AppContext';
 import { useTheme } from '../hooks/useTheme';
 import { copyWithTimeout, copyWithoutClear } from '../utils/clipboard';
-import { searchEntries } from '../utils/search';
+import { searchWithIndex } from '../utils/search';
 import { showToast } from '../utils/toast';
 import { UpdateNotification } from '../components/UpdateNotification';
-import { PlusIcon, GenerateIcon, SettingsIcon, LockIcon, SearchIcon, FolderIcon, UserIcon, CopyIcon } from '../components/Icons';
+import { EntryRow } from '../components/EntryRow';
+import { PlusIcon, GenerateIcon, SettingsIcon, LockIcon, SearchIcon, FolderIcon } from '../components/Icons';
 import type { EntrySummary } from '../types';
 
-function getInitials(title: string): string {
-  return title.charAt(0).toUpperCase();
-}
-
 export function VaultScreen() {
-  const { state, dispatch, actions } = useApp();
+  const { state: authState, actions: authActions } = useAuth();
+  const { state, actions } = useVault();
+  const { state: settingsState, actions: settingsActions } = useSettings();
   const { toggleTheme } = useTheme();
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (state.isUnlocked) {
+    if (authState.isUnlocked) {
       void Promise.allSettled([actions.loadEntries(), actions.loadGroups()]);
     }
-  }, [state.isUnlocked]);
+    // loadEntries/loadGroups are stable enough for the unlock transition;
+    // we intentionally only re-run on isUnlocked.
+  }, [authState.isUnlocked]);
 
-  const filteredEntries = useMemo(() => {
-    let entries = state.entries;
-    if (state.selectedGroupId) {
-      entries = entries.filter((entry) => entry.group_id === state.selectedGroupId);
-    }
-    return searchEntries(entries, state.searchQuery);
-  }, [state.entries, state.selectedGroupId, state.searchQuery]);
+  // §5.6.1: apply the group filter first, then search the filtered set.
+  // searchWithIndex uses a two-tier strategy: substring fast-path for the
+  // common case (O(N), no index build), Fuse fuzzy fallback for typos.
+  // The query is deferred so typing stays responsive even with 10k entries.
+  const groupFiltered = useMemo(() => {
+    if (!state.selectedGroupId) return state.entries;
+    return state.entries.filter((entry) => entry.group_id === state.selectedGroupId);
+  }, [state.entries, state.selectedGroupId]);
 
-  const handleEntryClick = async (entry: EntrySummary) => {
+  const deferredQuery = useDeferredValue(state.searchQuery);
+
+  const filteredEntries = useMemo(
+    () => searchWithIndex(groupFiltered, deferredQuery),
+    [groupFiltered, deferredQuery],
+  );
+
+  const handleEntryClick = useCallback(async (entry: EntrySummary) => {
     await actions.selectEntry(entry.id);
-    actions.navigate('entry');
-  };
+    authActions.navigate('entry');
+  }, [actions, authActions]);
 
-  const handleCopyUsername = async (e: React.MouseEvent, username: string) => {
-    e.stopPropagation();
+  const handleCopyUsername = useCallback(async (username: string) => {
     await copyWithoutClear(username);
     showToast('Username copied');
-  };
+  }, []);
 
-  const handleCopyPassword = async (e: React.MouseEvent, entry: EntrySummary) => {
-    e.stopPropagation();
+  const handleCopyPassword = useCallback(async (entry: EntrySummary) => {
     const secret = await actions.getEntrySecret(entry.id);
     if (secret?.password) {
       await copyWithTimeout(secret.password);
@@ -51,23 +59,23 @@ export function VaultScreen() {
       showToast('Password copied (auto-clears in 30s)');
       setTimeout(() => setCopiedId(null), 2000);
     }
-  };
+  }, [actions]);
 
   const handleAddClick = () => {
     actions.selectEntry(null);
-    actions.navigate('entry');
+    authActions.navigate('entry');
   };
 
   const handleManageGroups = () => {
-    actions.navigate('groupManager');
+    authActions.navigate('groupManager');
   };
 
   return (
     <div className="vault-container screen-shell">
-      {state.updateInfo && (
+      {settingsState.updateInfo && (
         <UpdateNotification
-          updateInfo={state.updateInfo}
-          onDismiss={() => dispatch({ type: 'SET_UPDATE_INFO', payload: null })}
+          updateInfo={settingsState.updateInfo}
+          onDismiss={() => settingsActions.dismissUpdate()}
         />
       )}
       <header className="vault-header">
@@ -78,13 +86,13 @@ export function VaultScreen() {
           </button>
           <button className="theme-dot" onClick={toggleTheme} title="Switch theme" aria-label="Toggle theme" />
           <div className="header-separator" />
-          <button className="btn btn-icon" onClick={() => actions.navigate('generator')} title="Password Generator" aria-label="Password generator">
+          <button className="btn btn-icon" onClick={() => authActions.navigate('generator')} title="Password Generator" aria-label="Password generator">
             <GenerateIcon />
           </button>
-          <button className="btn btn-icon" onClick={() => actions.navigate('settings')} title="Settings" aria-label="Settings">
+          <button className="btn btn-icon" onClick={() => authActions.navigate('settings')} title="Settings" aria-label="Settings">
             <SettingsIcon />
           </button>
-          <button className="btn btn-icon" onClick={() => actions.lock()} title="Lock Vault" aria-label="Lock vault">
+          <button className="btn btn-icon" onClick={() => authActions.lock()} title="Lock Vault" aria-label="Lock vault">
             <LockIcon />
           </button>
         </div>
@@ -164,43 +172,22 @@ export function VaultScreen() {
             <p className="text-muted-hint">Tap + to add your first password</p>
           </div>
         ) : (
-          filteredEntries.map((entry) => (
-            <div
-              key={entry.id}
-              className="entry-item"
-              role="listitem"
-            >
-              <button
-                className="entry-main"
-                onClick={() => handleEntryClick(entry)}
-                aria-label={`Open ${entry.title}, ${entry.username}`}
-              >
-                <span className="entry-icon" aria-hidden="true">{getInitials(entry.title)}</span>
-                <span className="entry-info">
-                  <span className="entry-title">{entry.title}</span>
-                  <span className="entry-username">{entry.username}</span>
-                </span>
-              </button>
-              <div className="entry-actions-inline">
-                <button
-                  className="btn btn-icon btn-copy"
-                  onClick={(e) => handleCopyUsername(e, entry.username)}
-                  title="Copy username"
-                  aria-label={`Copy username for ${entry.title}`}
-                >
-                  <UserIcon />
-                </button>
-                <button
-                  className={`btn btn-icon btn-copy ${copiedId === entry.id ? 'copied' : ''}`}
-                  onClick={(e) => handleCopyPassword(e, entry)}
-                  title={copiedId === entry.id ? 'Copied!' : 'Copy password'}
-                  aria-label={`Copy password for ${entry.title}`}
-                >
-                  <CopyIcon />
-                </button>
-              </div>
-            </div>
-          ))
+          // §5.6.1: virtualize the entry list so 10k entries render only the
+          // visible window. Combined with the memoized EntryRow and the
+          // deferred query, this keeps the main-thread long task under 50ms.
+          <Virtuoso
+            data={filteredEntries}
+            itemContent={(_i, entry) => (
+              <EntryRow
+                entry={entry}
+                copied={copiedId === entry.id}
+                onOpen={handleEntryClick}
+                onCopyUsername={handleCopyUsername}
+                onCopyPassword={handleCopyPassword}
+              />
+            )}
+            style={{ height: '100%' }}
+          />
         )}
       </div>
     </div>

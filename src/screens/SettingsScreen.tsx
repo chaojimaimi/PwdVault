@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useApp } from '../context/AppContext';
+import { useAuth, useSettings } from '../context/AppContext';
 import { useTheme } from '../hooks/useTheme';
 import { showToast } from '../utils/toast';
 import { BackHeader } from '../components/BackHeader';
@@ -20,7 +20,8 @@ const AUTO_LOCK_OPTIONS = [
 ];
 
 export function SettingsScreen() {
-  const { state, actions } = useApp();
+  const { actions: authActions } = useAuth();
+  const { state, actions } = useSettings();
   const { theme, setTheme, themes } = useTheme();
   const [settings, setSettings] = useState<Settings>(state.settings);
   const [saving, setSaving] = useState(false);
@@ -28,11 +29,11 @@ export function SettingsScreen() {
   const [showRevoke, setShowRevoke] = useState(false);
   const [revoking, setRevoking] = useState(false);
   const charsetValid = settings.default_include_uppercase || settings.default_include_lowercase || settings.default_include_numbers || settings.default_include_symbols;
-  const isDirty = useMemo(() => state.settingsStatus === 'success' && JSON.stringify(settings) !== JSON.stringify(state.settings), [settings, state.settings, state.settingsStatus]);
+  const isDirty = useMemo(() => state.status === 'success' && JSON.stringify(settings) !== JSON.stringify(state.settings), [settings, state.settings, state.status]);
 
   useEffect(() => {
-    if (state.settingsStatus === 'success') setSettings(state.settings);
-  }, [state.settings, state.settingsStatus]);
+    if (state.status === 'success') setSettings(state.settings);
+  }, [state.settings, state.status]);
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
@@ -45,16 +46,16 @@ export function SettingsScreen() {
 
   const handleBack = () => {
     if (isDirty) setShowUnsaved(true);
-    else actions.navigate('vault');
+    else authActions.navigate('vault');
   };
 
   const handleSave = async () => {
-    if (saving || state.settingsStatus !== 'success' || !charsetValid) return;
+    if (saving || state.status !== 'success' || !charsetValid) return;
     setSaving(true);
     try {
       await actions.updateSettings(settings);
       showToast('Settings saved');
-      actions.navigate('vault');
+      authActions.navigate('vault');
     } catch {
       showToast('Failed to save settings');
     } finally {
@@ -81,17 +82,17 @@ export function SettingsScreen() {
       <BackHeader title="Settings" onBack={handleBack} />
 
       <div className="generator-content screen-scroll-region">
-        {(state.settingsStatus === 'idle' || state.settingsStatus === 'loading') && (
+        {(state.status === 'idle' || state.status === 'loading') && (
           <div className="loading" role="status"><span className="spinner" /><span>Loading settings…</span></div>
         )}
-        {state.settingsStatus === 'error' && (
+        {state.status === 'error' && (
           <div className="resource-error" role="alert">
             <p>Could not load settings. Saving is disabled to protect your stored configuration.</p>
-            <p className="text-muted-hint">{state.settingsError}</p>
+            <p className="text-muted-hint">{state.error}</p>
             <button className="btn btn-secondary" onClick={() => void actions.loadSettings()}>Retry</button>
           </div>
         )}
-        <fieldset disabled={state.settingsStatus !== 'success' || saving} className="settings-fieldset">
+        <fieldset disabled={state.status !== 'success' || saving} className="settings-fieldset">
         <div className="settings-section">
           <h3 className="settings-section-title">Theme</h3>
           <div className="theme-selector">
@@ -234,17 +235,17 @@ export function SettingsScreen() {
       </div>
 
       <div className="generator-actions">
-        <button className="btn btn-primary" onClick={handleSave} disabled={saving || state.settingsStatus !== 'success' || !charsetValid}>
+        <button className="btn btn-primary" onClick={handleSave} disabled={saving || state.status !== 'success' || !charsetValid}>
           {saving ? 'Saving...' : 'Save Settings'}
         </button>
-        <button className="btn btn-secondary btn-full" onClick={() => actions.navigate('importExport')}>
+        <button className="btn btn-secondary btn-full" onClick={() => authActions.navigate('importExport')}>
           Backup & Restore
         </button>
       </div>
       <UnsavedChangesModal
         isOpen={showUnsaved}
         onStay={() => setShowUnsaved(false)}
-        onDiscard={() => { setShowUnsaved(false); actions.navigate('vault'); }}
+        onDiscard={() => { setShowUnsaved(false); authActions.navigate('vault'); }}
       />
       <AccessibleDialog
         isOpen={showRevoke}

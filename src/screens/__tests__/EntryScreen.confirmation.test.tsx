@@ -1,16 +1,27 @@
-import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { AppProvider } from '../../context/AppContext';
+import { render } from '@testing-library/react';
+import { vi, test, expect } from 'vitest';
 import EntryScreen from '../EntryScreen';
 
-test('shows confirmation modal when editing and saving changes', async () => {
-  // render with provider and pre-seeded state via AppProvider initial state is more involved in this project
-  const { container } = render(
-    <AppProvider>
-      <EntryScreen />
-    </AppProvider>
-  );
+// Lightweight smoke test: EntryScreen mounts without crashing when its
+// contexts return empty state. Detailed confirmation behaviour is covered
+// by EntryScreen.secretBoundary.test.tsx.
+vi.mock('../../context/AppContext', () => ({
+  useAuth: () => ({ actions: { navigate: vi.fn() } }),
+  useVault: () => ({
+    state: { selectedEntry: null },
+    actions: {
+      selectEntry: vi.fn(),
+      createEntry: vi.fn(),
+      updateEntry: vi.fn(),
+      deleteEntry: vi.fn(),
+      getEntrySecret: vi.fn(),
+    },
+  }),
+  useSettings: () => ({ state: { settings: {} }, actions: {} }),
+}));
+vi.mock('../../components/GroupSelector', () => ({ default: () => null }));
 
-  // This is a lightweight smoke test ensuring component mounts; detailed integration requires mocking AppContext actions.
+test('EntryScreen mounts in the new-entry state', () => {
+  const { container } = render(<EntryScreen />);
   expect(container).toBeTruthy();
 });

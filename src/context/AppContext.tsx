@@ -1,200 +1,37 @@
-import { useMemo, type ReactNode } from 'react';
-import { AuthProvider, useAuth } from './AuthContext';
-import { SettingsProvider, useSettings } from './SettingsContext';
-import { VaultProvider, useVault } from './VaultContext';
+import type { ReactNode } from 'react';
+import { AuthProvider } from './AuthContext';
+import { SettingsProvider } from './SettingsContext';
+import { VaultProvider } from './VaultContext';
 
 // ---------------------------------------------------------------------------
-// Backward-compatible facade
+// Provider composition
 //
-// The three sub-contexts (Auth / Vault / Settings) own their state. To avoid a
-// large migration of every screen that calls `useApp()`, we expose a combined
-// `useApp()` hook that merges the three contexts into the shape callers
-// already expect: { state, dispatch, actions }.
+// Phase 6 (§5.6.1) removed the `useApp()` aggregation facade. The three
+// sub-contexts (Auth / Vault / Settings) own their state independently, and
+// each screen subscribes to only the context(es) it needs. This eliminates
+// the "any context change re-renders every screen" behaviour and the
+// `dispatch: any` facade.
 //
-// New code should prefer the granular hooks (useAuth / useVault / useSettings)
-// to avoid unnecessary re-renders.
+// AppContent (App.tsx) subscribes only to AuthContext to decide which screen
+// to render; the screens themselves pull vault/settings state directly.
+//
+// Cross-context coordination that used to live in the facade:
+//   - On manual lock, VaultContext resets its entries/groups/selection.
+//     VaultContext now watches `auth.isUnlocked` and clears itself when the
+//     vault transitions to locked, so the lock path no longer needs to
+//     dispatch into VaultContext from outside.
 // ---------------------------------------------------------------------------
-
-function formatError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string') return error;
-  try { return JSON.stringify(error); } catch { return 'Unknown error'; }
-}
-
-interface CombinedState {
-  screen: ReturnType<typeof useAuth>['state']['screen'];
-  isInitialized: boolean;
-  isUnlocked: boolean;
-  isLoading: boolean;
-  error: string | null;
-  bootError: string | null;
-  entries: ReturnType<typeof useVault>['state']['entries'];
-  groups: ReturnType<typeof useVault>['state']['groups'];
-  selectedGroupId: string | null;
-  selectedEntry: ReturnType<typeof useVault>['state']['selectedEntry'];
-  searchQuery: string;
-  entriesStatus: ReturnType<typeof useVault>['state']['entriesStatus'];
-  entriesError: string | null;
-  groupsStatus: ReturnType<typeof useVault>['state']['groupsStatus'];
-  groupsError: string | null;
-  settings: ReturnType<typeof useSettings>['state']['settings'];
-  settingsStatus: ReturnType<typeof useSettings>['state']['status'];
-  settingsError: string | null;
-  updateInfo: ReturnType<typeof useSettings>['state']['updateInfo'];
-}
-
-interface CombinedActions {
-  initialize: (password: string) => Promise<void>;
-  unlock: (password: string) => Promise<boolean>;
-  lock: () => Promise<void>;
-  loadEntries: () => Promise<void>;
-  loadGroups: () => Promise<void>;
-  createGroup: (name: string) => Promise<import('../types').Group>;
-  updateGroup: (id: string, name: string) => Promise<void>;
-  deleteGroup: (id: string) => Promise<void>;
-  selectGroup: (id: string | null) => void;
-  selectEntry: (id: string | null) => Promise<void>;
-  getEntrySecret: (id: string) => Promise<import('../types').EntrySecretResponse | null>;
-  createEntry: (data: Parameters<ReturnType<typeof useVault>['actions']['createEntry']>[0]) => Promise<import('../types').EntrySummary>;
-  updateEntry: (id: string, data: Parameters<ReturnType<typeof useVault>['actions']['updateEntry']>[1]) => Promise<import('../types').EntrySummary>;
-  deleteEntry: (id: string) => Promise<void>;
-  navigate: (screen: import('../types').AppScreen) => void;
-  retryBoot: () => Promise<void>;
-  setSearchQuery: (query: string) => void;
-  loadSettings: () => Promise<void>;
-  updateSettings: (settings: import('../types').Settings) => Promise<void>;
-  exportVault: (password: string) => Promise<import('../types').VaultBackup>;
-  importVault: (backup: import('../types').VaultBackup, password: string) => Promise<import('../types').ImportResult>;
-}
-
-interface AppContextValue {
-  state: CombinedState;
-  dispatch: React.Dispatch<any>;
-  actions: CombinedActions;
-}
-
-import { createContext, useContext } from 'react';
-
-export const AppContext = createContext<AppContextValue | null>(null);
-
-function useCombinedApp(): AppContextValue {
-  const auth = useAuth();
-  const vault = useVault();
-  const settings = useSettings();
-
-  // Wrap vault/settings actions so errors are surfaced via the auth error
-  // channel, preserving the previous single-context behaviour.
-  const wrap = <T extends (...args: any[]) => Promise<any>>(fn: T): T =>
-    (async (...args: Parameters<T>) => {
-      try {
-        return await fn(...args);
-      } catch (error) {
-        auth.dispatch({ type: 'SET_ERROR', payload: formatError(error) });
-        throw error;
-      }
-    }) as T;
-
-  const state: CombinedState = {
-    screen: auth.state.screen,
-    isInitialized: auth.state.isInitialized,
-    isUnlocked: auth.state.isUnlocked,
-    isLoading: auth.state.isLoading,
-    error: auth.state.error,
-    bootError: auth.state.bootError,
-    entries: vault.state.entries,
-    groups: vault.state.groups,
-    selectedGroupId: vault.state.selectedGroupId,
-    selectedEntry: vault.state.selectedEntry,
-    searchQuery: vault.state.searchQuery,
-    entriesStatus: vault.state.entriesStatus,
-    entriesError: vault.state.entriesError,
-    groupsStatus: vault.state.groupsStatus,
-    groupsError: vault.state.groupsError,
-    settings: settings.state.settings,
-    settingsStatus: settings.state.status,
-    settingsError: settings.state.error,
-    updateInfo: settings.state.updateInfo,
-  };
-
-  const actions: CombinedActions = {
-    initialize: auth.actions.initialize,
-    unlock: auth.actions.unlock,
-    // Wrap lock so that VaultContext state (entries, selectedEntry, groups,
-    // searchQuery) is also cleared on manual lock. Without this, sensitive
-    // metadata remains in React memory after the vault is locked.
-    lock: async () => {
-      await auth.actions.lock();
-      vault.dispatch({ type: 'RESET' });
-    },
-    loadEntries: wrap(vault.actions.loadEntries),
-    loadGroups: wrap(vault.actions.loadGroups),
-    createGroup: wrap(vault.actions.createGroup),
-    updateGroup: wrap(vault.actions.updateGroup),
-    deleteGroup: wrap(vault.actions.deleteGroup),
-    selectGroup: vault.actions.selectGroup,
-    selectEntry: wrap(vault.actions.selectEntry),
-    getEntrySecret: vault.actions.getEntrySecret,
-    createEntry: wrap(vault.actions.createEntry),
-    updateEntry: wrap(vault.actions.updateEntry),
-    deleteEntry: wrap(vault.actions.deleteEntry),
-    navigate: auth.actions.navigate,
-    retryBoot: auth.actions.retryBoot,
-    setSearchQuery: vault.actions.setSearchQuery,
-    loadSettings: wrap(settings.actions.loadSettings),
-    updateSettings: wrap(settings.actions.updateSettings),
-    exportVault: vault.actions.exportVault,
-    importVault: wrap(vault.actions.importVault),
-  };
-
-  // dispatch proxy: route known action types to the right sub-context.
-  const dispatch: React.Dispatch<any> = (action: any) => {
-    switch (action.type) {
-      case 'SET_ENTRIES':
-      case 'SET_GROUPS':
-      case 'SET_SELECTED_GROUP':
-      case 'SET_SELECTED_ENTRY':
-      case 'SET_SEARCH_QUERY':
-      case 'SET_ENTRIES_RESOURCE':
-      case 'SET_GROUPS_RESOURCE':
-      case 'RESET':
-        // RESET clears VaultContext (entries/groups/selectedEntry/searchQuery)
-        // so manual lock does not leave sensitive metadata in React memory.
-        vault.dispatch(action);
-        break;
-      case 'SET_SETTINGS':
-      case 'SET_UPDATE_INFO':
-      case 'SET_RESOURCE':
-        settings.dispatch(action);
-        break;
-      default:
-        auth.dispatch(action);
-    }
-  };
-
-  return useMemo(() => ({ state, dispatch, actions }), [auth, vault, settings]);
-}
 
 export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <AuthProvider>
       <SettingsProvider>
-        <VaultProvider>
-          <AppContextBridge>{children}</AppContextBridge>
-        </VaultProvider>
+        <VaultProvider>{children}</VaultProvider>
       </SettingsProvider>
     </AuthProvider>
   );
 }
 
-function AppContextBridge({ children }: { children: ReactNode }) {
-  const value = useCombinedApp();
-  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
-}
-
-export function useApp() {
-  const ctx = useContext(AppContext);
-  if (!ctx) throw new Error('useApp must be used within AppProvider');
-  return ctx;
-}
-
-export { useAuth, useVault, useSettings };
+export { useAuth } from './AuthContext';
+export { useVault } from './VaultContext';
+export { useSettings } from './SettingsContext';

@@ -4,24 +4,27 @@ import EntryScreen from '../EntryScreen';
 
 const getEntrySecret = vi.fn();
 const updateEntry = vi.fn().mockResolvedValue({});
-const appValue: any = {
-  state: {
-    selectedEntry: {
-      id: 'entry-1', title: 'Before', username: 'user', url: '', tags: [], group_id: null,
-      created_at: 1, updated_at: 1,
-    },
-  },
-  actions: {
-    getEntrySecret,
-    updateEntry,
-    selectEntry: vi.fn(),
-    navigate: vi.fn(),
-    deleteEntry: vi.fn(),
-    createEntry: vi.fn(),
+const navigate = vi.fn();
+const selectEntry = vi.fn();
+const deleteEntry = vi.fn();
+const createEntry = vi.fn();
+
+// Stable state/actions objects so React's useEffect dependency check does not
+// see a new `selectedEntry` reference on every render (which would loop).
+const vaultState = {
+  selectedEntry: {
+    id: 'entry-1', title: 'Before', username: 'user', url: '', tags: [], group_id: null,
+    created_at: 1, updated_at: 1,
   },
 };
+const vaultActions = { getEntrySecret, updateEntry, selectEntry, deleteEntry, createEntry };
+const authActions = { navigate };
 
-vi.mock('../../context/AppContext', () => ({ useApp: () => appValue }));
+vi.mock('../../context/AppContext', () => ({
+  useAuth: () => ({ actions: authActions }),
+  useVault: () => ({ state: vaultState, actions: vaultActions }),
+  useSettings: () => ({ state: { settings: {} }, actions: {} }),
+}));
 vi.mock('../../components/GroupSelector', () => ({ default: () => <div data-testid="group-selector" /> }));
 
 beforeEach(() => {
@@ -48,7 +51,7 @@ test('metadata-only edit neither fetches nor resubmits existing secrets', async 
 test('back navigation warns only after the form becomes dirty', () => {
   const { unmount } = render(<EntryScreen />);
   fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
-  expect(appValue.actions.navigate).toHaveBeenCalledWith('vault');
+  expect(navigate).toHaveBeenCalledWith('vault');
   expect(screen.queryByText('Discard unsaved changes?')).not.toBeInTheDocument();
   unmount();
 
@@ -57,5 +60,5 @@ test('back navigation warns only after the form becomes dirty', () => {
   fireEvent.change(screen.getByLabelText('Title *'), { target: { value: 'Changed' } });
   fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
   expect(screen.getByText('Discard unsaved changes?')).toBeInTheDocument();
-  expect(appValue.actions.navigate).not.toHaveBeenCalled();
+  expect(navigate).not.toHaveBeenCalled();
 });

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useApp } from '../context/AppContext';
+import { useAuth, useVault } from '../context/AppContext';
 import { showToast } from '../utils/toast';
 import { BackHeader } from '../components/BackHeader';
 import { TrashIcon } from '../components/Icons';
@@ -17,7 +17,8 @@ function isSupportedBackup(backup: VaultBackup): boolean {
 }
 
 export function ImportExportScreen() {
-  const { actions } = useApp();
+  const { actions: authActions } = useAuth();
+  const { actions } = useVault();
   const [exportPassword, setExportPassword] = useState('');
   const [exportConfirm, setExportConfirm] = useState('');
   const [importPassword, setImportPassword] = useState('');
@@ -29,7 +30,7 @@ export function ImportExportScreen() {
   const [restoreConfirmation, setRestoreConfirmation] = useState('');
 
   const handleBack = () => {
-    actions.navigate('settings');
+    authActions.navigate('settings');
   };
 
   const handleExport = async () => {
