@@ -57,6 +57,14 @@ Each phase has a dedicated progress document under `docs/PHASE{n}-PROGRESS.md`.
 
 The following changes were the v1.0.5 baseline before the comprehensive optimization plan was applied.
 
+#### Phase 6 — Performance, Modularization & Release Engineering (§5.6)
+- **§5.6.1** Frontend: removed useApp() facade (9 screens subscribe directly); two-tier search (substring fast-path + Fuse fallback) with useDeferredValue; react-virtuoso list virtualization; memoized EntryRow; GroupManager pre-aggregated count Map; 10k search <100ms verified.
+- **§5.6.2** Backend: list_all_entries_bulk / list_all_groups_bulk (single read txn); all N+1 patterns eliminated; init/unlock/import/export on spawn_blocking; cancellable update check; criterion baseline (list 1k=3.7ms, digest 1k=0.8ms).
+- **§5.6.3** Workspace: 4-crate split (domain ← infrastructure ← application ← tauri-app); lib.rs 1310→292 lines; golden contract test for IPC↔NM consistency.
+- **§5.6.4** CI/CD: 6-job quality pipeline (frontend/rust/native-host/security/version + CodeQL SAST); ESLint; pnpm audit; gitleaks; cargo deny; Actions pinned to SHA.
+- **§5.6.5** Version: native-host aligned; bump-version.sh --check; CI hard-fail on 7-source mismatch.
+- **§5.6.6** Release: signing framework with graceful degradation (prerelease when unsigned); Chrome Web Store + Firefox AMO upload; SBOM (CycloneDX) + SHA-256 + artifact attestation.
+
 ## [1.0.5] - 2026-07-04
 
 ### Security

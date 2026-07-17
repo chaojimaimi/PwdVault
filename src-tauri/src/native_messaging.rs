@@ -1203,7 +1203,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let enc: crypto::EncryptedData = bincode::deserialize(&entry.encrypted_password).unwrap();
-        let decrypted = crypto::decrypt(&key, &enc).unwrap();
+        let decrypted = crypto::decrypt(key, &enc).unwrap();
         assert_eq!(String::from_utf8(decrypted).unwrap(), "new_pass");
     }
 
