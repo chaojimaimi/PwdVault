@@ -17,10 +17,10 @@ use crate::crypto::VerificationData;
 // Constants
 // ============================================================================
 
-pub(crate) const VAULT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vault");
-pub(crate) const ENTRIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("entries");
-pub(crate) const GROUPS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("groups");
-pub(crate) const SETTINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("settings");
+pub const VAULT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vault");
+pub const ENTRIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("entries");
+pub const GROUPS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("groups");
+pub const SETTINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("settings");
 
 pub mod entry_codec;
 pub mod group_codec;

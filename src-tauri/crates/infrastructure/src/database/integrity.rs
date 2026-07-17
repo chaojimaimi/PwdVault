@@ -10,8 +10,8 @@ use sha2::Sha256;
 use super::{DatabaseError, ENTRIES_TABLE, GROUPS_TABLE, SETTINGS_TABLE, VAULT_TABLE};
 
 pub const META_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
-pub(crate) const DB_DIGEST_KEY: &str = "db_digest";
-pub(crate) const DB_DIGEST_VERSION_KEY: &str = "db_digest_version";
+pub const DB_DIGEST_KEY: &str = "db_digest";
+pub const DB_DIGEST_VERSION_KEY: &str = "db_digest_version";
 const SCHEMA_VERSION_KEY: &str = "schema_version";
 
 /// Schema versions

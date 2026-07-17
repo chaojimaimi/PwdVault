@@ -3257,6 +3257,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "pwdvault-application"
+version = "1.0.5"
+dependencies = [
+ "base64 0.22.1",
+ "bincode",
+ "chrono",
+ "pwdvault-domain",
+ "pwdvault-infrastructure",
+ "rand 0.8.6",
+ "redb",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "ureq",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "pwdvault-domain"
 version = "1.0.5"
 dependencies = [
