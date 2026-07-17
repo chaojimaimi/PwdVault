@@ -1,16 +1,16 @@
-import Fuse, { type FuseResult, type IFuseOptions } from 'fuse.js';
-import type { EntrySummary } from '../types';
+import Fuse, { type FuseResult, type IFuseOptions } from "fuse.js";
+import type { EntrySummary } from "../types";
 
 const fuseOptions: IFuseOptions<EntrySummary> = {
-  keys: [
-    { name: 'title', weight: 0.4 },
-    { name: 'username', weight: 0.3 },
-    { name: 'url', weight: 0.2 },
-    { name: 'tags', weight: 0.1 },
-  ],
-  threshold: 0.3,
-  includeScore: true,
-  ignoreLocation: true,
+	keys: [
+		{ name: "title", weight: 0.4 },
+		{ name: "username", weight: 0.3 },
+		{ name: "url", weight: 0.2 },
+		{ name: "tags", weight: 0.1 },
+	],
+	threshold: 0.3,
+	includeScore: true,
+	ignoreLocation: true,
 };
 
 // Cache the last-built index keyed by the array reference. When the caller
@@ -28,12 +28,12 @@ let cachedIndex: Fuse<EntrySummary> | null = null;
  * every query, which for 10k entries dominates the per-keystroke cost.
  */
 export function buildFuseIndex(entries: EntrySummary[]): Fuse<EntrySummary> {
-  if (cachedEntries === entries && cachedIndex) {
-    return cachedIndex;
-  }
-  cachedEntries = entries;
-  cachedIndex = new Fuse(entries, fuseOptions);
-  return cachedIndex;
+	if (cachedEntries === entries && cachedIndex) {
+		return cachedIndex;
+	}
+	cachedEntries = entries;
+	cachedIndex = new Fuse(entries, fuseOptions);
+	return cachedIndex;
 }
 
 /**
@@ -42,20 +42,23 @@ export function buildFuseIndex(entries: EntrySummary[]): Fuse<EntrySummary> {
  * common case (user types a prefix of the title) in single-digit ms even
  * for 10k entries.
  */
-function substringFilter(entries: EntrySummary[], query: string): EntrySummary[] {
-  const q = query.toLowerCase();
-  const results: EntrySummary[] = [];
-  for (const e of entries) {
-    if (
-      e.title.toLowerCase().includes(q) ||
-      e.username.toLowerCase().includes(q) ||
-      (e.url && e.url.toLowerCase().includes(q)) ||
-      (e.tags && e.tags.some((t) => t.toLowerCase().includes(q)))
-    ) {
-      results.push(e);
-    }
-  }
-  return results;
+function substringFilter(
+	entries: EntrySummary[],
+	query: string,
+): EntrySummary[] {
+	const q = query.toLowerCase();
+	const results: EntrySummary[] = [];
+	for (const e of entries) {
+		if (
+			e.title.toLowerCase().includes(q) ||
+			e.username.toLowerCase().includes(q) ||
+			(e.url && e.url.toLowerCase().includes(q)) ||
+			(e.tags && e.tags.some((t) => t.toLowerCase().includes(q)))
+		) {
+			results.push(e);
+		}
+	}
+	return results;
 }
 
 /**
@@ -68,18 +71,20 @@ function substringFilter(entries: EntrySummary[], query: string): EntrySummary[]
  * Returns all entries unchanged when the query is empty.
  */
 export function searchWithIndex(
-  entries: EntrySummary[],
-  query: string,
+	entries: EntrySummary[],
+	query: string,
 ): EntrySummary[] {
-  const trimmed = query.trim();
-  if (!trimmed) return entries;
+	const trimmed = query.trim();
+	if (!trimmed) return entries;
 
-  const fast = substringFilter(entries, trimmed);
-  if (fast.length > 0) return fast;
+	const fast = substringFilter(entries, trimmed);
+	if (fast.length > 0) return fast;
 
-  // No exact substring hits — fall back to fuzzy matching for typos.
-  const index = buildFuseIndex(entries);
-  return index.search(trimmed).map((result: FuseResult<EntrySummary>) => result.item);
+	// No exact substring hits — fall back to fuzzy matching for typos.
+	const index = buildFuseIndex(entries);
+	return index
+		.search(trimmed)
+		.map((result: FuseResult<EntrySummary>) => result.item);
 }
 
 /**

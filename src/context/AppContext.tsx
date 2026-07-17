@@ -1,7 +1,7 @@
-import type { ReactNode } from 'react';
-import { AuthProvider } from './AuthContext';
-import { SettingsProvider } from './SettingsContext';
-import { VaultProvider } from './VaultContext';
+import type { ReactNode } from "react";
+import { AuthProvider } from "./AuthContext";
+import { SettingsProvider } from "./SettingsContext";
+import { VaultProvider } from "./VaultContext";
 
 // ---------------------------------------------------------------------------
 // Provider composition
@@ -23,15 +23,15 @@ import { VaultProvider } from './VaultContext';
 // ---------------------------------------------------------------------------
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  return (
-    <AuthProvider>
-      <SettingsProvider>
-        <VaultProvider>{children}</VaultProvider>
-      </SettingsProvider>
-    </AuthProvider>
-  );
+	return (
+		<AuthProvider>
+			<SettingsProvider>
+				<VaultProvider>{children}</VaultProvider>
+			</SettingsProvider>
+		</AuthProvider>
+	);
 }
 
-export { useAuth } from './AuthContext';
-export { useVault } from './VaultContext';
-export { useSettings } from './SettingsContext';
+export { useAuth } from "./AuthContext";
+export { useVault } from "./VaultContext";
+export { useSettings } from "./SettingsContext";
