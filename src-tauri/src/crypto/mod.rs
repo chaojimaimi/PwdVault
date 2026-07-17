@@ -40,17 +40,17 @@ impl SecretKey {
     pub fn new(bytes: [u8; KEY_SIZE]) -> Self {
         Self(Zeroizing::new(bytes))
     }
+}
 
-    /// Borrow the key bytes for cryptographic operations.
-    pub fn as_ref(&self) -> &[u8; KEY_SIZE] {
-        &self.0
+impl From<[u8; KEY_SIZE]> for SecretKey {
+    fn from(bytes: [u8; KEY_SIZE]) -> Self {
+        Self::new(bytes)
     }
+}
 
-    /// Consume into raw bytes (caller responsible for zeroization).
-    pub fn into_bytes(self) -> [u8; KEY_SIZE] {
-        // Zeroizing derefs to the inner value; we extract via Deref.
-        let tmp = self.0;
-        *tmp
+impl AsRef<[u8; KEY_SIZE]> for SecretKey {
+    fn as_ref(&self) -> &[u8; KEY_SIZE] {
+        &self.0
     }
 }
 

@@ -288,6 +288,62 @@ pub fn assert_user_only_dir(_path: &Path) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
+
+    const CRASH_DB_ENV: &str = "PWDVAULT_CRASH_TEST_DB";
+    const CRASH_MODE_ENV: &str = "PWDVAULT_CRASH_TEST_MODE";
+    const CRASH_TEST_NAME: &str = "test_infra::tests::crash_child_vault_transaction";
+    const CRASH_KEY: [u8; 32] = [0x5A; 32];
+    const CRASH_MAC_KEY: [u8; 32] = [0xA5; 32];
+
+    #[test]
+    fn crash_child_vault_transaction() {
+        let Ok(db_path) = std::env::var(CRASH_DB_ENV) else {
+            return;
+        };
+        let mode = std::env::var(CRASH_MODE_ENV).expect("crash mode");
+        let db = Database::open(db_path).expect("open crash-test db");
+        let txn = db.begin_write().expect("begin crash-test transaction");
+        let entry = database::PasswordEntry::new(
+            "Crash child".to_string(),
+            None,
+            "crash-child".to_string(),
+        );
+        database::vault_store::save_entry_in_txn(&txn, &CRASH_KEY, &entry)
+            .expect("save crash-test entry");
+        database::integrity::refresh_digest_in_txn(&txn, &CRASH_MAC_KEY)
+            .expect("refresh crash-test digest");
+
+        if mode == "after-commit" {
+            txn.commit().expect("commit crash-test transaction");
+        }
+
+        // Terminate without unwinding. In before-commit mode this leaves an
+        // in-progress redb transaction exactly as an abrupt process crash
+        // would; in after-commit mode it validates durable all-or-nothing state.
+        std::process::abort();
+    }
+
+    fn run_crash_child(db_path: &Path, mode: &str) {
+        let status = Command::new(std::env::current_exe().expect("current test executable"))
+            .arg("--exact")
+            .arg(CRASH_TEST_NAME)
+            .arg("--nocapture")
+            .env(CRASH_DB_ENV, db_path)
+            .env(CRASH_MODE_ENV, mode)
+            .status()
+            .expect("spawn crash-test child");
+        assert!(!status.success(), "child must terminate abnormally");
+    }
+
+    fn crash_test_database() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::TempDir::new().expect("create crash-test dir");
+        let db_path = dir.path().join("process-crash.db");
+        let db = database::init_database(&db_path).expect("init crash-test db");
+        database::integrity::refresh_digest(&db, &CRASH_MAC_KEY).expect("establish empty digest");
+        drop(db);
+        (dir, db_path)
+    }
 
     // --- Fault injection tests ---
 
@@ -310,6 +366,26 @@ mod tests {
     fn test_fault_injector_empty_db_reopens_cleanly() {
         let injector = FaultInjector::new();
         injector.verify_entry_count(0);
+    }
+
+    #[test]
+    fn test_process_crash_before_commit_preserves_old_state_and_digest() {
+        let (_dir, db_path) = crash_test_database();
+        run_crash_child(&db_path, "before-commit");
+
+        let db = Database::open(&db_path).expect("reopen after crash");
+        assert_eq!(database::count_entries(&db).unwrap(), 0);
+        assert!(database::integrity::verify_integrity(&db, &CRASH_MAC_KEY).unwrap());
+    }
+
+    #[test]
+    fn test_process_crash_after_commit_preserves_new_state_and_digest() {
+        let (_dir, db_path) = crash_test_database();
+        run_crash_child(&db_path, "after-commit");
+
+        let db = Database::open(&db_path).expect("reopen after crash");
+        assert_eq!(database::count_entries(&db).unwrap(), 1);
+        assert!(database::integrity::verify_integrity(&db, &CRASH_MAC_KEY).unwrap());
     }
 
     // --- Concurrency tests ---

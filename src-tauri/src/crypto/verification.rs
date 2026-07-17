@@ -10,7 +10,9 @@ use zeroize::Zeroize;
 
 use super::cipher::{self, EncryptedData};
 use super::kdf::{derive_key_with_params, derive_subkeys, AdaptiveParams};
-use super::{KEY_SIZE, SALT_SIZE, VERIFICATION_HEADER};
+use super::{SecretKey, KEY_SIZE, SALT_SIZE, VERIFICATION_HEADER};
+
+pub type DerivedSubkeys = (SecretKey, SecretKey);
 
 /// Error type for verification operations
 #[derive(Error, Debug)]
@@ -75,7 +77,7 @@ pub fn verify_password(
 pub fn unlock_with_password(
     password: &str,
     verification_data: &VerificationData,
-) -> Result<Option<([u8; KEY_SIZE], [u8; KEY_SIZE])>, VerificationError> {
+) -> Result<Option<DerivedSubkeys>, VerificationError> {
     let (mut master_key, _) =
         derive_key_with_params(password, &verification_data.salt, &verification_data.params)
             .map_err(|e| VerificationError::KdfError(e.to_string()))?;
@@ -85,7 +87,7 @@ pub fn unlock_with_password(
             if decrypted.as_slice().ct_eq(VERIFICATION_HEADER).into() {
                 let (enc_key, mac_key) = derive_subkeys(&master_key, &verification_data.salt);
                 master_key.zeroize();
-                Ok(Some((enc_key, mac_key)))
+                Ok(Some((enc_key.into(), mac_key.into())))
             } else {
                 Ok(None)
             }
@@ -125,7 +127,7 @@ mod tests {
         let result = unlock_with_password("my_password", &verification).unwrap();
         assert!(result.is_some());
         let (enc_key, mac_key) = result.unwrap();
-        assert_ne!(enc_key, mac_key);
-        assert_ne!(enc_key, master_key);
+        assert_ne!(enc_key.as_ref(), mac_key.as_ref());
+        assert_ne!(enc_key.as_ref(), &master_key);
     }
 }

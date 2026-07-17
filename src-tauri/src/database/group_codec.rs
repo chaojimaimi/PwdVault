@@ -9,7 +9,7 @@
 //! - **v1**: AES-256-GCM without AAD (pre-§5.1.4).
 //! - **v2**: AES-256-GCM with AAD = `table_name || record_id || record_format_version` (§5.1.4).
 
-use crate::crypto::{decrypt, decrypt_with_aad, encrypt, encrypt_with_aad, EncryptedData};
+use crate::crypto::{decrypt, decrypt_with_aad, encrypt_with_aad, EncryptedData};
 
 use super::{DatabaseError, Group};
 

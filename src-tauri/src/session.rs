@@ -21,14 +21,12 @@
 //! Auto-lock obtains an [`ExclusiveLease`] (exclusive/write guard) that waits
 //! for all operation leases to drain before clearing the keys.
 
-use std::sync::Mutex;
-use std::time::Instant;
-use zeroize::Zeroize;
-
+use crate::crypto::SecretKey;
 use crate::VaultError;
+use std::sync::{Mutex, RwLock, RwLockReadGuard};
+use std::time::Instant;
 
-/// The encryption key type (bare `[u8; 32]` — will be replaced by `SecretKey`
-/// in §5.1.5).
+/// Raw key inputs accepted only at the atomic unlock boundary.
 pub type EncKey = [u8; 32];
 pub type MacKey = [u8; 32];
 
@@ -39,9 +37,9 @@ enum SessionInner {
     Locked { generation: u64 },
     /// Keys and activity timer are live.
     Unlocked {
-        enc_key: EncKey,
-        mac_key: MacKey,
-        last_activity: Instant,
+        enc_key: SecretKey,
+        mac_key: SecretKey,
+        last_activity: Mutex<Instant>,
         /// Monotonically increasing counter incremented on each unlock.
         /// Used by [`SessionLease`] to detect that the session changed
         /// (lock → re-unlock) while the lease was held.
@@ -51,24 +49,17 @@ enum SessionInner {
 
 /// Unified vault session state machine.
 ///
-/// Holds enc_key, mac_key, last_activity, and session_generation behind a
-/// single `Mutex`. The lease mechanism built on top ensures that:
-/// - Operations hold a shared reference (via `reader` count) preventing
-///   auto-lock from clearing keys mid-operation.
-/// - Auto-lock acquires the exclusive lock, waits for readers to drain,
-///   then clears keys atomically.
+/// Holds enc_key, mac_key, last_activity, and session_generation behind an
+/// `RwLock`. Each operation lease owns a read guard, preventing auto-lock from
+/// obtaining the write guard and clearing keys until the operation finishes.
 pub struct VaultSession {
-    inner: Mutex<SessionInner>,
-    /// Number of active operation leases. Auto-lock's `exclusive_lease`
-    /// waits until this reaches 0 before proceeding.
-    reader_count: Mutex<u32>,
+    inner: RwLock<SessionInner>,
 }
 
 impl Default for VaultSession {
     fn default() -> Self {
         Self {
-            inner: Mutex::new(SessionInner::Locked { generation: 0 }),
-            reader_count: Mutex::new(0),
+            inner: RwLock::new(SessionInner::Locked { generation: 0 }),
         }
     }
 }
@@ -85,49 +76,51 @@ impl VaultSession {
     /// in a single lock acquisition. This is the **last step** of the two-phase
     /// unlock flow (§5.1.3 step 8) — it must only be called after all
     /// verification has passed.
-    pub fn unlock(&self, enc_key: EncKey, mac_key: MacKey) {
-        let mut inner = self.inner.lock().expect("session lock poisoned");
+    pub fn unlock(&self, enc_key: impl Into<SecretKey>, mac_key: impl Into<SecretKey>) {
+        let mut inner = self.inner.write().expect("session lock poisoned");
         let next_generation = match &*inner {
             SessionInner::Unlocked { generation, .. } => generation + 1,
             SessionInner::Locked { generation } => generation + 1,
         };
         *inner = SessionInner::Unlocked {
-            enc_key,
-            mac_key,
-            last_activity: Instant::now(),
+            enc_key: enc_key.into(),
+            mac_key: mac_key.into(),
+            last_activity: Mutex::new(Instant::now()),
             generation: next_generation,
         };
     }
 
     /// Check if the vault is currently unlocked (keys are in memory).
     pub fn is_unlocked(&self) -> bool {
-        let inner = self.inner.lock().expect("session lock poisoned");
+        let inner = self.inner.read().expect("session lock poisoned");
         matches!(*inner, SessionInner::Unlocked { .. })
     }
 
     /// Get the encryption key.
+    #[cfg(test)]
     pub fn get_enc_key(&self) -> Result<EncKey, VaultError> {
-        let inner = self.inner.lock().expect("session lock poisoned");
+        let inner = self.inner.read().expect("session lock poisoned");
         match &*inner {
-            SessionInner::Unlocked { enc_key, .. } => Ok(*enc_key),
+            SessionInner::Unlocked { enc_key, .. } => Ok(*enc_key.as_ref()),
             SessionInner::Locked { .. } => Err(VaultError::VaultLocked),
         }
     }
 
     /// Get the MAC key.
+    #[cfg(test)]
     pub fn get_mac_key(&self) -> Result<MacKey, VaultError> {
-        let inner = self.inner.lock().expect("session lock poisoned");
+        let inner = self.inner.read().expect("session lock poisoned");
         match &*inner {
-            SessionInner::Unlocked { mac_key, .. } => Ok(*mac_key),
+            SessionInner::Unlocked { mac_key, .. } => Ok(*mac_key.as_ref()),
             SessionInner::Locked { .. } => Err(VaultError::VaultLocked),
         }
     }
 
     /// Update the activity timestamp (called on successful vault operations).
     pub fn touch_activity(&self) {
-        let mut inner = self.inner.lock().expect("session lock poisoned");
-        if let SessionInner::Unlocked { last_activity, .. } = &mut *inner {
-            *last_activity = Instant::now();
+        let inner = self.inner.read().expect("session lock poisoned");
+        if let SessionInner::Unlocked { last_activity, .. } = &*inner {
+            *last_activity.lock().expect("activity lock poisoned") = Instant::now();
         }
     }
 
@@ -135,9 +128,12 @@ impl VaultSession {
     /// whether auto-lock should fire. Returns `Some(deadline)` if the vault
     /// is unlocked and a deadline can be computed.
     pub fn auto_lock_deadline(&self, timeout_secs: u64) -> Option<Instant> {
-        let inner = self.inner.lock().expect("session lock poisoned");
+        let inner = self.inner.read().expect("session lock poisoned");
         if let SessionInner::Unlocked { last_activity, .. } = &*inner {
-            Some(*last_activity + std::time::Duration::from_secs(timeout_secs))
+            Some(
+                *last_activity.lock().expect("activity lock poisoned")
+                    + std::time::Duration::from_secs(timeout_secs),
+            )
         } else {
             None
         }
@@ -148,10 +144,15 @@ impl VaultSession {
     /// Returns `true` only if the vault is unlocked AND the activity timer
     /// has exceeded `timeout_secs`.
     pub fn should_auto_lock(&self, timeout_secs: u64) -> bool {
-        let inner = self.inner.lock().expect("session lock poisoned");
+        let inner = self.inner.read().expect("session lock poisoned");
         match &*inner {
             SessionInner::Unlocked { last_activity, .. } => {
-                last_activity.elapsed().as_secs() >= timeout_secs
+                last_activity
+                    .lock()
+                    .expect("activity lock poisoned")
+                    .elapsed()
+                    .as_secs()
+                    >= timeout_secs
             }
             SessionInner::Locked { .. } => false,
         }
@@ -159,29 +160,17 @@ impl VaultSession {
 
     /// Obtain an operation lease.
     ///
-    /// The lease holds a shared reference count, preventing `exclusive_lease`
-    /// (used by auto-lock) from clearing keys while the operation is in
-    /// progress. The lease also snapshots the current `session_generation`
-    /// so callers can detect stale state.
+    /// The lease holds a read guard, preventing auto-lock from clearing keys
+    /// while the operation is in progress. It also snapshots the current
+    /// `session_generation` so callers can detect stale state.
     ///
     /// Returns an error if the vault is locked.
     pub fn lease(&self) -> Result<SessionLease<'_>, VaultError> {
-        let inner = self.inner.lock().expect("session lock poisoned");
-        match &*inner {
+        let guard = self.inner.read().expect("session lock poisoned");
+        match &*guard {
             SessionInner::Unlocked { generation, .. } => {
                 let generation = *generation;
-                drop(inner);
-
-                // Increment reader count AFTER confirming unlocked state.
-                *self
-                    .reader_count
-                    .lock()
-                    .expect("reader count lock poisoned") += 1;
-
-                Ok(SessionLease {
-                    session: self,
-                    generation,
-                })
+                Ok(SessionLease { guard, generation })
             }
             SessionInner::Locked { .. } => Err(VaultError::VaultLocked),
         }
@@ -189,64 +178,33 @@ impl VaultSession {
 
     /// Obtain an exclusive lease for auto-lock.
     ///
-    /// Waits for all operation leases to drain (reader_count reaches 0),
-    /// then atomically clears keys and transitions to Locked. This ensures
-    /// no operation is mid-flight when keys are wiped.
+    /// Waits for all operation leases to release their read guards, then
+    /// atomically clears keys and transitions to Locked. This ensures no
+    /// operation is mid-flight when keys are wiped.
     ///
     /// Returns `true` if the vault was unlocked and is now locked.
     pub fn exclusive_lock_and_clear(&self) -> bool {
-        // First, atomically clear keys and transition to Locked.
-        // This prevents new leases from being issued.
-        let was_unlocked = {
-            let mut inner = self.inner.lock().expect("session lock poisoned");
-            match std::mem::replace(
-                &mut *inner,
-                // Placeholder — replaced below after extracting keys
-                SessionInner::Locked { generation: 0 },
-            ) {
-                SessionInner::Unlocked {
-                    mut enc_key,
-                    mut mac_key,
-                    generation,
-                    ..
-                } => {
-                    // Preserve generation so next unlock increments correctly.
-                    *inner = SessionInner::Locked { generation };
-                    enc_key.zeroize();
-                    mac_key.zeroize();
-                    true
-                }
-                SessionInner::Locked { generation } => {
-                    *inner = SessionInner::Locked { generation };
-                    false
-                }
+        // Taking the write lock blocks until every SessionLease has dropped
+        // its read guard. New leases cannot pass while this guard is held.
+        let mut inner = self.inner.write().expect("session lock poisoned");
+        match std::mem::replace(&mut *inner, SessionInner::Locked { generation: 0 }) {
+            SessionInner::Unlocked {
+                enc_key,
+                mac_key,
+                generation,
+                ..
+            } => {
+                // SecretKey zeroizes both values when they are dropped here.
+                drop(enc_key);
+                drop(mac_key);
+                *inner = SessionInner::Locked { generation };
+                true
             }
-        };
-
-        if was_unlocked {
-            // Wait for in-flight operation leases to drain. They hold
-            // copies of the keys (obtained before we cleared them), so
-            // they can finish safely. New operations will fail with
-            // VaultLocked since the session is now Locked.
-            //
-            // We use a spin-wait with a short sleep and a 5-second timeout
-            // to avoid burning CPU and to prevent infinite hangs in case
-            // of a bug. In practice, operations are fast (ms), so this
-            // rarely loops more than a few times.
-            let deadline = Instant::now() + std::time::Duration::from_secs(5);
-            loop {
-                let count = *self
-                    .reader_count
-                    .lock()
-                    .expect("reader count lock poisoned");
-                if count == 0 || Instant::now() >= deadline {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(1));
+            SessionInner::Locked { generation } => {
+                *inner = SessionInner::Locked { generation };
+                false
             }
         }
-
-        was_unlocked
     }
 }
 
@@ -257,19 +215,32 @@ impl VaultSession {
 /// use [`SessionLease::check_valid`] to detect that the session changed
 /// (e.g. another thread locked and re-unlocked) during the operation.
 pub struct SessionLease<'a> {
-    session: &'a VaultSession,
+    guard: RwLockReadGuard<'a, SessionInner>,
     generation: u64,
 }
 
 impl<'a> SessionLease<'a> {
     /// Get the encryption key (valid for the lifetime of this lease).
-    pub fn enc_key(&self) -> Result<EncKey, VaultError> {
-        self.session.get_enc_key()
+    pub fn enc_key(&self) -> Result<&[u8; 32], VaultError> {
+        match &*self.guard {
+            SessionInner::Unlocked { enc_key, .. } => Ok(enc_key.as_ref()),
+            SessionInner::Locked { .. } => Err(VaultError::VaultLocked),
+        }
     }
 
     /// Get the MAC key (valid for the lifetime of this lease).
-    pub fn mac_key(&self) -> Result<MacKey, VaultError> {
-        self.session.get_mac_key()
+    pub fn mac_key(&self) -> Result<&[u8; 32], VaultError> {
+        match &*self.guard {
+            SessionInner::Unlocked { mac_key, .. } => Ok(mac_key.as_ref()),
+            SessionInner::Locked { .. } => Err(VaultError::VaultLocked),
+        }
+    }
+
+    /// Mark successful activity without re-entering the session RwLock.
+    pub fn touch_activity(&self) {
+        if let SessionInner::Unlocked { last_activity, .. } = &*self.guard {
+            *last_activity.lock().expect("activity lock poisoned") = Instant::now();
+        }
     }
 
     /// Check that the session generation hasn't changed since acquisition.
@@ -278,23 +249,9 @@ impl<'a> SessionLease<'a> {
     /// unlocked with a newer generation — the caller should treat a generation
     /// mismatch as a stale-state error).
     pub fn check_valid(&self) -> Result<(), VaultError> {
-        let inner = self.session.inner.lock().expect("session lock poisoned");
-        match &*inner {
+        match &*self.guard {
             SessionInner::Unlocked { generation, .. } if *generation == self.generation => Ok(()),
             _ => Err(VaultError::VaultLocked),
-        }
-    }
-}
-
-impl<'a> Drop for SessionLease<'a> {
-    fn drop(&mut self) {
-        let mut count = self
-            .session
-            .reader_count
-            .lock()
-            .expect("reader count lock poisoned");
-        if *count > 0 {
-            *count -= 1;
         }
     }
 }
@@ -336,19 +293,27 @@ mod tests {
 
     #[test]
     fn test_lease_prevents_clear() {
-        let session = VaultSession::new();
+        use std::sync::{mpsc, Arc};
+        use std::time::Duration;
+
+        let session = Arc::new(VaultSession::new());
         session.unlock(TEST_ENC_KEY, TEST_MAC_KEY);
 
         let lease = session.lease().unwrap();
-        assert_eq!(lease.enc_key().unwrap(), TEST_ENC_KEY);
+        assert_eq!(lease.enc_key().unwrap(), &TEST_ENC_KEY);
+        let (tx, rx) = mpsc::channel();
+        let locking_session = Arc::clone(&session);
+        let handle = std::thread::spawn(move || {
+            let locked = locking_session.exclusive_lock_and_clear();
+            tx.send(locked).unwrap();
+        });
 
-        // While the lease is held, exclusive_lock_and_clear clears keys
-        // but waits for the lease to drain. Simulate that the keys are
-        // already cleared by checking from a new call (which will fail).
+        // The write lock must not clear the keys while the read lease exists.
+        assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+        assert_eq!(lease.enc_key().unwrap(), &TEST_ENC_KEY);
         drop(lease);
-
-        // Now exclusive_lock_and_clear can proceed without blocking.
-        assert!(session.exclusive_lock_and_clear());
+        assert!(rx.recv_timeout(Duration::from_secs(1)).unwrap());
+        handle.join().unwrap();
         assert!(!session.is_unlocked());
     }
 
@@ -443,7 +408,7 @@ mod tests {
             let s = session.clone();
             handles.push(thread::spawn(move || {
                 let lease = s.lease().unwrap();
-                assert_eq!(lease.enc_key().unwrap(), TEST_ENC_KEY);
+                assert_eq!(lease.enc_key().unwrap(), &TEST_ENC_KEY);
                 // Simulate work
                 std::thread::sleep(std::time::Duration::from_millis(5));
                 assert!(lease.check_valid().is_ok());
@@ -456,5 +421,65 @@ mod tests {
 
         // After all leases dropped, exclusive_lock should succeed immediately.
         assert!(session.exclusive_lock_and_clear());
+    }
+
+    #[test]
+    fn test_one_thousand_mixed_session_operations() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let session = Arc::new(VaultSession::new());
+        session.unlock(TEST_ENC_KEY, TEST_MAC_KEY);
+        let barrier = Arc::new(Barrier::new(10));
+        let mut handles = Vec::new();
+
+        // Eight operation workers model IPC/HTTP service calls.
+        for _ in 0..8 {
+            let session = Arc::clone(&session);
+            let barrier = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                for _ in 0..100 {
+                    if let Ok(lease) = session.lease() {
+                        assert_eq!(lease.enc_key().unwrap(), &TEST_ENC_KEY);
+                        assert_eq!(lease.mac_key().unwrap(), &TEST_MAC_KEY);
+                        assert!(lease.check_valid().is_ok());
+                    }
+                    thread::yield_now();
+                }
+            }));
+        }
+
+        // One activity worker models successful commands resetting auto-lock.
+        {
+            let session = Arc::clone(&session);
+            let barrier = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                for _ in 0..100 {
+                    session.touch_activity();
+                    thread::yield_now();
+                }
+            }));
+        }
+
+        // One exclusive worker models auto-lock followed by user unlock.
+        {
+            let session = Arc::clone(&session);
+            let barrier = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                for _ in 0..100 {
+                    session.exclusive_lock_and_clear();
+                    session.unlock(TEST_ENC_KEY, TEST_MAC_KEY);
+                    thread::yield_now();
+                }
+            }));
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert!(session.is_unlocked());
     }
 }
