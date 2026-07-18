@@ -11,8 +11,9 @@ db-urls = ["https://github.com/RustSec/advisory-db"]
 ignore = [
     # bincode 1.x — unmaintained but no drop-in replacement available; used
     # for redb value serialization. Tracked for migration to bincode 2 or
-    # postcard in a future release.
-    { id = "RUSTSEC-2024-0370", reason = "bincode 1.x unmaintained; no drop-in replacement yet; migration planned", until = "2026-12-31" },
+    # postcard in a future release. Expiry tracked in
+    # docs/SECURITY-ADVISORY-ALLOWLIST.md (2026-12-31).
+    { id = "RUSTSEC-2024-0370", reason = "bincode 1.x unmaintained; no drop-in replacement yet; migration planned" },
 ]
 yanked = "warn"
 
