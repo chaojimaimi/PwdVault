@@ -111,6 +111,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      # Pre-build native messaging host for the target platform.
+      - name: Build native messaging host
+        run: |
+          cd extensions/native-host
+          cargo build --release
+          mkdir -p ../../src-tauri/binaries
+          cp target/release/pwdvault-native ../../src-tauri/binaries/
+
       - name: Build macOS app
         run: pnpm tauri build --bundles dmg,app
         env:
@@ -165,19 +173,31 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      # Pre-build native messaging host (Windows produces .exe).
+      - name: Build native messaging host
+        shell: bash
+        run: |
+          cd extensions/native-host
+          cargo build --release
+          mkdir -p ../../src-tauri/binaries
+          cp target/release/pwdvault-native.exe ../../src-tauri/binaries/ || \
+          cp target/release/pwdvault-native ../../src-tauri/binaries/
+
       - name: Build Windows app
         run: pnpm tauri build --bundles nsis
 
-      - name: Sign Windows executable
-        if: steps.secrets.outputs.windows_certs == 'true'
-        # VULN-002: pin to commit SHA when certificate is provisioned.
-        # Replace @v4 with @<full-40-char-SHA> from the v4 tag before first
-        # stable release that actually signs Windows builds.
-        uses: gtarnaras/code-sign-action@v4
-        with:
-          certificate: ${{ secrets.WINDOWS_CERTIFICATE }}
-          password: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          folder: src-tauri/target/release/bundle/nsis/
+      # Windows code signing — TODO: uncomment when WINDOWS_CERTIFICATE secret
+      # is provisioned. The action reference was removed because the original
+      # gtarnaras/code-sign-action repository is no longer available. Replace
+      # with a maintained signing action (e.g. azure/trusted-signing-action)
+      # or use signtool.exe directly before the first signed release.
+      # - name: Sign Windows executable
+      #   if: steps.secrets.outputs.windows_certs == 'true'
+      #   uses: <signing-action>@<SHA>
+      #   with:
+      #     certificate: ${{ secrets.WINDOWS_CERTIFICATE }}
+      #     password: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      #     folder: src-tauri/target/release/bundle/nsis/
 
       - name: Verify signature
         if: steps.secrets.outputs.windows_certs == 'true'
@@ -218,20 +238,15 @@ jobs:
             extensions/chrome/PwdVault-Chrome-Extension-*.zip
             extensions/firefox/PwdVault-Firefox-Extension-*.zip
 
-      # Chrome Web Store upload (skipped if secrets absent)
-      - name: Upload to Chrome Web Store
-        if: env.CHROME_CLIENT_ID != ''
-        continue-on-error: true
-        uses: trmcnvn/chrome-webstore-upload-cli@v2 # v2.2.0
-        with:
-          file: extensions/chrome/PwdVault-Chrome-Extension-*.zip
-          extension-id: ${{ secrets.CHROME_EXTENSION_ID }}
-          client-id: ${{ secrets.CHROME_CLIENT_ID }}
-          client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
-          refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
-          publish: false
-        env:
-          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+      # Chrome Web Store upload — TODO: uncomment when CHROME_CLIENT_ID secret
+      # is provisioned. The trmcnvn/chrome-webstore-upload-cli repo is no
+      # longer available; use an alternative (e.g. wixmedium/wix stores API)
+      # or manual upload until then.
+      # - name: Upload to Chrome Web Store
+      #   if: env.CHROME_CLIENT_ID != ''
+      #   continue-on-error: true
+      #   uses: <chrome-webstore-action>@<SHA>
+      #   ...
 
       # Firefox AMO signing (skipped if secrets absent)
       - name: Sign for Firefox AMO
