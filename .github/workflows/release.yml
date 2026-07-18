@@ -103,7 +103,7 @@ jobs:
       - name: Build macOS app
         run: pnpm tauri build --bundles dmg,app
         env:
-          APPLE_SIGNING_IDENTITY: ${{ steps.secrets.outputs.macos_certs == 'true' && 'Developer ID Application: PwdVault' || '-' }}
+          APPLE_SIGNING_IDENTITY: "${{ steps.secrets.outputs.macos_certs == 'true' && 'Developer ID Application: PwdVault' || '-' }}"
 
       - name: Notarize app
         if: steps.secrets.outputs.macos_certs == 'true'
