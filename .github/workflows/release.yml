@@ -315,7 +315,10 @@ jobs:
       - name: Generate SHA-256 checksums
         working-directory: artifacts
         run: |
-          find . -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.zip" \) -exec sha256sum {} \; > SHA256SUMS
+          while IFS= read -r -d '' file; do
+            hash=$(sha256sum "$file" | cut -d ' ' -f 1)
+            printf '%s  %s\n' "$hash" "$(basename "$file")"
+          done < <(find . -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.zip" \) -print0 | sort -z) > SHA256SUMS
           cat SHA256SUMS
 
       - name: Generate Rust SBOM (CycloneDX)
