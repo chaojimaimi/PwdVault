@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-07-19
+
+### Fixed
+- Restore desktop backup/export IPC compatibility by using Tauri's camelCase
+  command arguments for export and import passwords.
+- Preserve historical entries with an empty URL by normalizing blank optional
+  URLs to `None` across create, update, export, and import boundaries.
+- Authorize the minimal Tauri filesystem commands required by the system file
+  picker (`write_file`, `read_file`, and `stat`) so encrypted backups can be
+  saved and restored on desktop platforms.
+- Surface stage-specific backup generation and file-save errors instead of a
+  generic `Export failed` notification, with structured backend diagnostics.
+
 ## [1.1.1] - 2026-07-19
 
 ### Fixed

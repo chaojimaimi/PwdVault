@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PwdVault",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Secure password manager with auto-fill",
   "browser_specific_settings": {
     "gecko": {

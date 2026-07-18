@@ -121,11 +121,11 @@ export async function revokeExtensionAccess(): Promise<boolean> {
 // Import/Export
 
 export async function exportVault(exportPassword: string): Promise<VaultBackup> {
-  return invoke('export_vault', { export_password: exportPassword });
+  return invoke('export_vault', { exportPassword });
 }
 
 export async function importVault(backup: VaultBackup, importPassword: string): Promise<ImportResult> {
-  return invoke('import_vault', { backup, import_password: importPassword });
+  return invoke('import_vault', { backup, importPassword });
 }
 
 // Update Check

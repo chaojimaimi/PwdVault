@@ -6,11 +6,19 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 // Import after mock setup
-import { isVaultInitialized, unlockVault, createEntry } from '../vault';
+import {
+  createEntry,
+  exportVault,
+  importVault,
+  isVaultInitialized,
+  unlockVault,
+} from '../vault';
+import type { VaultBackup } from '../../types';
 
 describe('vault API client', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.clearAllMocks();
     // Default: no Tauri environment
     delete (window as any).__TAURI_INTERNALS__;
   });
@@ -48,6 +56,34 @@ describe('vault API client', () => {
       await unlockVault('mypassword');
 
       expect(tauriInvoke).toHaveBeenCalledWith('unlock_vault', { password: 'mypassword' });
+    });
+
+    it('uses Tauri camelCase argument names for backup commands', async () => {
+      (window as any).__TAURI_INTERNALS__ = {};
+
+      const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
+      (tauriInvoke as ReturnType<typeof vi.fn>).mockResolvedValue({});
+      const backup = {
+        version: 2,
+        created_at: 0,
+        salt: '',
+        kdf_memory: 65536,
+        kdf_iterations: 3,
+        kdf_parallelism: 1,
+        nonce: '',
+        data: '',
+      } as VaultBackup;
+
+      await exportVault('export-password');
+      await importVault(backup, 'import-password');
+
+      expect(tauriInvoke).toHaveBeenNthCalledWith(1, 'export_vault', {
+        exportPassword: 'export-password',
+      });
+      expect(tauriInvoke).toHaveBeenNthCalledWith(2, 'import_vault', {
+        backup,
+        importPassword: 'import-password',
+      });
     });
   });
 });

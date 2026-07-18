@@ -50,6 +50,16 @@ pub fn import_password(password: &str) -> Result<(), DomainError> {
     password_size(password)
 }
 
+/// Canonicalize an optional URL at every persistence and backup boundary.
+/// Historical releases stored an unfilled URL as `Some("")`; semantically
+/// that is the same as no URL and must not make the whole vault unexportable.
+pub fn normalize_url(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
+
 fn password_size(password: &str) -> Result<(), DomainError> {
     if password.len() > MAX_INPUT_PASSWORD_BYTES {
         return Err(invalid("PASSWORD_TOO_LONG", "Password is too long"));
@@ -107,8 +117,11 @@ fn entry_fields(
             "Entry password is empty or too long",
         ));
     }
-    if url.is_some_and(|value| value.trim().is_empty() || value.len() > MAX_FIELD_LENGTH) {
-        return Err(invalid("INVALID_URL", "URL is empty or too long"));
+    if url.is_some_and(|value| {
+        let trimmed = value.trim();
+        !trimmed.is_empty() && trimmed.len() > MAX_FIELD_LENGTH
+    }) {
+        return Err(invalid("INVALID_URL", "URL is too long"));
     }
     if notes.is_some_and(|value| value.len() > MAX_NOTES_LENGTH) {
         return Err(invalid("NOTES_TOO_LONG", "Notes are too long"));
@@ -288,5 +301,16 @@ mod tests {
     fn validation_errors_expose_stable_codes() {
         let error = master_password("short").unwrap_err();
         assert!(error.to_string().starts_with("PASSWORD_TOO_SHORT:"));
+    }
+
+    #[test]
+    fn optional_url_normalization_preserves_legacy_empty_values_as_absent() {
+        assert_eq!(normalize_url(None), None);
+        assert_eq!(normalize_url(Some(String::new())), None);
+        assert_eq!(normalize_url(Some("   ".to_string())), None);
+        assert_eq!(
+            normalize_url(Some("  https://example.com/login  ".to_string())),
+            Some("https://example.com/login".to_string())
+        );
     }
 }

@@ -16,6 +16,8 @@ pub fn create_entry(
     state: &Arc<AppState>,
     request: CreateEntryRequest,
 ) -> Result<EntrySummary, VaultError> {
+    let mut request = request;
+    request.url = validation::normalize_url(request.url);
     let lease = state.lease()?;
     validation::entry(&request)?;
 
@@ -156,7 +158,8 @@ pub fn update_entry<R: Into<UpdateEntryRequest>>(
     id: String,
     request: R,
 ) -> Result<EntrySummary, VaultError> {
-    let request = request.into();
+    let mut request = request.into();
+    request.url = validation::normalize_url(request.url);
     let lease = state.lease()?;
     validation::id(&id)?;
     validation::entry_update(&request)?;

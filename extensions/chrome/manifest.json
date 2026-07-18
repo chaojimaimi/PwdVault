@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PwdVault",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Secure password manager with auto-fill",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt9bjcRWGIot5SE+mnSdC3j+qCKOJD0e/HJ4xOglxY/seT5NqOGsIlm8D1+BFOjxQ7xs+kAwaTrLcovD7mhSEaVHy3IJjpddZudEyMgflSuuAx3vD2MZcTYWunFylSwij0H5wei1akK32oSJDfBw/+sow0BCrM2lqA41CXFwpHwLKJPILgp4sM8GtLFUiKFNy6Nw4EGdpefVEnCREFKQ+UtXIEuyuXkOSGuts3FPLVx4dQLszMPS4/EoVhnw8WdPsUW6o85cocwthMsFvfAH0UWaGqJZ8jL2A9yg4j8i7+8n8xcnXxwyiDhHFlh2pkgBGqOamgjv678KOz4ZHzr4ZtwIDAQAB",
   "permissions": [

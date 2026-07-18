@@ -199,9 +199,15 @@ pub async fn export_vault(
     state: State<'_, AppHandle>,
 ) -> Result<pwdvault_domain::VaultBackup, VaultError> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || app::export_vault(&state, export_password))
-        .await
-        .map_err(|e| VaultError::InternalError(format!("export task join error: {}", e)))?
+    let result =
+        tauri::async_runtime::spawn_blocking(move || app::export_vault(&state, export_password))
+            .await
+            .map_err(|e| VaultError::InternalError(format!("export task join error: {}", e)))?;
+    match &result {
+        Ok(_) => tracing::info!("vault backup generation completed"),
+        Err(error) => tracing::error!(error = ?error, "vault backup generation failed"),
+    }
+    result
 }
 
 #[tauri::command]

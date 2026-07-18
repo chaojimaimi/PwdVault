@@ -5,6 +5,7 @@ import { BackHeader } from "../components/BackHeader";
 import { TrashIcon } from "../components/Icons";
 import { AccessibleDialog } from "../components/AccessibleDialog";
 import type { VaultBackup } from "../types";
+import { errorMessage } from "../utils/errorMessage";
 
 function isTauriEnvironment(): boolean {
 	return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -50,8 +51,18 @@ export function ImportExportScreen() {
 		}
 
 		setExporting(true);
+		let backup: VaultBackup;
 		try {
-			const backup = await actions.exportVault(exportPassword);
+			backup = await actions.exportVault(exportPassword);
+		} catch (error) {
+			showToast(
+				`Backup generation failed: ${errorMessage(error, "Unknown backend error")}`,
+			);
+			setExporting(false);
+			return;
+		}
+
+		try {
 			const json = JSON.stringify(backup, null, 2);
 
 			if (isTauriEnvironment()) {
@@ -80,7 +91,7 @@ export function ImportExportScreen() {
 			setExportPassword("");
 			setExportConfirm("");
 		} catch (error) {
-			showToast(error instanceof Error ? error.message : "Export failed");
+			showToast(`Backup save failed: ${errorMessage(error, "Unknown file error")}`);
 		} finally {
 			setExporting(false);
 		}
@@ -146,7 +157,7 @@ export function ImportExportScreen() {
 				input.click();
 			}
 		} catch (error) {
-			showToast(error instanceof Error ? error.message : "Failed to read file");
+			showToast(errorMessage(error, "Failed to read file"));
 		}
 	};
 
@@ -176,7 +187,7 @@ export function ImportExportScreen() {
 			setSelectedBackup(null);
 			setSelectedFileName("");
 		} catch (error) {
-			showToast(error instanceof Error ? error.message : "Import failed");
+			showToast(errorMessage(error, "Import failed"));
 		} finally {
 			setImporting(false);
 		}

@@ -1,6 +1,6 @@
 [package]
 name = "pwdvault-native"
-version = "1.1.1"
+version = "1.1.2"
 edition = "2021"
 description = "Native messaging host for PwdVault browser extension"
 license = "MIT"

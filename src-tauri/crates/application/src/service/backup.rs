@@ -96,7 +96,7 @@ pub fn export_vault(
         export_entries.push(ExportEntry {
             id: entry.id,
             title: entry.title,
-            url: entry.url,
+            url: pwdvault_domain::validation::normalize_url(entry.url),
             username: entry.username,
             password: Zeroizing::new(password),
             notes,
@@ -282,7 +282,7 @@ pub fn import_vault(
     for export_entry in &payload.entries {
         let mut entry = PasswordEntry::new(
             export_entry.title.clone(),
-            export_entry.url.clone(),
+            pwdvault_domain::validation::normalize_url(export_entry.url.clone()),
             export_entry.username.clone(),
         );
 
@@ -506,6 +506,29 @@ mod tests {
         let empty = crate::service::get_entry_secret(&state, empty_id).unwrap();
         assert_eq!(empty.password.as_str(), "");
         assert!(empty.notes.is_none());
+    }
+
+    #[test]
+    fn export_normalizes_historical_empty_urls() {
+        let (state, _dir, _) = unlocked_state_with_entries(|enc_key| {
+            let mut empty_url = PasswordEntry::new(
+                "Historical empty URL".into(),
+                Some("   ".into()),
+                "legacy-user".into(),
+            );
+            let encrypted_password = crypto::encrypt(enc_key, b"legacy-secret").unwrap();
+            empty_url.encrypted_password = bincode::serialize(&encrypted_password).unwrap();
+            vec![empty_url]
+        });
+
+        let backup = export_vault(&state, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
+        let result =
+            import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
+        assert_eq!(result.entries_imported, 1);
+
+        let entries = crate::service::list_all_entries(&state).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].url, None);
     }
 
     #[test]

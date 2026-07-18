@@ -83,7 +83,7 @@ impl From<PasswordEntry> for EntrySummary {
         Self {
             id: entry.id,
             title: entry.title,
-            url: entry.url,
+            url: crate::validation::normalize_url(entry.url),
             username: entry.username,
             tags: entry.tags,
             group_id: entry.group_id,
