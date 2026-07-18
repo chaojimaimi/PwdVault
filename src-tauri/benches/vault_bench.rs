@@ -13,10 +13,10 @@
 //! extrapolated or added once seeding is amortized).
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use pwdvault_infrastructure::database::{self, PasswordEntry};
+use pwdvault_infrastructure::crypto;
 use pwdvault_infrastructure::database::integrity;
 use pwdvault_infrastructure::database::vault_store::VaultStore;
-use pwdvault_infrastructure::crypto;
+use pwdvault_infrastructure::database::{self, PasswordEntry};
 use redb::Database;
 use tempfile::TempDir;
 
@@ -46,11 +46,10 @@ fn build_db(n: usize) -> (Database, [u8; 32], [u8; 32], TempDir) {
                 Some(format!("https://example.com/{}", i)),
                 format!("user{}", i),
             );
-            entry.encrypted_password =
-                crypto::encrypt(&enc_key, b"bench-password")
-                    .ok()
-                    .and_then(|d| bincode::serialize(&d).ok())
-                    .unwrap_or_default();
+            entry.encrypted_password = crypto::encrypt(&enc_key, b"bench-password")
+                .ok()
+                .and_then(|d| bincode::serialize(&d).ok())
+                .unwrap_or_default();
             database::vault_store::save_entry_in_txn(&txn, &enc_key, &entry).expect("seed entry");
         }
         txn.commit().expect("commit seed batch");

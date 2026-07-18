@@ -116,9 +116,7 @@ fn parse_caller_args(args: &[String]) -> Result<CallerContext, String> {
     if let Some(raw_id) = first.strip_prefix("chrome-extension://") {
         let extension_id = raw_id.strip_suffix('/').unwrap_or(raw_id);
         let valid_id = extension_id.len() == 32
-            && extension_id
-                .bytes()
-                .all(|byte| matches!(byte, b'a'..=b'p'));
+            && extension_id.bytes().all(|byte| matches!(byte, b'a'..=b'p'));
         if !valid_id {
             return Err("Invalid Chrome extension caller".to_string());
         }
@@ -222,10 +220,14 @@ fn extract_id(payload: &[u8]) -> Option<u32> {
 fn validate_protocol_version(payload: &[u8]) -> Result<(), String> {
     let value = serde_json::from_slice::<serde_json::Value>(payload)
         .map_err(|_| "Invalid native messaging JSON".to_string())?;
-    match value.get("protocol_version").and_then(|version| version.as_u64()) {
+    match value
+        .get("protocol_version")
+        .and_then(|version| version.as_u64())
+    {
         Some(PROTOCOL_VERSION) => Ok(()),
-        Some(_) => Err("Unsupported protocol version; update PwdVault and the browser extension"
-            .to_string()),
+        Some(_) => Err(
+            "Unsupported protocol version; update PwdVault and the browser extension".to_string(),
+        ),
         None => Err("Missing protocol version; update the browser extension".to_string()),
     }
 }
@@ -276,13 +278,7 @@ fn forward_to_server(payload: &[u8], caller: &CallerContext) -> Result<Vec<u8>, 
              Authorization: Bearer {}\r\n\
              Connection: close\r\n\
              \r\n",
-            path,
-            SERVER_HOST,
-            SERVER_PORT,
-            body_len,
-            caller.origin,
-            caller.label,
-            token
+            path, SERVER_HOST, SERVER_PORT, body_len, caller.origin, caller.label, token
         ),
         None => format!(
             "POST {} HTTP/1.1\r\n\
@@ -415,9 +411,13 @@ mod tests {
 
     #[test]
     fn protocol_version_is_required_and_bounded() {
-        assert!(validate_protocol_version(br#"{"protocol_version":1,"command":"handshake"}"#).is_ok());
+        assert!(
+            validate_protocol_version(br#"{"protocol_version":1,"command":"handshake"}"#).is_ok()
+        );
         assert!(validate_protocol_version(br#"{"command":"handshake"}"#).is_err());
-        assert!(validate_protocol_version(br#"{"protocol_version":2,"command":"handshake"}"#).is_err());
+        assert!(
+            validate_protocol_version(br#"{"protocol_version":2,"command":"handshake"}"#).is_err()
+        );
     }
 
     #[test]

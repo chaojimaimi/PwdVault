@@ -1,13 +1,15 @@
 use std::sync::Arc;
 use zeroize::{Zeroize, Zeroizing};
 
-use pwdvault_infrastructure::crypto::{decrypt, encrypt, EncryptedData};
-use pwdvault_infrastructure::database;
-use pwdvault_infrastructure::database::{count_entries, list_all_entries_bulk, load_entry, vault_store, PasswordEntry};
 use crate::service::vault::get_db;
 use crate::{
     validation, AppState, CreateEntryRequest, EntrySecretResponse, EntrySummary,
     UpdateEntryRequest, VaultError,
+};
+use pwdvault_infrastructure::crypto::{decrypt, encrypt, EncryptedData};
+use pwdvault_infrastructure::database;
+use pwdvault_infrastructure::database::{
+    count_entries, list_all_entries_bulk, load_entry, vault_store, PasswordEntry,
 };
 
 pub fn create_entry(

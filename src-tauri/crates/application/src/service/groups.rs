@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
-use pwdvault_infrastructure::database::{list_all_entries_bulk, list_all_groups_bulk, load_group, vault_store, Group};
 use crate::service::vault::get_db;
 use crate::{AppState, VaultError};
+use pwdvault_infrastructure::database::{
+    list_all_entries_bulk, list_all_groups_bulk, load_group, vault_store, Group,
+};
 
 pub fn create_group(state: &Arc<AppState>, name: String) -> Result<Group, VaultError> {
     let lease = state.lease()?;

@@ -6,7 +6,9 @@
 //! for the frontend/extension.
 
 use pwdvault_domain::DomainError;
-use pwdvault_infrastructure::crypto::{EncryptionError, KdfError, KeyStoreError, VerificationError};
+use pwdvault_infrastructure::crypto::{
+    EncryptionError, KdfError, KeyStoreError, VerificationError,
+};
 use pwdvault_infrastructure::database::DatabaseError;
 use serde::{Deserialize, Serialize};
 

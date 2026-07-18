@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use pwdvault_infrastructure::database::{load_settings, vault_store, Settings};
 use crate::service::vault::get_db;
 use crate::{AppState, VaultError};
+use pwdvault_infrastructure::database::{load_settings, vault_store, Settings};
 
 pub fn get_settings(state: &Arc<AppState>) -> Result<Settings, VaultError> {
     let lease = state.lease()?;

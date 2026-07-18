@@ -134,7 +134,13 @@ fn adapter_only_commands_are_documented() {
     };
     assert_eq!(
         nm_only,
-        vec![&"get_entry", &"handshake", &"is_initialized", &"pair", &"pair_confirm"],
+        vec![
+            &"get_entry",
+            &"handshake",
+            &"is_initialized",
+            &"pair",
+            &"pair_confirm"
+        ],
         "NM-only command set changed — update this test if intentional"
     );
 
@@ -146,7 +152,11 @@ fn adapter_only_commands_are_documented() {
     };
     assert_eq!(
         ipc_only,
-        vec![&"get_entry_meta", &"is_vault_initialized", &"is_vault_unlocked"],
+        vec![
+            &"get_entry_meta",
+            &"is_vault_initialized",
+            &"is_vault_unlocked"
+        ],
         "IPC-only command set changed — update this test if intentional"
     );
 }

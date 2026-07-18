@@ -101,17 +101,13 @@ fn entry_fields(
     if username.trim().is_empty() || username.len() > MAX_FIELD_LENGTH {
         return Err(invalid("INVALID_USERNAME", "Username is empty or too long"));
     }
-    if password.is_some_and(|value| {
-        value.is_empty() || value.len() > MAX_PASSWORD_LENGTH
-    }) {
+    if password.is_some_and(|value| value.is_empty() || value.len() > MAX_PASSWORD_LENGTH) {
         return Err(invalid(
             "INVALID_ENTRY_PASSWORD",
             "Entry password is empty or too long",
         ));
     }
-    if url.is_some_and(|value| {
-        value.trim().is_empty() || value.len() > MAX_FIELD_LENGTH
-    }) {
+    if url.is_some_and(|value| value.trim().is_empty() || value.len() > MAX_FIELD_LENGTH) {
         return Err(invalid("INVALID_URL", "URL is empty or too long"));
     }
     if notes.is_some_and(|value| value.len() > MAX_NOTES_LENGTH) {

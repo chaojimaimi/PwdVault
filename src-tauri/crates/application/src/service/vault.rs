@@ -2,11 +2,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::{AppState, VaultError};
+use pwdvault_domain::constants;
 use pwdvault_infrastructure::crypto::{self, create_verification_header, unlock_with_password};
 use pwdvault_infrastructure::database::{self, load_settings, Settings};
 use pwdvault_infrastructure::paths;
-use pwdvault_domain::constants;
-use crate::{AppState, VaultError};
 
 /// Check if the rate limiter is currently blocking unlock attempts.
 pub fn check_rate_limit(state: &AppState) -> Result<(), VaultError> {
@@ -117,7 +117,11 @@ pub fn init_vault(state: &Arc<AppState>, password: Zeroizing<String>) -> Result<
         let store = database::vault_store::VaultStore::new(&db);
         store.write(mac_key.as_ref(), |txn| {
             database::vault_store::save_verification_data_in_txn(txn, &verification_data)?;
-            pwdvault_infrastructure::vault_header::save_header_in_txn(txn, &header, enc_key.as_ref())?;
+            pwdvault_infrastructure::vault_header::save_header_in_txn(
+                txn,
+                &header,
+                enc_key.as_ref(),
+            )?;
             database::vault_store::save_settings_in_txn(txn, &default_settings)?;
             Ok(())
         })?;
@@ -183,7 +187,8 @@ pub fn unlock_vault(
             "Database format is newer than this application".to_string(),
         ));
     }
-    let integrity_required = pwdvault_infrastructure::vault_header::is_integrity_required(header.as_ref());
+    let integrity_required =
+        pwdvault_infrastructure::vault_header::is_integrity_required(header.as_ref());
 
     // Step 5-6: Verify integrity and migrate if needed.
     if integrity_required {
@@ -212,7 +217,10 @@ pub fn unlock_vault(
         // Legacy database (no header, or header with integrity_required=false).
         // Migration is triggered by the explicit absence of integrity protection.
         tracing::info!("migrating database from legacy format");
-        let steps = database::migrations::plan(0, pwdvault_infrastructure::vault_header::VAULT_FORMAT_VERSION)?;
+        let steps = database::migrations::plan(
+            0,
+            pwdvault_infrastructure::vault_header::VAULT_FORMAT_VERSION,
+        )?;
         if steps != vec![database::migrations::MigrationStep::LegacyToV1] {
             return Err(VaultError::InvalidBackup(
                 "Unsupported database migration path".to_string(),
@@ -579,10 +587,12 @@ mod tests {
             Zeroizing::new(crate::fixtures::FIXTURE_PASSWORD.to_string())
         )
         .unwrap());
-        let first_header =
-            pwdvault_infrastructure::vault_header::load_header(&db, &state.session.get_enc_key().unwrap())
-                .unwrap()
-                .unwrap();
+        let first_header = pwdvault_infrastructure::vault_header::load_header(
+            &db,
+            &state.session.get_enc_key().unwrap(),
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(first_header.migration_generation, 1);
 
         lock_vault(&state);
@@ -591,10 +601,12 @@ mod tests {
             Zeroizing::new(crate::fixtures::FIXTURE_PASSWORD.to_string())
         )
         .unwrap());
-        let second_header =
-            pwdvault_infrastructure::vault_header::load_header(&db, &state.session.get_enc_key().unwrap())
-                .unwrap()
-                .unwrap();
+        let second_header = pwdvault_infrastructure::vault_header::load_header(
+            &db,
+            &state.session.get_enc_key().unwrap(),
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(second_header.migration_generation, 1);
     }
 

@@ -12,11 +12,13 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use zeroize::Zeroizing;
 
-use pwdvault_infrastructure::auth;
-use pwdvault_domain::constants;
-use pwdvault_infrastructure::database;
 use pwdvault_application::service;
-use pwdvault_application::{AppState, CreateEntryRequest, UpdateEntryRequest, VaultBackup, VaultError};
+use pwdvault_application::{
+    AppState, CreateEntryRequest, UpdateEntryRequest, VaultBackup, VaultError,
+};
+use pwdvault_domain::constants;
+use pwdvault_infrastructure::auth;
+use pwdvault_infrastructure::database;
 
 const HTTP_WORKERS: usize = 8;
 const HTTP_QUEUE_CAPACITY: usize = 64;
@@ -581,7 +583,11 @@ fn execute_command(
             let caller = caller.as_deref().ok_or("Browser caller required")?;
             let session_nonce = req.session_nonce.ok_or("Pairing session required")?;
             let user_code = req.code.ok_or("Code required")?;
-            if pwdvault_infrastructure::pairing::verify(caller, session_nonce.as_str(), user_code.as_str()) {
+            if pwdvault_infrastructure::pairing::verify(
+                caller,
+                session_nonce.as_str(),
+                user_code.as_str(),
+            ) {
                 let token = auth::get_token();
                 Ok(serde_json::json!({ "token": token }))
             } else {

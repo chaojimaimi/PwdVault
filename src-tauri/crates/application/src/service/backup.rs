@@ -3,12 +3,14 @@ use zeroize::{Zeroize, Zeroizing};
 
 use base64::Engine;
 
-use pwdvault_infrastructure::crypto::{self, decrypt, decrypt_with_aad, encrypt, encrypt_with_aad, EncryptedData};
+use crate::service::vault::get_db;
+use crate::{AppState, BackupPayload, ExportEntry, ImportResult, VaultBackup, VaultError};
+use pwdvault_infrastructure::crypto::{
+    self, decrypt, decrypt_with_aad, encrypt, encrypt_with_aad, EncryptedData,
+};
 use pwdvault_infrastructure::database::{
     self, list_entries, list_groups, load_entry, load_group, load_settings, Group, PasswordEntry,
 };
-use crate::service::vault::get_db;
-use crate::{AppState, BackupPayload, ExportEntry, ImportResult, VaultBackup, VaultError};
 
 const BACKUP_VERSION_V1: u32 = 1;
 const BACKUP_VERSION_V2: u32 = 2;
@@ -208,7 +210,9 @@ pub fn import_vault(
     if salt.len() != 16 || nonce_bytes.len() != crypto::NONCE_SIZE {
         return Err(VaultError::InvalidBackup("Invalid salt length".to_string()));
     }
-    if ciphertext.len() < 16 || ciphertext.len() > pwdvault_domain::validation::MAX_BACKUP_DECODED_BYTES {
+    if ciphertext.len() < 16
+        || ciphertext.len() > pwdvault_domain::validation::MAX_BACKUP_DECODED_BYTES
+    {
         return Err(VaultError::InvalidBackup(
             "Invalid ciphertext length".to_string(),
         ));

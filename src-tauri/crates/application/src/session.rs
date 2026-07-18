@@ -21,8 +21,8 @@
 //! Auto-lock obtains an [`ExclusiveLease`] (exclusive/write guard) that waits
 //! for all operation leases to drain before clearing the keys.
 
-use pwdvault_infrastructure::crypto::SecretKey;
 use crate::VaultError;
+use pwdvault_infrastructure::crypto::SecretKey;
 use std::sync::{Mutex, RwLock, RwLockReadGuard};
 use std::time::Instant;
 

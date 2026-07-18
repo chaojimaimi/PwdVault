@@ -105,10 +105,14 @@ jobs:
         run: cargo install cargo-deny
       - name: cargo deny check (main app)
         working-directory: src-tauri
-        run: cargo deny check --config ../deny.toml
+        run: cargo deny check
+        env:
+          CARGO_DENY_CONFIG: ${{ github.workspace }}/deny.toml
       - name: cargo deny check (native host)
         working-directory: extensions/native-host
-        run: cargo deny check --config ../../deny.toml
+        run: cargo deny check
+        env:
+          CARGO_DENY_CONFIG: ${{ github.workspace }}/deny.toml
 
       # cargo-audit: additional vulnerability database cross-check
       - name: Install cargo-audit

@@ -10,10 +10,7 @@ use std::sync::Arc;
 use tauri::State;
 use zeroize::Zeroizing;
 
-use pwdvault_application::{
-    self as app,
-    AppState, VaultError,
-};
+use pwdvault_application::{self as app, AppState, VaultError};
 use pwdvault_domain::{CreateEntryRequest, UpdateEntryRequest};
 
 pub type AppHandle = Arc<AppState>;
@@ -140,12 +137,17 @@ pub fn get_entry_count(state: State<'_, AppHandle>) -> Result<usize, VaultError>
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn create_group(name: String, state: State<'_, AppHandle>) -> Result<pwdvault_domain::Group, VaultError> {
+pub fn create_group(
+    name: String,
+    state: State<'_, AppHandle>,
+) -> Result<pwdvault_domain::Group, VaultError> {
     app::create_group(state.inner(), name)
 }
 
 #[tauri::command]
-pub fn list_all_groups(state: State<'_, AppHandle>) -> Result<Vec<pwdvault_domain::Group>, VaultError> {
+pub fn list_all_groups(
+    state: State<'_, AppHandle>,
+) -> Result<Vec<pwdvault_domain::Group>, VaultError> {
     app::list_all_groups(state.inner())
 }
 
@@ -219,7 +221,9 @@ pub async fn import_vault(
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub async fn check_for_updates(state: State<'_, AppHandle>) -> Result<pwdvault_domain::UpdateInfo, VaultError> {
+pub async fn check_for_updates(
+    state: State<'_, AppHandle>,
+) -> Result<pwdvault_domain::UpdateInfo, VaultError> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || app::check_for_updates(&state))
         .await

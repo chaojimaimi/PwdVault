@@ -12,15 +12,13 @@ pub mod native_messaging;
 
 // Re-export the application layer so external callers (tests, benches) can
 // still write `pwdvault_lib::AppState`, `pwdvault_lib::VaultError`, etc.
+pub use pwdvault_application::service;
+pub use pwdvault_application::{AppState, VaultError};
 pub use pwdvault_application::{
-    AppState, VaultError,
-};
-pub use pwdvault_application::{
-    CreateEntryRequest, UpdateEntryRequest, EntrySummary, EntrySecretResponse,
-    ExportEntry, BackupPayload, VaultBackup, ImportResult, UpdateInfo,
+    BackupPayload, CreateEntryRequest, EntrySecretResponse, EntrySummary, ExportEntry,
+    ImportResult, UpdateEntryRequest, UpdateInfo, VaultBackup,
 };
 pub use pwdvault_domain::{Group, PasswordEntry, Settings};
-pub use pwdvault_application::service;
 
 use std::sync::Arc;
 
@@ -87,7 +85,11 @@ fn register_native_host(app: &tauri::App) {
         }
     };
 
-    let binary_name = if cfg!(windows) { "pwdvault-native.exe" } else { "pwdvault-native" };
+    let binary_name = if cfg!(windows) {
+        "pwdvault-native.exe"
+    } else {
+        "pwdvault-native"
+    };
     let host_path = resource_dir.join("binaries").join(binary_name);
 
     if !host_path.exists() {
@@ -189,10 +191,12 @@ pub fn run() {
             {
                 let lock_i_clone = lock_i.clone();
                 let app_handle = app.handle().clone();
-                *state.update_lock_menu_fn.lock().expect("menu lock poisoned") =
-                    Some(Box::new(move |text: &str| {
-                        let _ = lock_i_clone.set_text(text);
-                    }));
+                *state
+                    .update_lock_menu_fn
+                    .lock()
+                    .expect("menu lock poisoned") = Some(Box::new(move |text: &str| {
+                    let _ = lock_i_clone.set_text(text);
+                }));
                 *state.reload_window_fn.lock().expect("window lock poisoned") =
                     Some(Box::new(move || {
                         if let Some(window) = app_handle.get_webview_window("main") {
