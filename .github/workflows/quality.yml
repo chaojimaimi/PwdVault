@@ -24,7 +24,7 @@ concurrency:
 # drift between CI runs.
 env:
   NODE_VERSION: '20'
-  PNPM_VERSION: '9'
+  PNPM_VERSION: '11'
 
 jobs:
   # ---------------------------------------------------------------------------
