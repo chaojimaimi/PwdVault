@@ -23,7 +23,7 @@ concurrency:
 # Pinned versions (§5.6.4): exact Node and pnpm major.minor to avoid
 # drift between CI runs.
 env:
-  NODE_VERSION: '20'
+  NODE_VERSION: '22'
   PNPM_VERSION: '11'
 
 jobs:
