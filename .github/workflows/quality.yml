@@ -33,11 +33,11 @@ jobs:
   quality-frontend:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
-      - uses: pnpm/action-setup@fe1f81f874a0c52c5a46f579b07807c8733132c5 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@1e60f620b9521f160767bc8cbe53c66c3d8d6c1b # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -55,11 +55,11 @@ jobs:
   quality-rust:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
-      - uses: dtolnay/rust-toolchain@1482605bfc571978aded9373ebabf15505c99e91 # stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # stable
         with:
           components: rustfmt, clippy
-      - uses: swatinem/rust-cache@a17f7ea6f727532c2c3b457b08a76588992d0231 # v2
+      - uses: swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           workspaces: './src-tauri -> target'
       - name: Check formatting
@@ -78,8 +78,8 @@ jobs:
   quality-native-host:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
-      - uses: dtolnay/rust-toolchain@1482605bfc571978aded9373ebabf15505c99e91 # stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # stable
         with:
           components: rustfmt, clippy
       - name: Check formatting (native host)
@@ -99,8 +99,8 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
-      - uses: dtolnay/rust-toolchain@1482605bfc571978aded9373ebabf15505c99e91 # stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # stable
 
       # cargo-deny: advisories (RUSTSEC allowlist in deny.toml) + licenses
       - name: Install cargo-deny
@@ -123,10 +123,10 @@ jobs:
         run: cargo audit
 
       # pnpm audit: frontend dependency vulnerabilities
-      - uses: pnpm/action-setup@fe1f81f874a0c52c5a46f579b07807c8733132c5 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@1e60f620b9521f160767bc8cbe53c66c3d8d6c1b # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: pnpm audit (production deps)
@@ -134,7 +134,7 @@ jobs:
 
       # Gitleaks: scan for committed secrets
       - name: Gitleaks secret scan
-        uses: gitleaks/gitleaks-action@8e61c1f0c6dbb2c0f33f7d2d1be603b698467889 # v2
+        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -144,6 +144,6 @@ jobs:
   version-consistency:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@d6324d9847fb17c88f7f7b56e9e9e2ce1a1e3c4a # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Check version consistency
         run: bash scripts/bump-version.sh --check
