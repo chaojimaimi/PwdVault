@@ -5,9 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
-## [1.1.0] - 2026-07-18
-
 ## [Unreleased]
+
+## [1.1.1] - 2026-07-19
+
+### Fixed
+- Preserve historical username-only/empty-password records during encrypted
+  backup export/import without weakening new-entry validation.
+- Make Chrome/Firefox extension ZIP generation deterministic and fail release
+  workflows on missing, linked, or invalid package content.
+- Correct Firefox MV3 background loading and store metadata; strict `web-ext`
+  lint now passes with zero warnings.
+- Harden extension popup markup rendering and quote escaping.
+- Repair Quality/CodeQL/Release gates, dependency audit registry selection, and
+  10-source Cargo/product version consistency.
+
+## [1.1.0] - 2026-07-18
 
 ### PwdVault Comprehensive Optimization Plan v1.0.5 (Phases 0–5)
 

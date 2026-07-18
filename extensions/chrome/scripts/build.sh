@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXTENSION_DIR="$(dirname "$SCRIPT_DIR")"
 DIST_DIR="$EXTENSION_DIR/dist"
 PROJECT_ROOT="$(dirname "$(dirname "$EXTENSION_DIR")")"
+VERSION=$(python3 -c "import json; print(json.load(open('$EXTENSION_DIR/manifest.json'))['version'])")
+CHROME_ZIP="$EXTENSION_DIR/PwdVault-Chrome-Extension-v$VERSION.zip"
 
 python3 "$PROJECT_ROOT/extensions/tests/verify_extension_identity.py"
 
@@ -34,6 +36,7 @@ echo "Building PwdVault Firefox Extension..."
 
 FIREFOX_DIR="$EXTENSION_DIR/../firefox"
 FIREFOX_DIST="$FIREFOX_DIR/dist"
+FIREFOX_ZIP="$FIREFOX_DIR/PwdVault-Firefox-Extension-v$VERSION.zip"
 
 rm -rf "$FIREFOX_DIST"
 mkdir -p "$FIREFOX_DIST"
@@ -45,9 +48,14 @@ cp -RL "$FIREFOX_DIR/icons" "$FIREFOX_DIST/icons"
 
 python3 "$PROJECT_ROOT/extensions/tests/verify_manifest.py" "$DIST_DIR"
 python3 "$PROJECT_ROOT/extensions/tests/verify_manifest.py" "$FIREFOX_DIST"
+python3 "$PROJECT_ROOT/extensions/tests/package_extension.py" "$DIST_DIR" "$CHROME_ZIP"
+python3 "$PROJECT_ROOT/extensions/tests/package_extension.py" "$FIREFOX_DIST" "$FIREFOX_ZIP"
+bash "$PROJECT_ROOT/extensions/tests/verify_package.sh" "$CHROME_ZIP" "$FIREFOX_ZIP"
 
 echo "Firefox extension built successfully!"
 echo "Dist: $FIREFOX_DIST"
+echo "Chrome ZIP: $CHROME_ZIP"
+echo "Firefox ZIP: $FIREFOX_ZIP"
 echo ""
 
 echo ""

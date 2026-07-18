@@ -7,8 +7,9 @@ name: Quality Gates
 #   quality-frontend  — Node/pnpm pinned, tsc, vitest, ESLint
 #   quality-rust      — fmt, clippy -D warnings, test --locked (workspace)
 #   quality-native-host — fmt, clippy, test (native host binary)
+#   quality-extension — deterministic Chrome/Firefox packages + strict Firefox lint
 #   security          — cargo deny, cargo audit, pnpm audit, gitleaks
-#   version-consistency — 7-source version alignment
+#   version-consistency — 10-source version alignment
 
 on:
   push:
@@ -51,7 +52,7 @@ jobs:
   # Rust workspace: fmt, clippy, test
   # ---------------------------------------------------------------------------
   quality-rust:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install Linux system dependencies (Tauri GTK/webkit)
@@ -104,6 +105,24 @@ jobs:
         run: cargo test --locked
 
   # ---------------------------------------------------------------------------
+  # Browser extensions: self-contained packages and Firefox store lint
+  # ---------------------------------------------------------------------------
+  quality-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Build and verify extension packages
+        run: bash extensions/chrome/scripts/build.sh
+      - name: Firefox web-ext lint (warnings are release blockers)
+        run: >-
+          pnpm --config.registry=https://registry.npmjs.org dlx web-ext@10.5.0 lint
+          --source-dir extensions/firefox/dist --warnings-as-errors
+
+  # ---------------------------------------------------------------------------
   # Security: cargo deny (advisories + licenses), cargo audit, pnpm audit,
   # gitleaks secret scan
   # ---------------------------------------------------------------------------
@@ -115,21 +134,17 @@ jobs:
 
       # cargo-deny: advisories (RUSTSEC allowlist in deny.toml) + licenses
       - name: Install cargo-deny
-        run: cargo install cargo-deny
+        run: cargo install --locked cargo-deny
       - name: cargo deny check (main app)
         working-directory: src-tauri
-        run: cargo deny check
-        env:
-          CARGO_DENY_CONFIG: ${{ github.workspace }}/deny.toml
+        run: cargo deny --config ../deny.toml check
       - name: cargo deny check (native host)
         working-directory: extensions/native-host
-        run: cargo deny check
-        env:
-          CARGO_DENY_CONFIG: ${{ github.workspace }}/deny.toml
+        run: cargo deny --config ../../deny.toml check
 
       # cargo-audit: additional vulnerability database cross-check
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        run: cargo install --locked cargo-audit
       - name: cargo audit (main app)
         working-directory: src-tauri
         run: cargo audit
@@ -143,7 +158,10 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: pnpm audit (production deps)
-        run: pnpm audit --prod --audit-level moderate
+        # Some developer mirrors do not implement npm's audit endpoint. Use
+        # the canonical registry so this gate reports dependency risk rather
+        # than mirror capability.
+        run: pnpm --config.registry=https://registry.npmjs.org audit --prod --audit-level moderate
 
       # Gitleaks: scan for committed secrets
       - name: Gitleaks secret scan
@@ -152,7 +170,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ---------------------------------------------------------------------------
-  # Version consistency: ensure all 7 version sources agree
+  # Version consistency: ensure all 10 version sources agree
   # ---------------------------------------------------------------------------
   version-consistency:
     runs-on: ubuntu-latest

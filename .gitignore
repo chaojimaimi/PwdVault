@@ -48,6 +48,8 @@ vault.db
 # Release bundles and expanded subdirectories (any versioned subfolder)
 /releases/*/
 /releases/**/*.zip
+/extensions/chrome/PwdVault-Chrome-Extension-*.zip
+/extensions/firefox/PwdVault-Firefox-Extension-*.zip
 /releases/**/*.dmg
 /releases/**/*.exe
 /releases/**/pwdvault-native*

@@ -242,17 +242,19 @@ pub fn backup_payload(payload: &BackupPayload) -> Result<(), DomainError> {
                 "Backup contains duplicate entry identifiers",
             ));
         }
-        let request = CreateEntryRequest {
-            title: entry.title.clone(),
-            url: entry.url.clone(),
-            username: entry.username.clone(),
-            password: entry.password.clone(),
-            notes: entry.notes.as_ref().map(|value| value.to_string()),
-            tags: entry.tags.clone(),
-            group_id: entry.group_id.clone(),
-        };
-        self::entry(&request)?;
-        if request
+        // New entries require a non-empty password, but historical databases
+        // can contain username-only records. Preserve those records across a
+        // backup round trip while applying every other field/size boundary.
+        entry_fields(
+            &entry.title,
+            entry.url.as_deref(),
+            &entry.username,
+            (!entry.password.is_empty()).then_some(entry.password.as_str()),
+            entry.notes.as_deref().map(String::as_str),
+            &entry.tags,
+            entry.group_id.as_deref(),
+        )?;
+        if entry
             .group_id
             .as_deref()
             .is_some_and(|group_id| !group_ids.contains(group_id))

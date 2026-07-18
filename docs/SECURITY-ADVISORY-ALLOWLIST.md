@@ -9,7 +9,7 @@
 
 | RUSTSEC ID | Package | Reason | Expiry | Owner |
 |------------|---------|--------|--------|-------|
-| RUSTSEC-2024-0370 | bincode 1.x | Unmaintained; used for redb value serialization; no drop-in replacement; migration to bincode 2 or postcard planned | 2026-12-31 | backend |
+| RUSTSEC-2025-0141 | bincode 1.x | Unmaintained; used for redb value serialization and historical-format compatibility; no drop-in replacement; migration to bincode 2 or postcard planned | 2026-12-31 | backend |
 
 ## Review process
 
@@ -19,10 +19,14 @@
 3. To remove an ignore: delete from `deny.toml` and this table after the
    vulnerable dependency is upgraded or replaced.
 
-## Known transitive warnings (not ignored, tracked for awareness)
+## Known transitive warnings
 
-The Tauri and GTK3 dependency trees on Linux produce RUSTSEC warnings for
-older transitive crates (e.g. `linux-raw-sys`, `aes-soft` when hardware AES
-is unavailable). These are upstream issues in Tauri's dependency closure and
-resolve when Tauri updates its lockfile. They do not affect the macOS/Windows
-release builds.
+`deny.toml` uses `unmaintained = "workspace"`: unmaintained direct workspace
+dependencies remain blocking, while upstream/transitive warnings stay visible
+in `cargo audit`. On 2026-07-18 the application lockfile reported 18
+unmaintained and 2 unsound warnings inherited through Tauri/Wry (`gtk-rs` GTK3
+on Linux and the old selector/urlpattern closure); the Native Host reported no
+warnings. `anyhow` was upgraded to 1.0.103 to remove the independently fixable
+`RUSTSEC-2026-0190`. These warning counts are recorded in each release closure
+and must be reviewed whenever Tauri updates its dependency closure; actual
+vulnerability findings remain release-blocking.

@@ -1,6 +1,6 @@
 name: Release
 
-# §5.6.4 release pipeline. Triggered by tag push (v*) or manual dispatch.
+# §5.6.4 release pipeline. Triggered only by an immutable release tag push.
 # Depends on quality.yml passing (referenced via branch protection rules).
 #
 # Jobs:
@@ -12,12 +12,6 @@ name: Release
 #   create-release    — GitHub Release (prerelease if unsigned)
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version (e.g., v1.0.6)'
-        required: true
-        type: string
   push:
     tags:
       - 'v*'
@@ -51,6 +45,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: TypeScript type-check
         run: pnpm tsc --noEmit
+      - name: ESLint
+        run: pnpm lint
       - name: Frontend tests
         run: pnpm test
 
@@ -69,12 +65,39 @@ jobs:
           cargo build --release
           mkdir -p ../../src-tauri/binaries
           cp target/release/pwdvault-native ../../src-tauri/binaries/ || true
+      - name: Check formatting (workspace)
+        working-directory: src-tauri
+        run: cargo fmt --all --check
       - name: Clippy (workspace, deny warnings)
         working-directory: src-tauri
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests (workspace)
         working-directory: src-tauri
         run: cargo test --workspace --locked
+      - name: Check native host formatting
+        working-directory: extensions/native-host
+        run: cargo fmt --check
+      - name: Clippy native host
+        working-directory: extensions/native-host
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test native host
+        working-directory: extensions/native-host
+        run: cargo test --locked
+
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny
+      - name: Dependency policy
+        run: |
+          cargo deny --manifest-path src-tauri/Cargo.toml --config deny.toml check
+          cargo deny --manifest-path extensions/native-host/Cargo.toml --config deny.toml check
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+      - name: Dependency vulnerability audit
+        run: |
+          cargo audit --file src-tauri/Cargo.lock
+          cargo audit --file extensions/native-host/Cargo.lock
+      - name: Frontend production dependency audit
+        run: pnpm --config.registry=https://registry.npmjs.org audit --prod --audit-level moderate
 
   # ---------------------------------------------------------------------------
   # macOS build with conditional signing/notarization (§5.6.6 #6/#8)
@@ -221,6 +244,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -229,8 +253,16 @@ jobs:
         run: bash extensions/chrome/scripts/build.sh
 
       - name: Verify packages
-        run: bash extensions/tests/verify_package.sh
-        continue-on-error: true
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          bash extensions/tests/verify_package.sh \
+            "extensions/chrome/PwdVault-Chrome-Extension-v${VERSION}.zip" \
+            "extensions/firefox/PwdVault-Firefox-Extension-v${VERSION}.zip"
+
+      - name: Firefox web-ext lint (warnings are release blockers)
+        run: >-
+          pnpm --config.registry=https://registry.npmjs.org dlx web-ext@10.5.0 lint
+          --source-dir extensions/firefox/dist --warnings-as-errors
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -254,8 +286,8 @@ jobs:
         if: env.AMO_API_KEY != ''
         continue-on-error: true
         run: |
-          npx web-ext sign \
-            --source-dir extensions/firefox \
+          pnpm --config.registry=https://registry.npmjs.org dlx web-ext@10.5.0 sign \
+            --source-dir extensions/firefox/dist \
             --api-key "$AMO_API_KEY" \
             --api-secret "$AMO_API_SECRET"
         env:
@@ -331,12 +363,7 @@ jobs:
 
       - name: Determine version
         id: version
-        run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
-          fi
+        run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Determine prerelease status
         id: prerelease

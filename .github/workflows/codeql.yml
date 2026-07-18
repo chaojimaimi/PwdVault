@@ -29,3 +29,13 @@ jobs:
       - uses: github/codeql-action/analyze@b7351df727350dca84cb9d725d57dcf5bc82ba26 # v3
         with:
           category: '/language:${{ matrix.language }}'
+          # GitHub Code Security is not enabled for this private personal
+          # repository. Run analysis as a gate and retain SARIF without trying
+          # the unavailable upload endpoint.
+          upload: never
+          output: sarif-results
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: codeql-${{ matrix.language }}-sarif
+          path: sarif-results
+          if-no-files-found: error

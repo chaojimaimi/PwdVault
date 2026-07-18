@@ -2,17 +2,20 @@
 # bump-version.sh — Sync version across all PwdVault source files
 #
 # Usage:
-#   ./scripts/bump-version.sh <X.Y.Z> [--changelog]   # bump all 7 sources
+#   ./scripts/bump-version.sh <X.Y.Z> [--changelog]   # bump all 10 sources
 #   ./scripts/bump-version.sh --check                 # verify all sources agree
 #
-# Version sources (7):
+# Version sources (10):
 #   1. VERSION
 #   2. src-tauri/Cargo.toml            (main app)
-#   3. extensions/native-host/Cargo.toml
-#   4. src-tauri/tauri.conf.json
-#   5. package.json
-#   6. extensions/chrome/manifest.json
-#   7. extensions/firefox/manifest.json
+#   3. src-tauri/crates/domain/Cargo.toml
+#   4. src-tauri/crates/infrastructure/Cargo.toml
+#   5. src-tauri/crates/application/Cargo.toml
+#   6. extensions/native-host/Cargo.toml
+#   7. src-tauri/tauri.conf.json
+#   8. package.json
+#   9. extensions/chrome/manifest.json
+#  10. extensions/firefox/manifest.json
 #
 # The native-host protocol version (src-tauri/src/constants.rs
 # NATIVE_PROTOCOL_VERSION) is intentionally separate from the product
@@ -46,6 +49,15 @@ read_version() {
         cargo-host)
             grep '^version' "$root/extensions/native-host/Cargo.toml" | head -1 \
                 | sed 's/version = "\(.*\)"/\1/' ;;
+        cargo-domain)
+            grep '^version' "$root/src-tauri/crates/domain/Cargo.toml" | head -1 \
+                | sed 's/version = "\(.*\)"/\1/' ;;
+        cargo-infrastructure)
+            grep '^version' "$root/src-tauri/crates/infrastructure/Cargo.toml" | head -1 \
+                | sed 's/version = "\(.*\)"/\1/' ;;
+        cargo-application)
+            grep '^version' "$root/src-tauri/crates/application/Cargo.toml" | head -1 \
+                | sed 's/version = "\(.*\)"/\1/' ;;
         tauri-conf)
             python3 -c "import json; print(json.load(open('$root/src-tauri/tauri.conf.json'))['version'])" ;;
         package-json)
@@ -60,7 +72,7 @@ read_version() {
 }
 
 # All version source identifiers, in display order.
-ALL_SOURCES=(VERSION package-json cargo-main cargo-host tauri-conf chrome-manifest firefox-manifest)
+ALL_SOURCES=(VERSION package-json cargo-main cargo-domain cargo-infrastructure cargo-application cargo-host tauri-conf chrome-manifest firefox-manifest)
 
 # ---------------------------------------------------------------------------
 # --check mode
@@ -152,19 +164,24 @@ do_bump() {
     # 2. src-tauri/Cargo.toml (line 3)
     set_line_version "src-tauri/Cargo.toml" 3 "src-tauri/Cargo.toml"
 
-    # 3. extensions/native-host/Cargo.toml (line 3)
+    # 3–5. Workspace crates (line 3)
+    set_line_version "src-tauri/crates/domain/Cargo.toml" 3 "domain/Cargo.toml"
+    set_line_version "src-tauri/crates/infrastructure/Cargo.toml" 3 "infrastructure/Cargo.toml"
+    set_line_version "src-tauri/crates/application/Cargo.toml" 3 "application/Cargo.toml"
+
+    # 6. extensions/native-host/Cargo.toml (line 3)
     set_line_version "extensions/native-host/Cargo.toml" 3 "native-host/Cargo.toml"
 
-    # 4. src-tauri/tauri.conf.json (line 4)
+    # 7. src-tauri/tauri.conf.json (line 4)
     set_line_version "src-tauri/tauri.conf.json" 4 "tauri.conf.json"
 
-    # 5. package.json (line 4)
+    # 8. package.json (line 4)
     set_line_version "package.json" 4 "package.json"
 
-    # 6. extensions/chrome/manifest.json (line 4)
+    # 9. extensions/chrome/manifest.json (line 4)
     set_line_version "extensions/chrome/manifest.json" 4 "chrome/manifest.json"
 
-    # 7. extensions/firefox/manifest.json (line 4)
+    # 10. extensions/firefox/manifest.json (line 4)
     if [[ -f extensions/firefox/manifest.json ]]; then
         set_line_version "extensions/firefox/manifest.json" 4 "firefox/manifest.json"
     fi

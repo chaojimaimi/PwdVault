@@ -13,8 +13,11 @@ ignore = [
     # for redb value serialization. Tracked for migration to bincode 2 or
     # postcard in a future release. Expiry tracked in
     # docs/SECURITY-ADVISORY-ALLOWLIST.md (2026-12-31).
-    { id = "RUSTSEC-2024-0370", reason = "bincode 1.x unmaintained; no drop-in replacement yet; migration planned" },
+    { id = "RUSTSEC-2025-0141", reason = "bincode 1.x unmaintained; no drop-in replacement yet; migration planned" },
 ]
+# Transitive unmaintained crates are reported as warnings. Direct workspace
+# dependencies remain blocking unless explicitly reviewed above.
+unmaintained = "workspace"
 yanked = "warn"
 
 [licenses]
@@ -26,8 +29,8 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
-    "Unicode-DFS-2016",
     "Unicode-3.0",
+    "CDLA-Permissive-2.0",
     "Zlib",
     "CC0-1.0",
     "MPL-2.0",

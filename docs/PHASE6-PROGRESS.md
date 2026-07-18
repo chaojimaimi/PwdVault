@@ -3,7 +3,7 @@
 > **Document**: 性能、模块化与发布工程
 > **Plan**: PwdVault-Comprehensive-Optimization-Plan-v1.0.5.md §5.6.1–§5.6.6
 > **Date**: 2026-07-18
-> **Status**: ✅ All acceptance criteria implemented; independent security review pending
+> **Status**: ✅ Core implementation complete; release closure verified locally
 
 ---
 
@@ -19,8 +19,8 @@ provenance (SBOM + attestation).
 
 ### Step 1 — Version Consistency (§5.6.5)
 - native-host Cargo.toml aligned 1.0.3 → 1.0.5.
-- bump-version.sh rewritten with --check mode (7 sources + tag alignment).
-- CI version check upgraded from warn to hard-fail across 7 sources.
+- bump-version.sh rewritten with --check mode (10 sources + tag alignment).
+- CI version check upgraded from warn to hard-fail across 10 sources.
 - CHANGELOG headers normalized from 4-part to 3-part version.
 
 ### Step 2 — Frontend Performance (§5.6.1)
@@ -48,21 +48,24 @@ provenance (SBOM + attestation).
 - Dependency direction: domain ← infrastructure ← application ← tauri-app (no cycles).
 
 ### Step 5 — CI/CD Pipeline (§5.6.4)
-- quality.yml: 6 jobs (frontend, rust, native-host, security, version-consistency).
+- quality.yml: 6 jobs (frontend, rust, native-host, extension, security, version-consistency).
 - ESLint added; pnpm audit; gitleaks; cargo deny (advisories + licenses).
 - CodeQL SAST workflow (JS/TS, weekly + PR).
 - All Actions pinned to commit SHA.
 - deny.toml + SECURITY-ADVISORY-ALLOWLIST.md for RUSTSEC allowlist.
 
-### Step 6a — Extension Store Upload
-- Chrome Web Store automated upload (conditional on secrets).
-- Firefox AMO automated signing (conditional on secrets).
+### Step 6a — Extension Store Readiness
+- Deterministic Chrome/Firefox ZIP generation and self-contained package checks.
+- Firefox `web-ext` lint/signing path (signing conditional on AMO secrets).
+- Chrome Web Store upload remains manual until a maintained pinned uploader and
+  credentials are provisioned.
 - EXTENSION-STORE-PUBLISHING.md: setup + listing checklist.
 
 ### Step 6b — App Signing Framework (degraded mode)
 - check-signing-secrets.sh: runtime detection of cert secrets.
 - macOS: conditional codesign + notarize + staple + spctl.
-- Windows: conditional Authenticode + signature verify.
+- Windows: credential detection + signature verification scaffold; the actual
+  signing action is intentionally disabled until a maintained pinned signer is selected.
 - Prerelease forced when any platform unsigned (§5.6.6-8).
 - UNSIGNED-INSTALL.md + SIGNING-SETUP.md.
 
@@ -81,18 +84,21 @@ provenance (SBOM + attestation).
 | 4 | KDF/import/update non-blocking UI | ✅ | init/unlock/import/export/check_for_updates on spawn_blocking; update check cancellable |
 | 5 | PR/release pass fmt/clippy/test/audit/version | ✅ | quality.yml + release.yml release-gate enforce all checks |
 | 6 | macOS codesign/spctl/stapler | ⚠️ Framework | release.yml conditional signing; passes when secrets present, degrades to prerelease |
-| 7 | Windows Authenticode Valid | ⚠️ Framework | release.yml conditional signing; passes when secrets present, degrades to prerelease |
+| 7 | Windows Authenticode Valid | ⏸ Deferred | build + verification exist; actual signer and Windows execution remain pending |
 | 8 | No cert → nightly only | ✅ | create-release forces prerelease=true when signing secrets absent |
 
 ## Verification Results
 
 | Gate | Result |
 |---|---|
-| Rust workspace tests | 106 passed (domain 3 + infra 49 + application 26 + tauri-app 28) |
+| Rust workspace tests | 107 passed (domain 3 + infra 49 + application 27 + tauri-app 28) |
 | Rust Clippy --workspace -D warnings | Passed |
-| Frontend tests | 95 passed (33 files) |
+| Frontend tests | 103 passed (36 files) |
 | TypeScript | No errors |
-| ESLint | Passed (0 errors) |
+| ESLint | Passed (0 errors; 7 pre-existing warnings) |
+| Native Host tests | 17 passed |
+| Firefox web-ext | 0 errors, 0 warnings, 0 notices |
+| Phase 5 fast gate | Passed, including process-level Native Host probe |
 | Criterion baseline | Recorded in PERFORMANCE-BASELINE.md |
 
 ## Remaining Boundaries
@@ -104,5 +110,6 @@ provenance (SBOM + attestation).
 3. **native-host independent crate (Step 4e)**: native_messaging.rs remains a
    module in tauri-app. Extracting it to a separate crate with an EventPort
    trait is a non-blocking optimization.
-4. **Independent security review**: §5.6 + §9 DoD require a full security
-   review of Phases 1-6 before declaring a stable security release.
+4. **Release publication**: local closure is recorded in
+   `V1.1.1-RELEASE-REPORT.md`; real-browser E2E, Windows CI, remote workflow
+   execution, and the existing-tag version decision remain open.

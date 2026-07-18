@@ -1,9 +1,10 @@
 # Independent Security Audit Report
 
 > **Date**: 2026-07-18
-> **Scope**: PwdVault v1.0.5 post Phase 1-6 optimization
+> **Scope**: PwdVault v1.1.1 release candidate after Phase 1-6 optimization
 > **Auditor**: code-auditor agent (automated + manual code review)
-> **Verdict**: ✅ **Approved for stable release** (0 Critical, 0 High)
+> **Verdict**: ✅ **No Critical/High code findings**; release remains prerelease
+> until signing, browser E2E, Windows CI, and tag alignment are complete
 
 ---
 
@@ -13,11 +14,16 @@
 |----------|-------|--------|
 | Critical | 0 | — |
 | High | 0 | — |
-| Medium | 2 | 1 fixed, 1 documented (CI SHA pin deferred) |
+| Medium | 2 | 2 fixed |
 | Low | 5 | Documented for 1.0.6 follow-up |
 | Info | 4 | Positive findings (security controls confirmed) |
 
-**Dependency scan**: cargo audit (0 vuln), pnpm audit (0 vuln), cargo deny (1 allowlisted: bincode RUSTSEC-2024-0370, expiry 2026-12-31).
+**Dependency scan**: cargo audit (0 vulnerabilities in both lockfiles), pnpm
+audit (0 known production vulnerabilities), cargo deny passed. One direct
+unmaintained dependency is explicitly allowlisted: bincode
+`RUSTSEC-2025-0141`, expiry 2026-12-31. The app lockfile also reports 18
+unmaintained and 2 unsound upstream/transitive warnings; the Native Host reports
+none.
 
 ---
 
@@ -29,11 +35,14 @@
 **Issue**: Pairing code interpolated via `innerHTML`, creating an XSS vector if the code source ever changes.
 **Fix**: Changed to `textContent` for the code element. Static markup still uses `innerHTML` (trusted). Committed.
 
-### VULN-002 [Medium → Documented] — CI actions not SHA-pinned
+### VULN-002 [Medium → Fixed] — CI action/tool provenance
 
 **Location**: `.github/workflows/release.yml:164, 210`
-**Issue**: `gtarnaras/code-sign-action@v4` and `CycloneDX/gh-cdxgen@v1` use tag pins. All other actions in the repo are SHA-pinned.
-**Status**: Cannot resolve SHAs without git access. Added inline comments marking these for manual SHA pinning before the first release that actually uses signing. The signing path is only activated when certificates are provisioned, so this is not exploitable in the current pre-release state.
+**Issue**: Removed/unavailable signing actions and best-effort tooling could be
+mistaken for completed release controls.
+**Fix**: All active actions are SHA-pinned; unavailable Windows signing and
+Chrome-store upload actions remain disabled and explicitly block a signed stable
+release. Quality/Release gates now run package, audit, and lint checks directly.
 
 ### VULN-003 [Low] — clipboardWrite permission (extension)
 
@@ -66,6 +75,15 @@
 **Location**: `deny.toml:13-16`
 **Status**: Allowlisted with reason + expiry (2026-12-31). Migration to bincode 2 planned.
 
+### VULN-008 [Medium → Fixed] — extension popup attribute injection boundary
+
+**Location**: `extensions/chrome/src/popup/popup.js`
+**Issue**: The previous `escapeHtml()` implementation escaped text nodes but did
+not encode quotes when values were interpolated into HTML attributes.
+**Fix**: Quote-aware escaping, escaped entry identifiers/icon text, and DOM node
+replacement via parsed markup. Firefox strict `web-ext` lint reports zero
+errors, warnings, and notices.
+
 ---
 
 ## Confirmed Security Controls (Positive Findings)
@@ -96,5 +114,7 @@ PwdVault v1.0.5 (post Phase 1-6) implements a robust security architecture
 with proper cryptographic primitives, careful key lifecycle management, and
 multi-layered defense-in-depth. The audit found no blocking vulnerabilities.
 
-**Recommendation**: Approved for stable release. Track VULN-004/006/007 and
-Windows ACL (VULN-005) for the 1.0.6 maintenance release.
+**Recommendation**: Code security review does not block an unsigned prerelease.
+Do not promote to stable until the remaining boundaries in
+`V1.1.1-RELEASE-REPORT.md` are complete. Track VULN-004/005/006/007 in the
+next maintenance cycle.

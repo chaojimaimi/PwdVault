@@ -54,7 +54,9 @@ All data is encrypted with AES-256-GCM and stored locally using an embedded data
 2. Open `about:debugging#/runtime/this-firefox`
 3. Click **Load Temporary Add-on** and select `manifest.json` from the extracted folder
 
-The extension communicates with the desktop app via HTTP API on `http://127.0.0.1:17429`. The desktop app must be running (system tray is fine).
+The extension uses the browser Native Messaging API. The bundled
+`pwdvault-native` host bridges authenticated messages to the desktop app's
+loopback service. The desktop app must be running (system tray is fine).
 
 ## Development
 
@@ -97,14 +99,17 @@ pnpm tauri build
 # Frontend tests
 pnpm test
 
-# Rust tests (single-threaded due to global keystore)
-cd src-tauri && cargo test -- --test-threads=1
+# Rust workspace tests (parallel-safe per-AppState session)
+cd src-tauri && cargo test --workspace --locked
+
+# Native Messaging host tests
+cd extensions/native-host && cargo test --locked
 ```
 
 ### Version Bump
 
 ```bash
-./scripts/bump-version.sh 1.0.0 --changelog
+./scripts/bump-version.sh 1.1.1 --changelog
 ```
 
 ## Tech Stack
@@ -115,12 +120,12 @@ cd src-tauri && cargo test -- --test-threads=1
 | Backend | Tauri v2, Rust |
 | Database | redb (pure Rust, ACID, embedded) |
 | Encryption | AES-256-GCM, Argon2id |
-| Browser extension | Chrome/Firefox MV3, HTTP API |
+| Browser extension | Chrome/Firefox MV3, Native Messaging bridge |
 | CI/CD | GitHub Actions (macOS + Windows) |
 
 ## Project Status
 
-v1.0.0. See [CHANGELOG.md](CHANGELOG.md) for details.
+v1.1.1. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ### Roadmap
 

@@ -1,15 +1,16 @@
 [package]
 name = "pwdvault-infrastructure"
-version = "1.0.5"
+version = "1.1.1"
 edition = "2021"
 description = "PwdVault infrastructure — redb repository, crypto, filesystem, native host setup"
+license = "MIT"
 
 [lib]
 name = "pwdvault_infrastructure"
 path = "src/lib.rs"
 
 [dependencies]
-pwdvault-domain = { path = "../domain" }
+pwdvault-domain = { version = "1.1.0", path = "../domain" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

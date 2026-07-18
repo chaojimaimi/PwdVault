@@ -1,16 +1,17 @@
 [package]
 name = "pwdvault-application"
-version = "1.0.5"
+version = "1.1.1"
 edition = "2021"
 description = "PwdVault application layer — vault lifecycle, CRUD, backup, session use cases"
+license = "MIT"
 
 [lib]
 name = "pwdvault_application"
 path = "src/lib.rs"
 
 [dependencies]
-pwdvault-domain = { path = "../domain" }
-pwdvault-infrastructure = { path = "../infrastructure" }
+pwdvault-domain = { version = "1.1.0", path = "../domain" }
+pwdvault-infrastructure = { version = "1.1.0", path = "../infrastructure" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

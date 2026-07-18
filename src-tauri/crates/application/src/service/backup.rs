@@ -8,9 +8,7 @@ use crate::{AppState, BackupPayload, ExportEntry, ImportResult, VaultBackup, Vau
 use pwdvault_infrastructure::crypto::{
     self, decrypt, decrypt_with_aad, encrypt, encrypt_with_aad, EncryptedData,
 };
-use pwdvault_infrastructure::database::{
-    self, load_settings, Group, PasswordEntry,
-};
+use pwdvault_infrastructure::database::{self, load_settings, Group, PasswordEntry};
 
 const BACKUP_VERSION_V1: u32 = 1;
 const BACKUP_VERSION_V2: u32 = 2;
@@ -395,7 +393,10 @@ mod tests {
 
     const TEST_PASSWORD: &str = "backup-test-password";
 
-    fn unlocked_state() -> (Arc<AppState>, TempDir) {
+    fn unlocked_state_with_entries<F>(build_entries: F) -> (Arc<AppState>, TempDir, Vec<String>)
+    where
+        F: FnOnce(&[u8; 32]) -> Vec<PasswordEntry>,
+    {
         let dir = TempDir::new().unwrap();
         let db = Arc::new(database::init_database(dir.path().join("backup.db")).unwrap());
         let salt = [0x41; 16];
@@ -408,9 +409,8 @@ mod tests {
             crypto::kdf::derive_key_with_params(TEST_PASSWORD, &salt, &params).unwrap();
         let verification = crypto::create_verification_header(&master_key, salt, params).unwrap();
         let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &salt);
-        let mut entry = PasswordEntry::new("Backup entry".into(), None, "backup-user".into());
-        let encrypted_password = crypto::encrypt(&enc_key, b"backup-secret").unwrap();
-        entry.encrypted_password = bincode::serialize(&encrypted_password).unwrap();
+        let entries = build_entries(&enc_key);
+        let entry_ids = entries.iter().map(|entry| entry.id.clone()).collect();
 
         database::vault_store::VaultStore::new(&db)
             .write(&mac_key, |txn| {
@@ -421,7 +421,9 @@ mod tests {
                     &enc_key,
                 )?;
                 database::vault_store::save_settings_in_txn(txn, &Settings::default())?;
-                database::vault_store::save_entry_in_txn(txn, &enc_key, &entry)?;
+                for entry in &entries {
+                    database::vault_store::save_entry_in_txn(txn, &enc_key, entry)?;
+                }
                 Ok(())
             })
             .unwrap();
@@ -430,6 +432,16 @@ mod tests {
         *state.database.lock().unwrap() = Some(db);
         *state.verification_data.lock().unwrap() = Some(verification);
         state.session.unlock(enc_key, mac_key);
+        (state, dir, entry_ids)
+    }
+
+    fn unlocked_state() -> (Arc<AppState>, TempDir) {
+        let (state, dir, _) = unlocked_state_with_entries(|enc_key| {
+            let mut entry = PasswordEntry::new("Backup entry".into(), None, "backup-user".into());
+            let encrypted_password = crypto::encrypt(enc_key, b"backup-secret").unwrap();
+            entry.encrypted_password = bincode::serialize(&encrypted_password).unwrap();
+            vec![entry]
+        });
         (state, dir)
     }
 
@@ -442,6 +454,58 @@ mod tests {
         let result =
             import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
         assert_eq!(result.entries_imported, 1);
+    }
+
+    #[test]
+    fn export_supports_raw_historical_secrets_and_empty_passwords() {
+        let (state, _dir, _) = unlocked_state_with_entries(|enc_key| {
+            let mut raw =
+                PasswordEntry::new("Historical raw entry".into(), None, "legacy-user".into());
+            raw.encrypted_password = crypto::encrypt(enc_key, b"legacy-secret")
+                .unwrap()
+                .to_bytes();
+            raw.encrypted_notes = Some(
+                crypto::encrypt(enc_key, b"legacy-notes")
+                    .unwrap()
+                    .to_bytes(),
+            );
+
+            let mut empty =
+                PasswordEntry::new("Historical empty entry".into(), None, "empty-user".into());
+            empty.encrypted_password = Vec::new();
+            empty.encrypted_notes = Some(Vec::new());
+            vec![raw, empty]
+        });
+
+        let backup = export_vault(&state, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
+        let result =
+            import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
+        assert_eq!(result.entries_imported, 2);
+
+        let entries = crate::service::list_all_entries(&state).unwrap();
+        let raw_id = entries
+            .iter()
+            .find(|entry| entry.title == "Historical raw entry")
+            .unwrap()
+            .id
+            .clone();
+        let empty_id = entries
+            .iter()
+            .find(|entry| entry.title == "Historical empty entry")
+            .unwrap()
+            .id
+            .clone();
+
+        let raw = crate::service::get_entry_secret(&state, raw_id).unwrap();
+        assert_eq!(raw.password.as_str(), "legacy-secret");
+        assert_eq!(
+            raw.notes.as_deref().map(String::as_str),
+            Some("legacy-notes")
+        );
+
+        let empty = crate::service::get_entry_secret(&state, empty_id).unwrap();
+        assert_eq!(empty.password.as_str(), "");
+        assert!(empty.notes.is_none());
     }
 
     #[test]

@@ -340,6 +340,15 @@ class PopupApp {
 
   // === Render Router ===
 
+  replaceMarkup(element, markup) {
+    // All dynamic values passed into render methods are escaped before they
+    // reach this parser. Importing parsed nodes avoids assigning variable
+    // strings to innerHTML, which is rejected by the Firefox release linter.
+    const parsed = new DOMParser().parseFromString(markup, 'text/html');
+    const nodes = Array.from(parsed.body.childNodes, node => document.importNode(node, true));
+    element.replaceChildren(...nodes);
+  }
+
   render() {
     const app = document.getElementById('app');
 
@@ -353,33 +362,33 @@ class PopupApp {
 
     switch (this.state.status) {
       case 'loading':
-        app.innerHTML = this.renderLoading();
+        this.replaceMarkup(app, this.renderLoading());
         break;
       case 'locked':
-        app.innerHTML = this.renderLockScreen();
+        this.replaceMarkup(app, this.renderLockScreen());
         this.attachLockScreenEvents();
         break;
       case 'unlocked':
-        app.innerHTML = this.renderMain();
+        this.replaceMarkup(app, this.renderMain());
         this.attachMainEvents();
         break;
       case 'creating':
-        app.innerHTML = this.renderCreateForm();
+        this.replaceMarkup(app, this.renderCreateForm());
         this.attachCreateFormEvents();
         break;
       case 'generator':
-        app.innerHTML = this.renderGenerator();
+        this.replaceMarkup(app, this.renderGenerator());
         this.attachGeneratorEvents();
         if (!this.state.generatedPassword) {
           this.handleGenerate();
         }
         break;
       case 'disconnected':
-        app.innerHTML = this.renderDisconnected();
+        this.replaceMarkup(app, this.renderDisconnected());
         this.attachDisconnectedEvents();
         break;
       case 'pairing':
-        app.innerHTML = this.renderPairing();
+        this.replaceMarkup(app, this.renderPairing());
         this.attachPairingEvents();
         // Auto-request a fresh pairing code on first entry to the pairing
         // screen. The pairingStarted flag prevents repeat calls when the
@@ -390,7 +399,7 @@ class PopupApp {
         }
         break;
       default:
-        app.innerHTML = this.renderError();
+        this.replaceMarkup(app, this.renderError());
     }
 
     // Restore scroll position after DOM rebuild (see comment above).
@@ -661,9 +670,9 @@ class PopupApp {
     const displayUrl = entry.url ? this.formatUrl(entry.url) : '';
 
     return `
-      <div class="entry-card ${isExpanded ? 'expanded' : ''}" data-id="${entry.id}">
+      <div class="entry-card ${isExpanded ? 'expanded' : ''}" data-id="${this.escapeHtml(entry.id)}">
         <div class="entry-header" role="button" tabindex="0" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${this.escapeHtml(entry.title || 'Untitled')}">
-          <div class="entry-icon">${(entry.title || '?').charAt(0).toUpperCase()}</div>
+          <div class="entry-icon">${this.escapeHtml((entry.title || '?').charAt(0).toUpperCase())}</div>
           <div class="entry-info">
             <div class="entry-title">${this.escapeHtml(entry.title || 'Untitled')}</div>
             <div class="entry-meta">${this.escapeHtml(entry.username || '')}${displayUrl ? ' · ' + this.escapeHtml(displayUrl) : ''}</div>
@@ -687,7 +696,7 @@ class PopupApp {
           <span class="detail-label">Username</span>
           <span class="detail-value">${this.escapeHtml(entry.username || '-')}</span>
           <div class="detail-actions">
-            <button class="detail-btn" data-action="copy-username" data-id="${entry.id}" title="Copy username">
+            <button class="detail-btn" data-action="copy-username" data-id="${this.escapeHtml(entry.id)}" title="Copy username">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                 <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
@@ -700,7 +709,7 @@ class PopupApp {
           <span class="detail-label">Password</span>
           <span class="detail-value password ${!isPasswordVisible ? 'hidden' : ''}">${isPasswordVisible ? this.escapeHtml(password || '') : maskedPassword}</span>
           <div class="detail-actions">
-            <button class="detail-btn" data-action="toggle-password" data-id="${entry.id}" title="${isPasswordVisible ? 'Hide' : 'Show'} password">
+            <button class="detail-btn" data-action="toggle-password" data-id="${this.escapeHtml(entry.id)}" title="${isPasswordVisible ? 'Hide' : 'Show'} password">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 ${isPasswordVisible
                   ? '<path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'
@@ -708,7 +717,7 @@ class PopupApp {
                 }
               </svg>
             </button>
-            <button class="detail-btn" data-action="copy-password" data-id="${entry.id}" title="Copy password">
+            <button class="detail-btn" data-action="copy-password" data-id="${this.escapeHtml(entry.id)}" title="Copy password">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                 <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
@@ -734,14 +743,14 @@ class PopupApp {
         ` : ''}
 
         <div class="quick-actions">
-          <button class="action-btn primary" data-action="autofill" data-id="${entry.id}">
+          <button class="action-btn primary" data-action="autofill" data-id="${this.escapeHtml(entry.id)}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/>
               <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
             </svg>
             Auto-fill
           </button>
-          <button class="action-btn secondary" data-action="copy-both" data-id="${entry.id}">
+          <button class="action-btn secondary" data-action="copy-both" data-id="${this.escapeHtml(entry.id)}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
               <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
@@ -953,9 +962,12 @@ class PopupApp {
         const entries = this.getFilteredEntries();
         const list = document.querySelector('.list');
         if (list) {
-          list.innerHTML = entries.length === 0
-            ? this.renderEmpty()
-            : entries.map(entry => this.renderEntry(entry)).join('');
+          this.replaceMarkup(
+            list,
+            entries.length === 0
+              ? this.renderEmpty()
+              : entries.map(entry => this.renderEntry(entry)).join('')
+          );
           this.attachEntryEvents();
         }
       };
@@ -968,9 +980,12 @@ class PopupApp {
         const entries = this.getFilteredEntries();
         const list = document.querySelector('.list');
         if (list) {
-          list.innerHTML = entries.length === 0
-            ? this.renderEmpty()
-            : entries.map(entry => this.renderEntry(entry)).join('');
+          this.replaceMarkup(
+            list,
+            entries.length === 0
+              ? this.renderEmpty()
+              : entries.map(entry => this.renderEntry(entry)).join('')
+          );
           this.attachEntryEvents();
         }
         // Update active tab
@@ -1314,10 +1329,13 @@ class PopupApp {
   }
 
   escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    if (text === null || text === undefined) return '';
+    return String(text)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
   }
 }
 

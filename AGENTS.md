@@ -2,10 +2,10 @@
 
 A secure, local-first password manager built with Tauri + React.
 
-**Last Updated**: 2026-05-01
+**Last Updated**: 2026-07-19
 **Repository**: https://github.com/chaojimaimi/PwdVault (Private)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.0.0
-**Current Version**: `v1.0.0`
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.1.1
+**Current Version**: `v1.1.1`
 **Current Branch**: `main`
 
 ---
@@ -17,7 +17,7 @@ A secure, local-first password manager built with Tauri + React.
 - **Backend**: Tauri v2 + Rust
 - **Database**: redb (pure Rust, ACID-compliant, embedded)
 - **Encryption**: AES-256-GCM + Argon2id key derivation
-- **Browser Extension**: Chrome extension via HTTP API (port 17429)
+- **Browser Extension**: Chrome/Firefox MV3 via Native Messaging bridge
 - **CI/CD**: GitHub Actions (macOS + Windows builds)
 
 ### Directory Structure
@@ -89,9 +89,9 @@ PwdVault/
 │   └── release.yml               # CI: macOS + Windows + extension builds
 ├── releases/                     # Local release artifacts
 ├── scripts/
-│   └── bump-version.sh           # Version sync across 6 files
+│   └── bump-version.sh           # Version sync across 10 files
 ├── DESIGN.md                     # Design system specification (Light/Dark themes)
-├── VERSION                       # 4-digit version: 1.0.0.0
+├── VERSION                       # SemVer product version
 ├── CHANGELOG.md
 ├── password_generator_analysis.md # Password generator security analysis & fixes
 └── AGENTS.md                     # This file
@@ -111,9 +111,10 @@ PwdVault/
    - Tray menu: Show, Lock Vault, Quit
    - Left-click tray icon restores window
 
-4. **Browser Extension Communication** (HTTP API):
-   - Extension uses `fetch()` to `http://127.0.0.1:17429/api/{command}`
-   - No native messaging host needed, simpler cross-browser support
+4. **Browser Extension Communication** (Native Messaging bridge):
+   - Extension uses `sendNativeMessage('com.pwdvault.app', ...)`
+   - Bundled host validates the browser caller and bridges to the bounded
+     loopback desktop API
 
 5. **Security Model**:
    - Master password never stored on disk
