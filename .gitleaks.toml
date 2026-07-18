@@ -3,10 +3,12 @@ title = "PwdVault Gitleaks configuration"
 [extend]
 useDefault = true
 
-[[allowlists]]
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
 description = "Chrome manifest key is a public RSA key used to derive a stable extension ID"
 condition = "AND"
-targetRules = ["generic-api-key"]
 paths = ['''^extensions/chrome/manifest\.json$''']
 regexTarget = "line"
 regexes = ['''^\s*"key":\s*"[A-Za-z0-9+/=]+"\s*,?\s*$''']
