@@ -9,7 +9,7 @@ use pwdvault_infrastructure::crypto::{
     self, decrypt, decrypt_with_aad, encrypt, encrypt_with_aad, EncryptedData,
 };
 use pwdvault_infrastructure::database::{
-    self, list_entries, list_groups, load_entry, load_group, load_settings, Group, PasswordEntry,
+    self, load_settings, Group, PasswordEntry,
 };
 
 const BACKUP_VERSION_V1: u32 = 1;
@@ -55,54 +55,62 @@ pub fn export_vault(
     let db = get_db(state)?;
     let key = lease.enc_key()?;
 
-    // Load all entries and decrypt passwords/notes
-    let entry_ids = list_entries(&db)?;
+    // Load all entries and decrypt passwords/notes.
+    // Uses list_all_entries_bulk (single read txn, §5.6.2) instead of the
+    // old list_entries + N×load_entry pattern.
+    let entries = database::list_all_entries_bulk(&db, key, None)?;
     let mut export_entries = Vec::new();
-    for id in entry_ids {
-        if let Some(entry) = load_entry(&db, key, &id)? {
-            // Decrypt password
+    for entry in entries {
+        // Decrypt the inner password field. Use the same resilient path as
+        // get_entry_secret: try bincode(EncryptedData) first, then raw bytes,
+        // to handle entries written by different historical versions.
+        let password = if entry.encrypted_password.is_empty() {
+            String::new()
+        } else {
             let enc_pwd: EncryptedData = bincode::deserialize(&entry.encrypted_password)
+                .or_else(|_| EncryptedData::from_bytes(&entry.encrypted_password))
                 .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
-            let pwd_bytes = decrypt(key, &enc_pwd)?;
-            let password = String::from_utf8(pwd_bytes)
-                .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
+            let mut pwd_bytes = decrypt(key, &enc_pwd)?;
+            let result = String::from_utf8(pwd_bytes.clone())
+                .map_err(|e| VaultError::DecryptionFailed(e.to_string()));
+            pwd_bytes.zeroize();
+            result?
+        };
 
-            // Decrypt notes
-            let notes = if let Some(ref enc_notes_bytes) = entry.encrypted_notes {
-                let enc: EncryptedData = bincode::deserialize(enc_notes_bytes)
-                    .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
-                let notes_bytes = decrypt(key, &enc)?;
-                Some(
-                    String::from_utf8(notes_bytes)
-                        .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?,
-                )
-            } else {
+        // Decrypt notes if present.
+        let notes = if let Some(ref enc_notes_bytes) = entry.encrypted_notes {
+            if enc_notes_bytes.is_empty() {
                 None
-            };
+            } else {
+                let enc: EncryptedData = bincode::deserialize(enc_notes_bytes)
+                    .or_else(|_| EncryptedData::from_bytes(enc_notes_bytes))
+                    .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
+                let mut notes_bytes = decrypt(key, &enc)?;
+                let result = String::from_utf8(notes_bytes.clone())
+                    .map_err(|e| VaultError::DecryptionFailed(e.to_string()));
+                notes_bytes.zeroize();
+                Some(Zeroizing::new(result?))
+            }
+        } else {
+            None
+        };
 
-            export_entries.push(ExportEntry {
-                id: entry.id,
-                title: entry.title,
-                url: entry.url,
-                username: entry.username,
-                password: Zeroizing::new(password),
-                notes: notes.map(Zeroizing::new),
-                tags: entry.tags,
-                group_id: entry.group_id,
-                created_at: entry.created_at,
-                updated_at: entry.updated_at,
-            });
-        }
+        export_entries.push(ExportEntry {
+            id: entry.id,
+            title: entry.title,
+            url: entry.url,
+            username: entry.username,
+            password: Zeroizing::new(password),
+            notes,
+            tags: entry.tags,
+            group_id: entry.group_id,
+            created_at: entry.created_at,
+            updated_at: entry.updated_at,
+        });
     }
 
-    // Load groups
-    let group_ids = list_groups(&db)?;
-    let mut groups = Vec::new();
-    for id in group_ids {
-        if let Some(g) = load_group(&db, key, &id)? {
-            groups.push(g);
-        }
-    }
+    // Load groups via bulk scan (§5.6.2).
+    let groups = database::list_all_groups_bulk(&db, key)?;
 
     // Load settings
     let settings = load_settings(&db)?;
@@ -328,8 +336,8 @@ pub fn import_vault(
         .map_err(|e| VaultError::InternalError(e.to_string()))?;
 
     // Collect existing IDs via a read transaction before the write.
-    let existing_entry_ids = list_entries(&db)?;
-    let existing_group_ids = list_groups(&db)?;
+    let existing_entry_ids = database::list_entries(&db)?;
+    let existing_group_ids = database::list_groups(&db)?;
 
     // Apply all mutations AND digest refresh in a single write transaction
     // (§5.1.2). Wrapped in an inner closure returning DatabaseError so the
