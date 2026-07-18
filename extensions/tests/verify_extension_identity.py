@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CHROME_MANIFEST = ROOT / "extensions/chrome/manifest.json"
 FIREFOX_MANIFEST = ROOT / "extensions/firefox/manifest.json"
-NATIVE_SETUP = ROOT / "src-tauri/src/native_host_setup.rs"
+NATIVE_SETUP = ROOT / "src-tauri/crates/infrastructure/src/native_host_setup.rs"
 
 
 def chrome_id(public_key_der: bytes) -> str:
