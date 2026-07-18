@@ -11,14 +11,14 @@ let toastContainer: HTMLDivElement | null = null;
  * Ensure the toast container exists in the DOM.
  */
 function ensureContainer(): HTMLDivElement {
-  if (!toastContainer || !document.body.contains(toastContainer)) {
-    toastContainer = document.createElement('div');
-    toastContainer.id = 'toast-container';
-    toastContainer.setAttribute('aria-live', 'polite');
-    toastContainer.setAttribute('aria-atomic', 'false');
-    document.body.appendChild(toastContainer);
-  }
-  return toastContainer;
+	if (!toastContainer || !document.body.contains(toastContainer)) {
+		toastContainer = document.createElement("div");
+		toastContainer.id = "toast-container";
+		toastContainer.setAttribute("aria-live", "polite");
+		toastContainer.setAttribute("aria-atomic", "false");
+		document.body.appendChild(toastContainer);
+	}
+	return toastContainer;
 }
 
 /**
@@ -27,25 +27,28 @@ function ensureContainer(): HTMLDivElement {
  * @param message - The message to display
  * @param duration - Duration in milliseconds (default: 3000)
  */
-export function showToast(message: string, duration: number = TOAST_DURATION_MS): void {
-  const container = ensureContainer();
+export function showToast(
+	message: string,
+	duration: number = TOAST_DURATION_MS,
+): void {
+	const container = ensureContainer();
 
-  const toast = document.createElement('div');
-  toast.className = 'toast';
-  toast.setAttribute('role', 'status');
-  toast.textContent = message;
+	const toast = document.createElement("div");
+	toast.className = "toast";
+	toast.setAttribute("role", "status");
+	toast.textContent = message;
 
-  container.appendChild(toast);
+	container.appendChild(toast);
 
-  // Auto-remove after duration
-  setTimeout(() => {
-    toast.style.animation = 'fadeOut 0.2s ease-out forwards';
-    setTimeout(() => {
-      if (toast.parentNode) {
-        toast.parentNode.removeChild(toast);
-      }
-    }, 200);
-  }, duration);
+	// Auto-remove after duration
+	setTimeout(() => {
+		toast.style.animation = "fadeOut 0.2s ease-out forwards";
+		setTimeout(() => {
+			if (toast.parentNode) {
+				toast.parentNode.removeChild(toast);
+			}
+		}, 200);
+	}, duration);
 }
 
 /**
@@ -56,27 +59,27 @@ export function showToast(message: string, duration: number = TOAST_DURATION_MS)
  * @param duration - Duration in milliseconds (default: 3000)
  */
 export function showToastWithType(
-  message: string,
-  type: 'info' | 'success' | 'error' = 'info',
-  duration: number = TOAST_DURATION_MS
+	message: string,
+	type: "info" | "success" | "error" = "info",
+	duration: number = TOAST_DURATION_MS,
 ): void {
-  const container = ensureContainer();
+	const container = ensureContainer();
 
-  const toast = document.createElement('div');
-  toast.className = `toast toast-${type}`;
-  toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
-  toast.textContent = message;
+	const toast = document.createElement("div");
+	toast.className = `toast toast-${type}`;
+	toast.setAttribute("role", type === "error" ? "alert" : "status");
+	toast.textContent = message;
 
-  container.appendChild(toast);
+	container.appendChild(toast);
 
-  setTimeout(() => {
-    toast.style.animation = 'fadeOut 0.2s ease-out forwards';
-    setTimeout(() => {
-      if (toast.parentNode) {
-        toast.parentNode.removeChild(toast);
-      }
-    }, 200);
-  }, duration);
+	setTimeout(() => {
+		toast.style.animation = "fadeOut 0.2s ease-out forwards";
+		setTimeout(() => {
+			if (toast.parentNode) {
+				toast.parentNode.removeChild(toast);
+			}
+		}, 200);
+	}, duration);
 }
 
 /**
@@ -92,27 +95,26 @@ export function showToastWithType(
  *                   with the backend SESSION_TTL)
  */
 export function showPairingCodeToast(
-  code: string,
-  duration: number = 30000
+	code: string,
+	duration: number = 30000,
 ): void {
-  const container = ensureContainer();
+	const container = ensureContainer();
 
-  // Dismiss any existing pairing toast to avoid stacking.
-  container.querySelectorAll('.pairing-toast').forEach((el) => el.remove());
+	// Dismiss any existing pairing toast to avoid stacking.
+	container.querySelectorAll(".pairing-toast").forEach((el) => el.remove());
 
-  const toast = document.createElement('div');
-  toast.className = 'toast pairing-toast';
-  toast.setAttribute('role', 'status');
+	const toast = document.createElement("div");
+	toast.className = "toast pairing-toast";
+	toast.setAttribute("role", "status");
 
-  // Format code as "XXX XXX" for readability.
-  const formatted = code.length === 6
-    ? `${code.slice(0, 3)} ${code.slice(3)}`
-    : code;
+	// Format code as "XXX XXX" for readability.
+	const formatted =
+		code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
 
-  // Build the toast DOM without innerHTML for the code value (VULN-001).
-  // The static parts use innerHTML (trusted markup), but the pairing code
-  // — the only externally-derived value — is set via textContent.
-  toast.innerHTML = `
+	// Build the toast DOM without innerHTML for the code value (VULN-001).
+	// The static parts use innerHTML (trusted markup), but the pairing code
+	// — the only externally-derived value — is set via textContent.
+	toast.innerHTML = `
     <div class="pairing-toast-head">
       <div class="pairing-toast-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -132,33 +134,37 @@ export function showPairingCodeToast(
     </div>
   `;
 
-  // Set the pairing code via textContent to prevent XSS (CWE-79).
-  // Even though the current code is always 6 digits, this is defense-in-depth.
-  const codeEl = toast.querySelector<HTMLDivElement>('.pairing-toast-code');
-  if (codeEl) codeEl.textContent = formatted;
+	// Set the pairing code via textContent to prevent XSS (CWE-79).
+	// Even though the current code is always 6 digits, this is defense-in-depth.
+	const codeEl = toast.querySelector<HTMLDivElement>(".pairing-toast-code");
+	if (codeEl) codeEl.textContent = formatted;
 
-  container.appendChild(toast);
+	container.appendChild(toast);
 
-  // Animate the progress bar from 100% → 0% over `duration`.
-  const bar = toast.querySelector<HTMLDivElement>('.pairing-toast-progress-bar');
-  if (bar) {
-    // Force a reflow so the transition runs from the initial 100% width.
-    void bar.offsetWidth;
-    bar.style.transition = `width ${duration}ms linear`;
-    bar.style.width = '0%';
-  }
+	// Animate the progress bar from 100% → 0% over `duration`.
+	const bar = toast.querySelector<HTMLDivElement>(
+		".pairing-toast-progress-bar",
+	);
+	if (bar) {
+		// Force a reflow so the transition runs from the initial 100% width.
+		void bar.offsetWidth;
+		bar.style.transition = `width ${duration}ms linear`;
+		bar.style.width = "0%";
+	}
 
-  // OK / close button dismisses immediately.
-  const closeBtn = toast.querySelector<HTMLButtonElement>('.pairing-toast-close');
-  const dismiss = () => {
-    if (!toast.parentNode) return;
-    toast.style.animation = 'fadeOut 0.2s ease-out forwards';
-    setTimeout(() => {
-      if (toast.parentNode) toast.parentNode.removeChild(toast);
-    }, 200);
-  };
-  if (closeBtn) closeBtn.onclick = dismiss;
+	// OK / close button dismisses immediately.
+	const closeBtn = toast.querySelector<HTMLButtonElement>(
+		".pairing-toast-close",
+	);
+	const dismiss = () => {
+		if (!toast.parentNode) return;
+		toast.style.animation = "fadeOut 0.2s ease-out forwards";
+		setTimeout(() => {
+			if (toast.parentNode) toast.parentNode.removeChild(toast);
+		}, 200);
+	};
+	if (closeBtn) closeBtn.onclick = dismiss;
 
-  // Auto-dismiss after duration.
-  setTimeout(dismiss, duration);
+	// Auto-dismiss after duration.
+	setTimeout(dismiss, duration);
 }
