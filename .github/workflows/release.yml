@@ -60,6 +60,15 @@ jobs:
       - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: './src-tauri -> target'
+
+      # Pre-build the native messaging host binary so tauri-build's resource
+      # glob (binaries/pwdvault-native*) resolves during clippy/test on Linux.
+      - name: Build native messaging host (placeholder for CI gate)
+        run: |
+          cd extensions/native-host
+          cargo build --release
+          mkdir -p ../../src-tauri/binaries
+          cp target/release/pwdvault-native ../../src-tauri/binaries/ || true
       - name: Clippy (workspace, deny warnings)
         working-directory: src-tauri
         run: cargo clippy --workspace --all-targets -- -D warnings
