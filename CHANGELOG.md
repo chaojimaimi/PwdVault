@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-07-21
+
+### Fixed
+- Build the Windows Native Messaging host with the statically linked MSVC CRT
+  so Chrome and Firefox can launch it on systems without a separately installed
+  Visual C++ Redistributable.
+- Add a Windows PE release gate that rejects missing, wrong-architecture,
+  non-stdio, or dynamically VC++-linked Native Host binaries before packaging.
+- Run a dedicated Windows Native Host build/test job on every push and pull
+  request, closing the platform gap that allowed the v1.1.2 loader failure.
+- Translate Chrome's generic Native Messaging communication failure into an
+  actionable desktop-update/reinstall message.
+
 ## [1.1.2] - 2026-07-19
 
 ### Fixed

@@ -10,6 +10,9 @@ export function friendlyConnectionError(error) {
   if (lower.includes('host has exited')) {
     return 'PwdVault browser integration exited unexpectedly. Restart the desktop app.';
   }
+  if (lower.includes('error when communicating with the native messaging host')) {
+    return 'PwdVault browser integration could not start. Update or reinstall the PwdVault desktop app.';
+  }
   if (lower.includes('timed out')) {
     return 'PwdVault desktop app did not respond in time.';
   }

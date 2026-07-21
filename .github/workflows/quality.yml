@@ -104,6 +104,25 @@ jobs:
         working-directory: extensions/native-host
         run: cargo test --locked
 
+  # Build the exact Windows host shape used by the release. This catches
+  # loader-time failures (notably a missing VC++ Redistributable) that cannot
+  # be observed by the macOS/Linux unit-test jobs.
+  quality-native-host-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          components: rustfmt, clippy
+      - name: Build release native host
+        working-directory: extensions/native-host
+        run: cargo build --release --locked
+      - name: Verify self-contained Windows native host
+        run: python scripts/verify-windows-native-host.py extensions/native-host/target/release/pwdvault-native.exe
+      - name: Run native host tests
+        working-directory: extensions/native-host
+        run: cargo test --locked
+
   # ---------------------------------------------------------------------------
   # Browser extensions: self-contained packages and Firefox store lint
   # ---------------------------------------------------------------------------

@@ -206,6 +206,9 @@ jobs:
           cp target/release/pwdvault-native.exe ../../src-tauri/binaries/ || \
           cp target/release/pwdvault-native ../../src-tauri/binaries/
 
+      - name: Verify self-contained Windows native host
+        run: python scripts/verify-windows-native-host.py src-tauri/binaries/pwdvault-native.exe
+
       - name: Build Windows app
         run: pnpm tauri build --bundles nsis
 

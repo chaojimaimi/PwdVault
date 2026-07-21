@@ -9,6 +9,11 @@ describe('native connection errors', () => {
       .toContain('Make sure it is running');
   });
 
+  it('turns Chrome loader failures into an actionable reinstall message', () => {
+    expect(friendlyConnectionError(new Error('Error when communicating with the native messaging host.')))
+      .toContain('Update or reinstall');
+  });
+
   it('only classifies token rejection as an authentication error', () => {
     expect(isAuthenticationError(new Error('Unauthorized'))).toBe(true);
     expect(isAuthenticationError(new Error('Invalid token'))).toBe(true);

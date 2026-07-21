@@ -1,0 +1,10 @@
+# The Native Messaging host is launched directly by Chrome/Firefox, outside
+# the Tauri process. It therefore cannot assume that the Microsoft Visual C++
+# Redistributable is installed on an otherwise supported Windows machine.
+#
+# Tauri already builds the desktop executable with a self-contained MSVC CRT;
+# keep the separately-built host self-contained as well. Without this setting
+# Windows terminates the host in the loader before `main`, and browsers report
+# only "Error when communicating with the native messaging host."
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
