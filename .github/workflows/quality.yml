@@ -119,6 +119,8 @@ jobs:
         run: cargo build --release --locked
       - name: Verify self-contained Windows native host
         run: python scripts/verify-windows-native-host.py extensions/native-host/target/release/pwdvault-native.exe
+      - name: Execute Windows native host framing smoke
+        run: python scripts/windows-native-host-smoke.py extensions/native-host/target/release/pwdvault-native.exe
       - name: Run native host tests
         working-directory: extensions/native-host
         run: cargo test --locked

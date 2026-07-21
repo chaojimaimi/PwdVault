@@ -31,6 +31,37 @@ const MAX_HTTP_HEADER_SIZE: usize = 64 * 1024;
 const FIREFOX_ADDON_ID: &str = "pwdvault@pwdvault.app";
 const PROTOCOL_VERSION: u64 = 1;
 
+// Chrome's Native Messaging protocol is binary-framed. Windows initializes
+// the C runtime's standard streams as O_TEXT, which is allowed to translate
+// bytes such as LF and therefore corrupt the four-byte length prefix or JSON
+// payload. Chrome documents O_BINARY as mandatory for Windows native hosts.
+#[cfg(windows)]
+const O_BINARY: i32 = 0x8000;
+
+#[cfg(windows)]
+extern "C" {
+    fn _setmode(file_descriptor: i32, mode: i32) -> i32;
+}
+
+#[cfg(windows)]
+fn configure_native_messaging_stdio() -> Result<(), &'static str> {
+    // SAFETY: 0 and 1 are the process stdin/stdout CRT descriptors, and
+    // `_setmode` does not retain either argument. This runs before either
+    // stream is locked or used.
+    if unsafe { _setmode(0, O_BINARY) } == -1 {
+        return Err("failed to set stdin to binary mode");
+    }
+    if unsafe { _setmode(1, O_BINARY) } == -1 {
+        return Err("failed to set stdout to binary mode");
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn configure_native_messaging_stdio() -> Result<(), &'static str> {
+    Ok(())
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct CallerContext {
     /// Stable label used to bind a pairing challenge to its browser caller.
@@ -40,6 +71,13 @@ struct CallerContext {
 }
 
 fn main() {
+    if let Err(error) = configure_native_messaging_stdio() {
+        // stderr is the only stream Native Messaging hosts may use for
+        // diagnostics; stdout must contain framed protocol bytes exclusively.
+        eprintln!("pwdvault-native: {error}");
+        return;
+    }
+
     // Buffer stdout so length-prefixed frames are written atomically.
     let stdout = io::stdout();
     let mut out = io::BufWriter::new(stdout.lock());

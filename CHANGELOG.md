@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-07-21
+
+### Fixed
+- Put Windows Native Messaging stdin/stdout into mandatory `O_BINARY` mode
+  before reading or writing Chrome's length-prefixed protocol frames.
+- Add a Windows process-level smoke test that launches the packaged Host with
+  Chrome arguments, forwards a handshake through a mock loopback server, and
+  validates the exact framed response bytes.
+
 ## [1.1.3] - 2026-07-21
 
 ### Fixed
