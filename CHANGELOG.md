@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-07-22
+
+### Fixed
+- Register Chrome and Firefox Native Messaging manifests in both the 32-bit
+  and 64-bit HKCU registry views, replacing stale legacy entries that Chrome
+  queries before the current 64-bit registration.
+- Add a Windows registry integration test and a user-safe inspection/repair
+  script for both Chrome Native Messaging registry views.
+
 ## [1.1.4] - 2026-07-21
 
 ### Fixed

@@ -7,7 +7,9 @@
 
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::path::PathBuf;
 
 /// The native messaging host name browsers use in `connectNative`.
 pub const HOST_NAME: &str = "com.pwdvault.app";
@@ -178,9 +180,6 @@ fn nm_dir_linux(browser: Browser) -> io::Result<PathBuf> {
 /// and point the registry value at it.
 #[cfg(target_os = "windows")]
 fn register_windows(browser: Browser, manifest: &str) -> io::Result<()> {
-    use winreg::enums::*;
-    use winreg::RegKey;
-
     // Store the manifest file under the app data directory.
     let base = dirs::data_local_dir()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "local app data dir"))?
@@ -192,14 +191,35 @@ fn register_windows(browser: Browser, manifest: &str) -> io::Result<()> {
 
     let path_str = manifest_path.to_string_lossy().to_string();
 
+    write_windows_registry_views(browser, HOST_NAME, &path_str)
+}
+
+/// Write the Native Messaging registration into both Windows registry views.
+///
+/// Chrome queries the 32-bit view first and the 64-bit view second. Updating
+/// only the process-default view can therefore leave an older 32-bit entry in
+/// front of the freshly installed 64-bit entry. That stale entry may launch an
+/// obsolete or missing Host even after the desktop application is reinstalled.
+#[cfg(target_os = "windows")]
+fn write_windows_registry_views(
+    browser: Browser,
+    host_name: &str,
+    manifest_path: &str,
+) -> io::Result<()> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
     let subkey = match browser {
         Browser::Chrome => r"Software\Google\Chrome\NativeMessagingHosts",
         Browser::Firefox => r"Software\Mozilla\NativeMessagingHosts",
     };
+    let key_path = format!("{}\\{}", subkey, host_name);
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let (key, _) = hkcu.create_subkey(&format!("{}\\{}", subkey, HOST_NAME))?;
-    key.set_value("", &path_str)?;
+    for view in [KEY_WOW64_32KEY, KEY_WOW64_64KEY] {
+        let (key, _) = hkcu.create_subkey_with_flags(&key_path, KEY_ALL_ACCESS | view)?;
+        key.set_value("", &manifest_path)?;
+    }
 
     Ok(())
 }
@@ -296,5 +316,32 @@ mod tests {
         assert_eq!(chrome, "com.pwdvault.app.chrome.json");
         assert_eq!(firefox, "com.pwdvault.app.firefox.json");
         assert_ne!(chrome, firefox);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_registration_writes_both_registry_views() {
+        use winreg::enums::*;
+        use winreg::RegKey;
+
+        let host_name = format!("com.pwdvault.test.{}", std::process::id());
+        let manifest_path = r"C:\Temp\pwdvault-native-test.json";
+        let parent = r"Software\Google\Chrome\NativeMessagingHosts";
+        let key_path = format!("{}\\{}", parent, host_name);
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+
+        write_windows_registry_views(Browser::Chrome, &host_name, manifest_path)
+            .expect("write both registry views");
+
+        for view in [KEY_WOW64_32KEY, KEY_WOW64_64KEY] {
+            let key = hkcu
+                .open_subkey_with_flags(&key_path, KEY_READ | view)
+                .expect("registration exists in selected registry view");
+            let actual: String = key.get_value("").expect("default manifest path value");
+            assert_eq!(actual, manifest_path);
+            drop(key);
+            hkcu.delete_subkey_with_flags(&key_path, view)
+                .expect("remove test registration");
+        }
     }
 }

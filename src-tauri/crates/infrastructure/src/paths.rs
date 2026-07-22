@@ -96,11 +96,11 @@ pub fn prepare_sensitive_file(path: &Path) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-pub fn secure_file(path: &Path) -> Result<(), std::io::Error> {
+pub fn secure_file(_path: &Path) -> Result<(), std::io::Error> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        std::fs::set_permissions(_path, std::fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
 }

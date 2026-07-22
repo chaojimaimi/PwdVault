@@ -124,6 +124,25 @@ jobs:
       - name: Run native host tests
         working-directory: extensions/native-host
         run: cargo test --locked
+      - name: Verify Chrome registration in both Windows registry views
+        working-directory: src-tauri
+        run: >-
+          cargo test --locked -p pwdvault-infrastructure
+          native_host_setup::tests::windows_registration_writes_both_registry_views
+      - name: Validate Windows registration diagnostic script
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path scripts/windows-native-registration.ps1),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "PowerShell parser found $($errors.Count) error(s)"
+          }
 
   # ---------------------------------------------------------------------------
   # Browser extensions: self-contained packages and Firefox store lint
