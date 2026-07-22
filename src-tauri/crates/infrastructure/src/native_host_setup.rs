@@ -336,12 +336,22 @@ mod tests {
         for view in [KEY_WOW64_32KEY, KEY_WOW64_64KEY] {
             let key = hkcu
                 .open_subkey_with_flags(&key_path, KEY_READ | view)
-                .expect("registration exists in selected registry view");
+                .unwrap_or_else(|error| {
+                    panic!("registration exists in {view:?} registry view: {error}")
+                });
             let actual: String = key.get_value("").expect("default manifest path value");
             assert_eq!(actual, manifest_path);
-            drop(key);
-            hkcu.delete_subkey_with_flags(&key_path, view)
-                .expect("remove test registration");
+        }
+
+        // Some supported Windows versions share/reflect this HKCU subtree
+        // between registry views. Read both views before cleanup, then accept
+        // NotFound while deleting the second alias of the same underlying key.
+        for view in [KEY_WOW64_32KEY, KEY_WOW64_64KEY] {
+            match hkcu.delete_subkey_with_flags(&key_path, view) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => panic!("remove test registration from {view:?}: {error}"),
+            }
         }
     }
 }
