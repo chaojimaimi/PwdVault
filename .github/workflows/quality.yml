@@ -157,6 +157,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: Build and verify extension packages
         run: bash extensions/chrome/scripts/build.sh
+      - name: Verify transparent icon corners
+        run: python3 scripts/verify-icon-transparency.py
       - name: Firefox web-ext lint (warnings are release blockers)
         run: >-
           pnpm --config.registry=https://registry.npmjs.org dlx web-ext@10.5.0 lint

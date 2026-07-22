@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   queries before the current 64-bit registration.
 - Add a Windows registry integration test and a user-safe inspection/repair
   script for both Chrome Native Messaging registry views.
+- Remove the baked white matte from the application and browser-extension
+  icons, regenerate transparent PNG/ICO/ICNS assets, and enforce transparent
+  corner pixels in the quality workflow.
 
 ## [1.1.4] - 2026-07-21
 
