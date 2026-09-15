@@ -155,3 +155,69 @@ describe('AccessibleDialog stacking (A8)', () => {
     root.remove();
   });
 });
+
+// X3: two dialogs closed in reverse mount order (outer first, inner last).
+// The last-closing dialog must restore the ORIGINAL background state, not the
+// outer dialog's own `aria-hidden "true"` that it observed at mount. B is
+// opened from inside A (portals render outside #root, so their controls stay
+// reachable while #root is aria-hidden).
+function OutOfOrderHarness() {
+  const [openA, setOpenA] = useState(false);
+  const [openB, setOpenB] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpenA(true)}>Open A</button>
+      <AccessibleDialog
+        isOpen={openA}
+        onClose={() => setOpenA(false)}
+        labelledBy="dialog-a-title"
+      >
+        <h2 id="dialog-a-title">Dialog A</h2>
+        <button onClick={() => setOpenB(true)}>Open B</button>
+        <button onClick={() => setOpenA(false)}>Close A</button>
+      </AccessibleDialog>
+      <AccessibleDialog
+        isOpen={openB}
+        onClose={() => setOpenB(false)}
+        labelledBy="dialog-b-title"
+      >
+        <h2 id="dialog-b-title">Dialog B</h2>
+        <button onClick={() => setOpenB(false)}>Close B</button>
+      </AccessibleDialog>
+    </>
+  );
+}
+
+describe('AccessibleDialog out-of-order close (X3)', () => {
+  it('leaves no aria-hidden residue on #root when the outer dialog closes first', async () => {
+    const root = document.createElement('div');
+    root.id = 'root';
+    document.body.appendChild(root);
+    render(<OutOfOrderHarness />, { container: root });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open A' }));
+    await screen.findByRole('dialog', { name: 'Dialog A' });
+    expect(root).toHaveAttribute('aria-hidden', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open B' }));
+    await screen.findByRole('dialog', { name: 'Dialog B' });
+
+    // Close A (the background-hiding owner) FIRST; the background must stay
+    // hidden while B is still open.
+    fireEvent.click(screen.getByRole('button', { name: 'Close A' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Dialog A' })).not.toBeInTheDocument(),
+    );
+    expect(root).toHaveAttribute('aria-hidden', 'true');
+
+    // Close B last: the owner's snapshot (no aria-hidden before any dialog)
+    // must be restored — no residue from B's mount-time observation.
+    fireEvent.click(screen.getByRole('button', { name: 'Close B' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Dialog B' })).not.toBeInTheDocument(),
+    );
+    expect(root).not.toHaveAttribute('aria-hidden');
+    expect(root).not.toHaveAttribute('inert');
+    root.remove();
+  });
+});

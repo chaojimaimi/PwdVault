@@ -1,5 +1,5 @@
 // PwdVault Popup Script - Enhanced with Groups, Generator UI, and Theme Switching
-import Fuse from './fuse.min.mjs';
+import Fuse from "./fuse.min.mjs";
 
 // Handle of the pending clipboard auto-clear timer. Copying again cancels
 // the previous timer so the 30s window restarts from the most recent copy
@@ -7,430 +7,455 @@ import Fuse from './fuse.min.mjs';
 let activeClearTimer = null;
 
 class PopupApp {
-  constructor() {
-    this.state = {
-      status: 'loading',
-      unlocked: false,
-      entries: [],
-      groups: [],
-      selectedGroupId: null,
-      entryDetails: new Map(),
-      searchQuery: '',
-      error: null,
-      expandedEntryId: null,
-      visiblePasswords: new Set(),
-      theme: 'light',
-      // Generator state
-      generatedPassword: '',
-      generatorOptions: {
-        length: 16,
-        includeUppercase: true,
-        includeLowercase: true,
-        includeNumbers: true,
-        includeSymbols: true,
-      },
-      generatorCopied: false,
-      // Pairing state
-      pairingStarted: false,
-      pairingHint: null,
-      createFormDirty: false,
-      createPending: false,
-    };
+	constructor() {
+		this.state = {
+			status: "loading",
+			unlocked: false,
+			entries: [],
+			groups: [],
+			selectedGroupId: null,
+			entryDetails: new Map(),
+			searchQuery: "",
+			error: null,
+			expandedEntryId: null,
+			visiblePasswords: new Set(),
+			theme: "light",
+			// Generator state
+			generatedPassword: "",
+			generatorOptions: {
+				length: 16,
+				includeUppercase: true,
+				includeLowercase: true,
+				includeNumbers: true,
+				includeSymbols: true,
+			},
+			generatorCopied: false,
+			// Pairing state
+			pairingStarted: false,
+			pairingHint: null,
+			createFormDirty: false,
+			createPending: false,
+		};
 
-    this.loadTheme();
-    this.init();
-  }
+		this.loadTheme();
+		this.init();
+	}
 
-  // === Theme Management ===
+	// === Theme Management ===
 
-  loadTheme() {
-    try {
-      const saved = localStorage.getItem('pwdvault-theme');
-      if (saved && ['light', 'dark'].includes(saved)) {
-        this.state.theme = saved;
-      } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        this.state.theme = 'dark';
-      }
-    } catch {}
-    this.applyTheme();
-  }
+	loadTheme() {
+		try {
+			const saved = localStorage.getItem("pwdvault-theme");
+			if (saved && ["light", "dark"].includes(saved)) {
+				this.state.theme = saved;
+			} else if (
+				window.matchMedia &&
+				window.matchMedia("(prefers-color-scheme: dark)").matches
+			) {
+				this.state.theme = "dark";
+			}
+		} catch {}
+		this.applyTheme();
+	}
 
-  setTheme(theme) {
-    this.state.theme = theme;
-    try {
-      localStorage.setItem('pwdvault-theme', theme);
-    } catch {}
-    this.applyTheme();
-  }
+	setTheme(theme) {
+		this.state.theme = theme;
+		try {
+			localStorage.setItem("pwdvault-theme", theme);
+		} catch {}
+		this.applyTheme();
+	}
 
-  applyTheme() {
-    document.documentElement.setAttribute('data-theme', this.state.theme);
-    // Smooth transition
-    document.documentElement.classList.add('theme-transitioning');
-    setTimeout(() => {
-      document.documentElement.classList.remove('theme-transitioning');
-    }, 300);
-  }
+	applyTheme() {
+		document.documentElement.setAttribute("data-theme", this.state.theme);
+		// Smooth transition
+		document.documentElement.classList.add("theme-transitioning");
+		setTimeout(() => {
+			document.documentElement.classList.remove("theme-transitioning");
+		}, 300);
+	}
 
-  // === Init ===
+	// === Init ===
 
-  async init() {
-    try {
-      const status = await this.sendMessage({ type: 'GET_STATUS' });
+	async init() {
+		try {
+			const status = await this.sendMessage({ type: "GET_STATUS" });
 
-      if (status.status === 'needs_pairing') {
-        this.state.status = 'pairing';
-      } else if (status.unlocked) {
-        this.state.status = 'unlocked';
-        this.state.unlocked = true;
-        await Promise.all([this.loadEntries(), this.loadGroups()]);
-      } else if (status.status === 'connected') {
-        this.state.status = 'locked';
-      } else {
-        this.state.status = 'disconnected';
-        this.state.error = status.error || null;
-      }
+			if (status.status === "needs_pairing") {
+				this.state.status = "pairing";
+			} else if (status.unlocked) {
+				this.state.status = "unlocked";
+				this.state.unlocked = true;
+				await Promise.all([this.loadEntries(), this.loadGroups()]);
+			} else if (status.status === "connected") {
+				this.state.status = "locked";
+			} else {
+				this.state.status = "disconnected";
+				this.state.error = status.error || null;
+			}
 
-      this.render();
-    } catch (error) {
-      this.state.status = 'error';
-      this.state.error = error.message;
-      this.render();
-    }
-  }
+			this.render();
+		} catch (error) {
+			this.state.status = "error";
+			this.state.error = error.message;
+			this.render();
+		}
+	}
 
-  async sendMessage(message) {
-    return chrome.runtime.sendMessage(message);
-  }
+	async sendMessage(message) {
+		return chrome.runtime.sendMessage(message);
+	}
 
-  // === Data Loading ===
+	// === Data Loading ===
 
-  async loadEntries() {
-    try {
-      const entries = await this.sendMessage({ type: 'GET_ENTRIES' });
-      if (entries && entries.error) {
-        this.state.error = entries.error;
-      } else {
-        this.state.entries = entries || [];
-      }
-    } catch (error) {
-      this.state.error = error.message;
-    }
-  }
+	async loadEntries() {
+		try {
+			const entries = await this.sendMessage({ type: "GET_ENTRIES" });
+			if (entries && entries.error) {
+				this.state.error = entries.error;
+			} else {
+				this.state.entries = entries || [];
+			}
+		} catch (error) {
+			this.state.error = error.message;
+		}
+	}
 
-  async loadGroups() {
-    try {
-      const groups = await this.sendMessage({ type: 'GET_GROUPS' });
-      if (groups && !groups.error) {
-        this.state.groups = groups || [];
-      }
-    } catch {
-      // Groups not available — non-critical
-      this.state.groups = [];
-    }
-  }
+	async loadGroups() {
+		try {
+			const groups = await this.sendMessage({ type: "GET_GROUPS" });
+			if (groups && !groups.error) {
+				this.state.groups = groups || [];
+			}
+		} catch {
+			// Groups not available — non-critical
+			this.state.groups = [];
+		}
+	}
 
-  async getEntryDetails(id) {
-    if (this.state.entryDetails.has(id)) {
-      return this.state.entryDetails.get(id);
-    }
+	async getEntryDetails(id) {
+		if (this.state.entryDetails.has(id)) {
+			return this.state.entryDetails.get(id);
+		}
 
-    try {
-      const entry = await this.sendMessage({ type: 'GET_ENTRY', id });
-      if (entry && !entry.error) {
-        this.state.entryDetails.set(id, entry);
-        // Re-render so the freshly fetched details appear in the popup.
-        // Without this, the async data lands in state.entryDetails but the
-        // DOM never updates (popup has no reactive subscription layer).
-        if (this.state.expandedEntryId === id) {
-          this.render();
-        }
-        return entry;
-      }
-    } catch (error) {
-      console.error('Failed to get entry details:', error);
-    }
-    return null;
-  }
+		try {
+			const entry = await this.sendMessage({ type: "GET_ENTRY", id });
+			if (entry && !entry.error) {
+				this.state.entryDetails.set(id, entry);
+				// Re-render so the freshly fetched details appear in the popup.
+				// Without this, the async data lands in state.entryDetails but the
+				// DOM never updates (popup has no reactive subscription layer).
+				if (this.state.expandedEntryId === id) {
+					this.render();
+				}
+				return entry;
+			}
+		} catch (error) {
+			console.error("Failed to get entry details:", error);
+		}
+		return null;
+	}
 
-  // === Vault Actions ===
+	// === Vault Actions ===
 
-  async unlock(password) {
-    this.state.status = 'loading';
-    this.render();
+	async unlock(password) {
+		this.state.status = "loading";
+		this.render();
 
-    try {
-      const result = await this.sendMessage({ type: 'UNLOCK_VAULT', password });
-      if (result === true) {
-        this.state.unlocked = true;
-        this.state.status = 'unlocked';
-        this.state.error = null;
-        await Promise.all([this.loadEntries(), this.loadGroups()]);
-      } else {
-        this.state.error = 'Invalid password';
-        this.state.status = 'locked';
-      }
-    } catch (error) {
-      this.state.error = error.message;
-      this.state.status = 'locked';
-    }
+		try {
+			const result = await this.sendMessage({ type: "UNLOCK_VAULT", password });
+			if (result === true) {
+				this.state.unlocked = true;
+				this.state.status = "unlocked";
+				this.state.error = null;
+				await Promise.all([this.loadEntries(), this.loadGroups()]);
+			} else {
+				this.state.error = "Invalid password";
+				this.state.status = "locked";
+			}
+		} catch (error) {
+			this.state.error = error.message;
+			this.state.status = "locked";
+		}
 
-    this.render();
-  }
+		this.render();
+	}
 
-  async lock() {
-    await this.sendMessage({ type: 'LOCK_VAULT' });
-    this.state.unlocked = false;
-    this.state.status = 'locked';
-    this.state.entries = [];
-    this.state.groups = [];
-    this.state.selectedGroupId = null;
-    this.state.entryDetails.clear();
-    this.state.expandedEntryId = null;
-    this.state.visiblePasswords.clear();
-    this.render();
-  }
+	async lock() {
+		await this.sendMessage({ type: "LOCK_VAULT" });
+		this.state.unlocked = false;
+		this.state.status = "locked";
+		this.state.entries = [];
+		this.state.groups = [];
+		this.state.selectedGroupId = null;
+		this.state.entryDetails.clear();
+		this.state.expandedEntryId = null;
+		this.state.visiblePasswords.clear();
+		this.render();
+	}
 
-  // === Clipboard ===
+	// === Clipboard ===
 
-  async copyToClipboard(text, label = 'Copied!', autoClear = false) {
-    try {
-      await navigator.clipboard.writeText(text);
+	async copyToClipboard(text, label = "Copied!", autoClear = false) {
+		try {
+			await navigator.clipboard.writeText(text);
 
-      if (autoClear) {
-        if (activeClearTimer) clearTimeout(activeClearTimer);
-        const expectedDigest = await this.digestText(text);
-        activeClearTimer = setTimeout(async () => {
-          try {
-            const current = await navigator.clipboard.readText();
-            if (await this.digestText(current) === expectedDigest) {
-              await navigator.clipboard.writeText('');
-            }
-          } catch {}
-        }, 30000);
-        this.showToast(label + ' (auto-clears in 30s)');
-      } else {
-        this.showToast(label);
-      }
-      return true;
-    } catch {
-      this.showToast('Failed to copy');
-      return false;
-    }
-  }
+			if (autoClear) {
+				if (activeClearTimer) clearTimeout(activeClearTimer);
+				const expectedDigest = await this.digestText(text);
+				activeClearTimer = setTimeout(async () => {
+					try {
+						const current = await navigator.clipboard.readText();
+						if ((await this.digestText(current)) === expectedDigest) {
+							await navigator.clipboard.writeText("");
+						}
+					} catch {}
+				}, 30000);
+				this.showToast(label + " (auto-clears in 30s)");
+			} else {
+				this.showToast(label);
+			}
+			return true;
+		} catch {
+			this.showToast("Failed to copy");
+			return false;
+		}
+	}
 
-  async digestText(text) {
-    const bytes = new TextEncoder().encode(text);
-    const digest = await crypto.subtle.digest('SHA-256', bytes);
-    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
-  }
+	async digestText(text) {
+		const bytes = new TextEncoder().encode(text);
+		const digest = await crypto.subtle.digest("SHA-256", bytes);
+		return Array.from(new Uint8Array(digest), (byte) =>
+			byte.toString(16).padStart(2, "0"),
+		).join("");
+	}
 
-  // === Auto-fill ===
+	// === Auto-fill ===
 
-  async autofill(entry) {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab) {
-      const fullEntry = await this.getEntryDetails(entry.id);
-      if (fullEntry && fullEntry.password) {
-        chrome.tabs.sendMessage(tab.id, {
-          type: 'AUTOFILL',
-          username: fullEntry.username,
-          password: fullEntry.password,
-        });
-        window.close();
-      }
-    }
-  }
+	async autofill(entry) {
+		const [tab] = await chrome.tabs.query({
+			active: true,
+			currentWindow: true,
+		});
+		if (tab) {
+			const fullEntry = await this.getEntryDetails(entry.id);
+			if (fullEntry && fullEntry.password) {
+				chrome.tabs.sendMessage(tab.id, {
+					type: "AUTOFILL",
+					username: fullEntry.username,
+					password: fullEntry.password,
+				});
+				window.close();
+			}
+		}
+	}
 
-  // === Password Strength (simplified) ===
+	// === Password Strength (simplified) ===
 
-  getPasswordStrength(password) {
-    if (!password) return { score: 0, label: '', color: 'var(--color-text-muted)' };
+	getPasswordStrength(password) {
+		if (!password)
+			return { score: 0, label: "", color: "var(--color-text-muted)" };
 
-    let score = 0;
-    if (password.length >= 8) score += 15;
-    if (password.length >= 12) score += 15;
-    if (password.length >= 16) score += 10;
-    if (password.length >= 24) score += 10;
+		let score = 0;
+		if (password.length >= 8) score += 15;
+		if (password.length >= 12) score += 15;
+		if (password.length >= 16) score += 10;
+		if (password.length >= 24) score += 10;
 
-    const hasLower = /[a-z]/.test(password);
-    const hasUpper = /[A-Z]/.test(password);
-    const hasDigit = /[0-9]/.test(password);
-    const hasSymbol = /[^a-zA-Z0-9]/.test(password);
+		const hasLower = /[a-z]/.test(password);
+		const hasUpper = /[A-Z]/.test(password);
+		const hasDigit = /[0-9]/.test(password);
+		const hasSymbol = /[^a-zA-Z0-9]/.test(password);
 
-    const types = [hasLower, hasUpper, hasDigit, hasSymbol].filter(Boolean).length;
-    score += types * 12;
+		const types = [hasLower, hasUpper, hasDigit, hasSymbol].filter(
+			Boolean,
+		).length;
+		score += types * 12;
 
-    // Unique characters bonus
-    const unique = new Set(password).size;
-    score += Math.min(unique * 2, 14);
+		// Unique characters bonus
+		const unique = new Set(password).size;
+		score += Math.min(unique * 2, 14);
 
-    score = Math.min(score, 100);
+		score = Math.min(score, 100);
 
-    let label, color;
-    if (score < 25) { label = 'Weak'; color = 'var(--color-danger)'; }
-    else if (score < 50) { label = 'Fair'; color = 'var(--color-warning)'; }
-    else if (score < 75) { label = 'Good'; color = 'var(--color-primary)'; }
-    else { label = 'Strong'; color = 'var(--color-success)'; }
+		let label, color;
+		if (score < 25) {
+			label = "Weak";
+			color = "var(--color-danger)";
+		} else if (score < 50) {
+			label = "Fair";
+			color = "var(--color-warning)";
+		} else if (score < 75) {
+			label = "Good";
+			color = "var(--color-primary)";
+		} else {
+			label = "Strong";
+			color = "var(--color-success)";
+		}
 
-    return { score, label, color };
-  }
+		return { score, label, color };
+	}
 
-  // === Filtering ===
+	// === Filtering ===
 
-  getFilteredEntries() {
-    let entries = this.state.entries;
+	getFilteredEntries() {
+		let entries = this.state.entries;
 
-    if (this.state.selectedGroupId) {
-      entries = entries.filter(e => e.group_id === this.state.selectedGroupId);
-    }
+		if (this.state.selectedGroupId) {
+			entries = entries.filter(
+				(e) => e.group_id === this.state.selectedGroupId,
+			);
+		}
 
-    if (!this.state.searchQuery || !this.state.searchQuery.trim()) return entries;
+		if (!this.state.searchQuery || !this.state.searchQuery.trim())
+			return entries;
 
-    const fuse = new Fuse(entries, {
-      keys: [
-        { name: 'title', weight: 0.4 },
-        { name: 'username', weight: 0.3 },
-        { name: 'url', weight: 0.2 },
-        { name: 'tags', weight: 0.1 },
-      ],
-      threshold: 0.3,
-      includeScore: true,
-      ignoreLocation: true,
-    });
+		const fuse = new Fuse(entries, {
+			keys: [
+				{ name: "title", weight: 0.4 },
+				{ name: "username", weight: 0.3 },
+				{ name: "url", weight: 0.2 },
+				{ name: "tags", weight: 0.1 },
+			],
+			threshold: 0.3,
+			includeScore: true,
+			ignoreLocation: true,
+		});
 
-    return fuse.search(this.state.searchQuery).map(r => r.item);
-  }
+		return fuse.search(this.state.searchQuery).map((r) => r.item);
+	}
 
-  // === UI State ===
+	// === UI State ===
 
-  showToast(message) {
-    const toast = document.getElementById('toast');
-    const messageEl = document.getElementById('toast-message');
-    messageEl.textContent = message;
-    toast.classList.add('show');
-    setTimeout(() => {
-      toast.classList.remove('show');
-    }, 2000);
-  }
+	showToast(message) {
+		const toast = document.getElementById("toast");
+		const messageEl = document.getElementById("toast-message");
+		messageEl.textContent = message;
+		toast.classList.add("show");
+		setTimeout(() => {
+			toast.classList.remove("show");
+		}, 2000);
+	}
 
-  toggleEntryExpansion(entryId) {
-    if (this.state.expandedEntryId === entryId) {
-      this.state.expandedEntryId = null;
-    } else {
-      this.state.expandedEntryId = entryId;
-      this.state.visiblePasswords.clear();
-      this.getEntryDetails(entryId);
-    }
-    this.render();
-  }
+	toggleEntryExpansion(entryId) {
+		if (this.state.expandedEntryId === entryId) {
+			this.state.expandedEntryId = null;
+		} else {
+			this.state.expandedEntryId = entryId;
+			this.state.visiblePasswords.clear();
+			this.getEntryDetails(entryId);
+		}
+		this.render();
+	}
 
-  togglePasswordVisibility(entryId) {
-    if (this.state.visiblePasswords.has(entryId)) {
-      this.state.visiblePasswords.delete(entryId);
-    } else {
-      this.state.visiblePasswords.add(entryId);
-    }
-    this.render();
-  }
+	togglePasswordVisibility(entryId) {
+		if (this.state.visiblePasswords.has(entryId)) {
+			this.state.visiblePasswords.delete(entryId);
+		} else {
+			this.state.visiblePasswords.add(entryId);
+		}
+		this.render();
+	}
 
-  async goToUrl(url) {
-    if (url) {
-      let finalUrl = url;
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        finalUrl = 'https://' + url;
-      }
-      chrome.tabs.create({ url: finalUrl });
-      window.close();
-    }
-  }
+	async goToUrl(url) {
+		if (url) {
+			let finalUrl = url;
+			if (!url.startsWith("http://") && !url.startsWith("https://")) {
+				finalUrl = "https://" + url;
+			}
+			chrome.tabs.create({ url: finalUrl });
+			window.close();
+		}
+	}
 
-  // === Render Router ===
+	// === Render Router ===
 
-  replaceMarkup(element, markup) {
-    // All dynamic values passed into render methods are escaped before they
-    // reach this parser. Importing parsed nodes avoids assigning variable
-    // strings to innerHTML, which is rejected by the Firefox release linter.
-    const parsed = new DOMParser().parseFromString(markup, 'text/html');
-    const nodes = Array.from(parsed.body.childNodes, node => document.importNode(node, true));
-    element.replaceChildren(...nodes);
-  }
+	replaceMarkup(element, markup) {
+		// All dynamic values passed into render methods are escaped before they
+		// reach this parser. Importing parsed nodes avoids assigning variable
+		// strings to innerHTML, which is rejected by the Firefox release linter.
+		const parsed = new DOMParser().parseFromString(markup, "text/html");
+		const nodes = Array.from(parsed.body.childNodes, (node) =>
+			document.importNode(node, true),
+		);
+		element.replaceChildren(...nodes);
+	}
 
-  render() {
-    const app = document.getElementById('app');
+	render() {
+		const app = document.getElementById("app");
 
-    // Preserve scroll position across re-renders. Each render() rebuilds the
-    // DOM via innerHTML, which resets scrollTop to 0 — causing the view to
-    // jump to the top when the user expands an entry or toggles password
-    // visibility in the lower part of the list. The scrollable container is
-    // the .list element (max-height: 280px; overflow-y: auto).
-    const listEl = app.querySelector('.list');
-    const savedScrollTop = listEl ? listEl.scrollTop : 0;
+		// Preserve scroll position across re-renders. Each render() rebuilds the
+		// DOM via innerHTML, which resets scrollTop to 0 — causing the view to
+		// jump to the top when the user expands an entry or toggles password
+		// visibility in the lower part of the list. The scrollable container is
+		// the .list element (max-height: 280px; overflow-y: auto).
+		const listEl = app.querySelector(".list");
+		const savedScrollTop = listEl ? listEl.scrollTop : 0;
 
-    switch (this.state.status) {
-      case 'loading':
-        this.replaceMarkup(app, this.renderLoading());
-        break;
-      case 'locked':
-        this.replaceMarkup(app, this.renderLockScreen());
-        this.attachLockScreenEvents();
-        break;
-      case 'unlocked':
-        this.replaceMarkup(app, this.renderMain());
-        this.attachMainEvents();
-        break;
-      case 'creating':
-        this.replaceMarkup(app, this.renderCreateForm());
-        this.attachCreateFormEvents();
-        break;
-      case 'generator':
-        this.replaceMarkup(app, this.renderGenerator());
-        this.attachGeneratorEvents();
-        if (!this.state.generatedPassword) {
-          this.handleGenerate();
-        }
-        break;
-      case 'disconnected':
-        this.replaceMarkup(app, this.renderDisconnected());
-        this.attachDisconnectedEvents();
-        break;
-      case 'pairing':
-        this.replaceMarkup(app, this.renderPairing());
-        this.attachPairingEvents();
-        // Auto-request a fresh pairing code on first entry to the pairing
-        // screen. The pairingStarted flag prevents repeat calls when the
-        // popup re-renders (e.g. after an error) without the user explicitly
-        // asking for a new code.
-        if (!this.state.pairingStarted) {
-          this.startPairing();
-        }
-        break;
-      default:
-        this.replaceMarkup(app, this.renderError());
-    }
+		switch (this.state.status) {
+			case "loading":
+				this.replaceMarkup(app, this.renderLoading());
+				break;
+			case "locked":
+				this.replaceMarkup(app, this.renderLockScreen());
+				this.attachLockScreenEvents();
+				break;
+			case "unlocked":
+				this.replaceMarkup(app, this.renderMain());
+				this.attachMainEvents();
+				break;
+			case "creating":
+				this.replaceMarkup(app, this.renderCreateForm());
+				this.attachCreateFormEvents();
+				break;
+			case "generator":
+				this.replaceMarkup(app, this.renderGenerator());
+				this.attachGeneratorEvents();
+				if (!this.state.generatedPassword) {
+					this.handleGenerate();
+				}
+				break;
+			case "disconnected":
+				this.replaceMarkup(app, this.renderDisconnected());
+				this.attachDisconnectedEvents();
+				break;
+			case "pairing":
+				this.replaceMarkup(app, this.renderPairing());
+				this.attachPairingEvents();
+				// Auto-request a fresh pairing code on first entry to the pairing
+				// screen. The pairingStarted flag prevents repeat calls when the
+				// popup re-renders (e.g. after an error) without the user explicitly
+				// asking for a new code.
+				if (!this.state.pairingStarted) {
+					this.startPairing();
+				}
+				break;
+			default:
+				this.replaceMarkup(app, this.renderError());
+		}
 
-    // Restore scroll position after DOM rebuild (see comment above).
-    const newListEl = app.querySelector('.list');
-    if (newListEl) {
-      newListEl.scrollTop = savedScrollTop;
-    }
-  }
+		// Restore scroll position after DOM rebuild (see comment above).
+		const newListEl = app.querySelector(".list");
+		if (newListEl) {
+			newListEl.scrollTop = savedScrollTop;
+		}
+	}
 
-  // === Render: Loading ===
+	// === Render: Loading ===
 
-  renderLoading() {
-    return `
+	renderLoading() {
+		return `
       <div class="loading">
         <div class="spinner"></div>
         <span>Loading...</span>
       </div>
     `;
-  }
+	}
 
-  // === Render: Lock Screen ===
+	// === Render: Lock Screen ===
 
-  renderLockScreen() {
-    return `
+	renderLockScreen() {
+		return `
       <div class="lock-screen">
         <div class="lock-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -440,7 +465,7 @@ class PopupApp {
         </div>
         <h2>Vault Locked</h2>
         <p>Enter your master password to unlock</p>
-        ${this.state.error ? `<div class="error-message">${this.escapeHtml(this.state.error)}</div>` : ''}
+        ${this.state.error ? `<div class="error-message">${this.escapeHtml(this.state.error)}</div>` : ""}
         <form id="unlock-form">
           <div class="form-group">
             <label for="password">Master Password</label>
@@ -450,15 +475,15 @@ class PopupApp {
         </form>
       </div>
     `;
-  }
+	}
 
-  // === Render: Main (with groups + theme switcher) ===
+	// === Render: Main (with groups + theme switcher) ===
 
-  renderMain() {
-    const entries = this.getFilteredEntries();
-    const groups = this.state.groups;
+	renderMain() {
+		const entries = this.getFilteredEntries();
+		const groups = this.state.groups;
 
-    return `
+		return `
       <div class="header">
         <div class="header-brand">
           <div class="header-logo">
@@ -501,19 +526,27 @@ class PopupApp {
             value="${this.escapeHtml(this.state.searchQuery)}" />
         </div>
 
-        ${groups.length > 0 ? `
+        ${
+					groups.length > 0
+						? `
         <div class="group-tabs">
           <div class="group-tabs-scroll">
-            <button class="group-tab ${!this.state.selectedGroupId ? 'active' : ''}" data-group-id="">All</button>
-            ${groups.map(g => `
-              <button class="group-tab ${this.state.selectedGroupId === g.id ? 'active' : ''}" data-group-id="${this.escapeHtml(g.id)}">${this.escapeHtml(g.name)}</button>
-            `).join('')}
+            <button class="group-tab ${!this.state.selectedGroupId ? "active" : ""}" data-group-id="">All</button>
+            ${groups
+							.map(
+								(g) => `
+              <button class="group-tab ${this.state.selectedGroupId === g.id ? "active" : ""}" data-group-id="${this.escapeHtml(g.id)}">${this.escapeHtml(g.name)}</button>
+            `,
+							)
+							.join("")}
           </div>
         </div>
-        ` : ''}
+        `
+						: ""
+				}
 
         <div class="list">
-          ${entries.length === 0 ? this.renderEmpty() : entries.map(entry => this.renderEntry(entry)).join('')}
+          ${entries.length === 0 ? this.renderEmpty() : entries.map((entry) => this.renderEntry(entry)).join("")}
         </div>
       </div>
 
@@ -523,18 +556,18 @@ class PopupApp {
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
             <path d="M7 11V7a5 5 0 0110 0v4"/>
           </svg>
-          <span>${entries.length} password${entries.length !== 1 ? 's' : ''}</span>
+          <span>${entries.length} password${entries.length !== 1 ? "s" : ""}</span>
         </div>
       </div>
     `;
-  }
+	}
 
-  // === Render: Create Form (with group selector) ===
+	// === Render: Create Form (with group selector) ===
 
-  renderCreateForm() {
-    const groups = this.state.groups;
+	renderCreateForm() {
+		const groups = this.state.groups;
 
-    return `
+		return `
       <div class="header">
         <div class="header-brand">
           <button class="icon-btn" id="back-btn" title="Back" aria-label="Go back">
@@ -547,7 +580,7 @@ class PopupApp {
       </div>
 
       <div class="content">
-        ${this.state.error ? `<div class="error-message">${this.escapeHtml(this.state.error)}</div>` : ''}
+        ${this.state.error ? `<div class="error-message">${this.escapeHtml(this.state.error)}</div>` : ""}
         <form id="create-form" class="create-form">
           <div class="form-group">
             <label for="entry-title">Title *</label>
@@ -578,15 +611,19 @@ class PopupApp {
             <label for="entry-url">Website URL</label>
             <input type="text" id="entry-url" class="form-input" placeholder="e.g. https://github.com" />
           </div>
-          ${groups.length > 0 ? `
+          ${
+						groups.length > 0
+							? `
           <div class="form-group">
             <label for="entry-group">Group</label>
             <select id="entry-group" class="form-select">
               <option value="">No group</option>
-              ${groups.map(g => `<option value="${this.escapeHtml(g.id)}">${this.escapeHtml(g.name)}</option>`).join('')}
+              ${groups.map((g) => `<option value="${this.escapeHtml(g.id)}">${this.escapeHtml(g.name)}</option>`).join("")}
             </select>
           </div>
-          ` : ''}
+          `
+							: ""
+					}
           <div class="form-group">
             <label for="entry-notes">Notes</label>
             <textarea id="entry-notes" class="form-input form-textarea" placeholder="Optional notes..." rows="2"></textarea>
@@ -595,17 +632,17 @@ class PopupApp {
         </form>
       </div>
     `;
-  }
+	}
 
-  // === Render: Generator Screen ===
+	// === Render: Generator Screen ===
 
-  renderGenerator() {
-    const opts = this.state.generatorOptions;
-    const password = this.state.generatedPassword;
-    const strength = this.getPasswordStrength(password);
-    const copied = this.state.generatorCopied;
+	renderGenerator() {
+		const opts = this.state.generatorOptions;
+		const password = this.state.generatedPassword;
+		const strength = this.getPasswordStrength(password);
+		const copied = this.state.generatorCopied;
 
-    return `
+		return `
       <div class="header">
         <div class="header-brand">
           <button class="icon-btn" id="back-btn" title="Back" aria-label="Go back">
@@ -619,7 +656,7 @@ class PopupApp {
 
       <div class="generator-content">
         <div class="password-preview" id="password-preview">
-          ${password ? this.escapeHtml(password) : 'Generating...'}
+          ${password ? this.escapeHtml(password) : "Generating..."}
         </div>
 
         <div class="strength-meter" role="meter" aria-label="Password strength: ${this.escapeHtml(strength.label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${strength.score}">
@@ -631,7 +668,7 @@ class PopupApp {
 
         <div class="option-group">
           <div class="option-row">
-            <label>Length: ${opts.length}</label>
+            <label id="gen-length-label">Length: ${opts.length}</label>
           </div>
           <div class="length-control">
             <input type="range" id="gen-length" min="8" max="64" value="${opts.length}" />
@@ -640,19 +677,19 @@ class PopupApp {
 
         <div class="option-group">
           <div class="checkbox-wrapper">
-            <input type="checkbox" id="gen-uppercase" ${opts.includeUppercase ? 'checked' : ''} />
+            <input type="checkbox" id="gen-uppercase" ${opts.includeUppercase ? "checked" : ""} />
             <label for="gen-uppercase">Uppercase (A-Z)</label>
           </div>
           <div class="checkbox-wrapper">
-            <input type="checkbox" id="gen-lowercase" ${opts.includeLowercase ? 'checked' : ''} />
+            <input type="checkbox" id="gen-lowercase" ${opts.includeLowercase ? "checked" : ""} />
             <label for="gen-lowercase">Lowercase (a-z)</label>
           </div>
           <div class="checkbox-wrapper">
-            <input type="checkbox" id="gen-numbers" ${opts.includeNumbers ? 'checked' : ''} />
+            <input type="checkbox" id="gen-numbers" ${opts.includeNumbers ? "checked" : ""} />
             <label for="gen-numbers">Numbers (0-9)</label>
           </div>
           <div class="checkbox-wrapper">
-            <input type="checkbox" id="gen-symbols" ${opts.includeSymbols ? 'checked' : ''} />
+            <input type="checkbox" id="gen-symbols" ${opts.includeSymbols ? "checked" : ""} />
             <label for="gen-symbols">Symbols (!@#$...)</label>
           </div>
         </div>
@@ -662,46 +699,46 @@ class PopupApp {
 
       <div class="generator-actions">
         <button class="btn btn-primary" id="gen-copy">
-          ${copied ? 'Copied!' : 'Copy to Clipboard'}
+          ${copied ? "Copied!" : "Copy to Clipboard"}
         </button>
       </div>
     `;
-  }
+	}
 
-  // === Render: Entry Card ===
+	// === Render: Entry Card ===
 
-  renderEntry(entry) {
-    const isExpanded = this.state.expandedEntryId === entry.id;
-    const isPasswordVisible = this.state.visiblePasswords.has(entry.id);
-    const details = this.state.entryDetails.get(entry.id);
-    const displayUrl = entry.url ? this.formatUrl(entry.url) : '';
+	renderEntry(entry) {
+		const isExpanded = this.state.expandedEntryId === entry.id;
+		const isPasswordVisible = this.state.visiblePasswords.has(entry.id);
+		const details = this.state.entryDetails.get(entry.id);
+		const displayUrl = entry.url ? this.formatUrl(entry.url) : "";
 
-    return `
-      <div class="entry-card ${isExpanded ? 'expanded' : ''}" data-id="${this.escapeHtml(entry.id)}">
-        <div class="entry-header" role="button" tabindex="0" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${this.escapeHtml(entry.title || 'Untitled')}">
-          <div class="entry-icon">${this.escapeHtml((entry.title || '?').charAt(0).toUpperCase())}</div>
+		return `
+      <div class="entry-card ${isExpanded ? "expanded" : ""}" data-id="${this.escapeHtml(entry.id)}">
+        <div class="entry-header" role="button" tabindex="0" aria-expanded="${isExpanded}" aria-label="${isExpanded ? "Collapse" : "Expand"} ${this.escapeHtml(entry.title || "Untitled")}">
+          <div class="entry-icon">${this.escapeHtml((entry.title || "?").charAt(0).toUpperCase())}</div>
           <div class="entry-info">
-            <div class="entry-title">${this.escapeHtml(entry.title || 'Untitled')}</div>
-            <div class="entry-meta">${this.escapeHtml(entry.username || '')}${displayUrl ? ' · ' + this.escapeHtml(displayUrl) : ''}</div>
+            <div class="entry-title">${this.escapeHtml(entry.title || "Untitled")}</div>
+            <div class="entry-meta">${this.escapeHtml(entry.username || "")}${displayUrl ? " · " + this.escapeHtml(displayUrl) : ""}</div>
           </div>
           <svg class="entry-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="6 9 12 15 18 9"/>
           </svg>
         </div>
-        ${isExpanded ? this.renderEntryDetails(entry, details, isPasswordVisible) : ''}
+        ${isExpanded ? this.renderEntryDetails(entry, details, isPasswordVisible) : ""}
       </div>
     `;
-  }
+	}
 
-  renderEntryDetails(entry, details, isPasswordVisible) {
-    const password = details ? details.password : '';
-    const maskedPassword = password ? '\u2022'.repeat(password.length) : '';
+	renderEntryDetails(entry, details, isPasswordVisible) {
+		const password = details ? details.password : "";
+		const maskedPassword = password ? "\u2022".repeat(password.length) : "";
 
-    return `
+		return `
       <div class="entry-details">
         <div class="detail-row">
           <span class="detail-label">Username</span>
-          <span class="detail-value">${this.escapeHtml(entry.username || '-')}</span>
+          <span class="detail-value">${this.escapeHtml(entry.username || "-")}</span>
           <div class="detail-actions">
             <button class="detail-btn" data-action="copy-username" data-id="${this.escapeHtml(entry.id)}" title="Copy username">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -714,14 +751,15 @@ class PopupApp {
 
         <div class="detail-row">
           <span class="detail-label">Password</span>
-          <span class="detail-value password ${!isPasswordVisible ? 'hidden' : ''}">${isPasswordVisible ? this.escapeHtml(password || '') : maskedPassword}</span>
+          <span class="detail-value password ${!isPasswordVisible ? "hidden" : ""}">${isPasswordVisible ? this.escapeHtml(password || "") : maskedPassword}</span>
           <div class="detail-actions">
-            <button class="detail-btn" data-action="toggle-password" data-id="${this.escapeHtml(entry.id)}" title="${isPasswordVisible ? 'Hide' : 'Show'} password">
+            <button class="detail-btn" data-action="toggle-password" data-id="${this.escapeHtml(entry.id)}" title="${isPasswordVisible ? "Hide" : "Show"} password">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                ${isPasswordVisible
-                  ? '<path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'
-                  : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'
-                }
+                ${
+									isPasswordVisible
+										? '<path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'
+										: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'
+								}
               </svg>
             </button>
             <button class="detail-btn" data-action="copy-password" data-id="${this.escapeHtml(entry.id)}" title="Copy password">
@@ -733,7 +771,9 @@ class PopupApp {
           </div>
         </div>
 
-        ${entry.url ? `
+        ${
+					entry.url
+						? `
         <div class="detail-row">
           <span class="detail-label">Website</span>
           <span class="detail-value">${this.escapeHtml(this.formatUrl(entry.url))}</span>
@@ -747,7 +787,9 @@ class PopupApp {
             </button>
           </div>
         </div>
-        ` : ''}
+        `
+						: ""
+				}
 
         <div class="quick-actions">
           <button class="action-btn primary" data-action="autofill" data-id="${this.escapeHtml(entry.id)}">
@@ -767,11 +809,11 @@ class PopupApp {
         </div>
       </div>
     `;
-  }
+	}
 
-  renderEmpty() {
-    if (this.state.searchQuery) {
-      return `
+	renderEmpty() {
+		if (this.state.searchQuery) {
+			return `
         <div class="no-results">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="8"/>
@@ -780,9 +822,9 @@ class PopupApp {
           <p>No passwords match "${this.escapeHtml(this.state.searchQuery)}"</p>
         </div>
       `;
-    }
+		}
 
-    return `
+		return `
       <div class="empty">
         <div class="empty-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -794,10 +836,10 @@ class PopupApp {
         <p>Click + to add a new password</p>
       </div>
     `;
-  }
+	}
 
-  renderDisconnected() {
-    return `
+	renderDisconnected() {
+		return `
       <div class="disconnected-screen">
         <div class="disconnected-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -808,14 +850,14 @@ class PopupApp {
         </div>
         <h2>Not Connected</h2>
         <p>PwdVault desktop app must be running to access your passwords</p>
-        ${this.state.error ? `<div class="error-message" role="alert">${this.escapeHtml(this.state.error)}</div>` : ''}
+        ${this.state.error ? `<div class="error-message" role="alert">${this.escapeHtml(this.state.error)}</div>` : ""}
         <button class="btn btn-primary" id="connect-btn">Connect to Desktop App</button>
       </div>
     `;
-  }
+	}
 
-  renderPairing() {
-    return `
+	renderPairing() {
+		return `
       <div class="lock-screen">
         <div class="lock-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -826,8 +868,8 @@ class PopupApp {
         </div>
         <h2>Pairing Required</h2>
         <p>Enter the 6-digit code shown in the PwdVault desktop app</p>
-        ${this.state.pairingHint ? `<p class="pairing-hint">${this.escapeHtml(this.state.pairingHint)}</p>` : ''}
-        ${this.state.error ? `<div class="error-message">${this.escapeHtml(this.state.error)}</div>` : ''}
+        ${this.state.pairingHint ? `<p class="pairing-hint">${this.escapeHtml(this.state.pairingHint)}</p>` : ""}
+        ${this.state.error ? `<div class="error-message">${this.escapeHtml(this.state.error)}</div>` : ""}
         <form id="pairing-form">
           <div class="form-group">
             <label for="pairing-code">Pairing Code</label>
@@ -840,98 +882,101 @@ class PopupApp {
         <button class="btn btn-secondary" id="new-code-btn" style="width:100%;margin-top:8px;">Get New Code</button>
       </div>
     `;
-  }
+	}
 
-  attachPairingEvents() {
-    const form = document.getElementById('pairing-form');
-    if (form) {
-      form.onsubmit = async (e) => {
-        e.preventDefault();
-        const code = document.getElementById('pairing-code').value.trim();
-        if (!code || code.length !== 6) {
-          this.state.error = 'Please enter the 6-digit code';
-          this.render();
-          return;
-        }
+	attachPairingEvents() {
+		const form = document.getElementById("pairing-form");
+		if (form) {
+			form.onsubmit = async (e) => {
+				e.preventDefault();
+				const code = document.getElementById("pairing-code").value.trim();
+				if (!code || code.length !== 6) {
+					this.state.error = "Please enter the 6-digit code";
+					this.render();
+					return;
+				}
 
-        const result = await this.sendMessage({ type: 'PAIR_CONFIRM', code });
-        if (result && result.success) {
-          this.state.error = null;
-          this.state.pairingStarted = false;
-          await this.init();
-        } else {
-          // Keep pairingStarted=true: resetting it here would make the next
-          // render auto-call startPairing(), invalidating the code the
-          // desktop app is still displaying. The user retries the same code
-          // or requests a new one explicitly via "Get New Code".
-          this.state.error = (result && result.error) || 'Invalid or expired code';
-          this.render();
-        }
-      };
-    }
+				const result = await this.sendMessage({ type: "PAIR_CONFIRM", code });
+				if (result && result.success) {
+					this.state.error = null;
+					this.state.pairingStarted = false;
+					await this.init();
+				} else {
+					// Keep pairingStarted=true: resetting it here would make the next
+					// render auto-call startPairing(), invalidating the code the
+					// desktop app is still displaying. The user retries the same code
+					// or requests a new one explicitly via "Get New Code".
+					this.state.error =
+						(result && result.error) || "Invalid or expired code";
+					this.render();
+				}
+			};
+		}
 
-    // "Get new code" button — requests a fresh pairing session from the
-    // desktop app. The new code will be displayed as a toast there.
-    const newCodeBtn = document.getElementById('new-code-btn');
-    if (newCodeBtn) {
-      newCodeBtn.onclick = async () => {
-        this.state.error = null;
-        this.state.pairingStarted = false;
-        // Show a brief loading state on the button
-        newCodeBtn.textContent = 'Requesting...';
-        newCodeBtn.disabled = true;
-        await this.startPairing();
-        newCodeBtn.textContent = 'Get New Code';
-        newCodeBtn.disabled = false;
-      };
-    }
-  }
+		// "Get new code" button — requests a fresh pairing session from the
+		// desktop app. The new code will be displayed as a toast there.
+		const newCodeBtn = document.getElementById("new-code-btn");
+		if (newCodeBtn) {
+			newCodeBtn.onclick = async () => {
+				this.state.error = null;
+				this.state.pairingStarted = false;
+				// Show a brief loading state on the button
+				newCodeBtn.textContent = "Requesting...";
+				newCodeBtn.disabled = true;
+				await this.startPairing();
+				newCodeBtn.textContent = "Get New Code";
+				newCodeBtn.disabled = false;
+			};
+		}
+	}
 
-  // Ask the desktop app to display a new 6-digit pairing code.
-  // Only called once per pairing screen render.
-  async startPairing() {
-    if (this.state.pairingStarted) return;
-    this.state.pairingStarted = true;
-    try {
-      // A recently started pairing (nonce still pending) means the desktop
-      // app may still be displaying its code. Each `pair` call overwrites
-      // that code, so keep the existing session and let the user retry the
-      // displayed code or explicitly ask for a new one. Falls through when
-      // there is no pending session or it can no longer be fresh (30s TTL).
-      let pending = null;
-      try {
-        pending = await this.sendMessage({ type: 'GET_PAIRING_PENDING' });
-      } catch {
-        pending = null;
-      }
-      if (pending && pending.pending && pending.fresh) {
-        this.state.pairingHint =
-          'A pairing code was already requested — enter the one shown in the desktop app (it expires after 30 seconds), or click "Get New Code".';
-        this.render();
-        return;
-      }
-      this.state.pairingHint = null;
-      const result = await this.sendMessage({ type: 'START_PAIRING' });
-      if (result && result.result === 'failed') {
-        this.state.status = 'disconnected';
-        this.state.error = result.error || 'Unable to connect to the PwdVault desktop app.';
-        this.state.pairingStarted = false;
-        this.render();
-      } else if (result && result.result === 'paired') {
-        // Already paired (token cached) — proceed to normal flow
-        this.state.pairingStarted = false;
-        await this.init();
-      }
-    } catch (e) {
-      this.state.status = 'disconnected';
-      this.state.error = e.message || 'Unable to connect to the PwdVault desktop app.';
-      this.state.pairingStarted = false;
-      this.render();
-    }
-  }
+	// Ask the desktop app to display a new 6-digit pairing code.
+	// Only called once per pairing screen render.
+	async startPairing() {
+		if (this.state.pairingStarted) return;
+		this.state.pairingStarted = true;
+		try {
+			// A recently started pairing (nonce still pending) means the desktop
+			// app may still be displaying its code. Each `pair` call overwrites
+			// that code, so keep the existing session and let the user retry the
+			// displayed code or explicitly ask for a new one. Falls through when
+			// there is no pending session or it can no longer be fresh (30s TTL).
+			let pending = null;
+			try {
+				pending = await this.sendMessage({ type: "GET_PAIRING_PENDING" });
+			} catch {
+				pending = null;
+			}
+			if (pending && pending.pending && pending.fresh) {
+				this.state.pairingHint =
+					'A pairing code was already requested — enter the one shown in the desktop app (it expires after 30 seconds), or click "Get New Code".';
+				this.render();
+				return;
+			}
+			this.state.pairingHint = null;
+			const result = await this.sendMessage({ type: "START_PAIRING" });
+			if (result && result.result === "failed") {
+				this.state.status = "disconnected";
+				this.state.error =
+					result.error || "Unable to connect to the PwdVault desktop app.";
+				this.state.pairingStarted = false;
+				this.render();
+			} else if (result && result.result === "paired") {
+				// Already paired (token cached) — proceed to normal flow
+				this.state.pairingStarted = false;
+				await this.init();
+			}
+		} catch (e) {
+			this.state.status = "disconnected";
+			this.state.error =
+				e.message || "Unable to connect to the PwdVault desktop app.";
+			this.state.pairingStarted = false;
+			this.render();
+		}
+	}
 
-  renderError() {
-    return `
+	renderError() {
+		return `
       <div class="lock-screen">
         <div class="disconnected-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -941,439 +986,466 @@ class PopupApp {
           </svg>
         </div>
         <h2>Error</h2>
-        <p>${this.escapeHtml(this.state.error || 'Unknown error occurred')}</p>
+        <p>${this.escapeHtml(this.state.error || "Unknown error occurred")}</p>
         <button class="btn btn-primary" id="retry-btn">Try Again</button>
       </div>
     `;
-  }
+	}
 
-  // === Event Attachers ===
+	// === Event Attachers ===
 
-  attachLockScreenEvents() {
-    const form = document.getElementById('unlock-form');
-    if (form) {
-      form.onsubmit = (e) => {
-        e.preventDefault();
-        const password = document.getElementById('password').value;
-        if (password) {
-          this.unlock(password);
-        }
-      };
-    }
-  }
+	attachLockScreenEvents() {
+		const form = document.getElementById("unlock-form");
+		if (form) {
+			form.onsubmit = (e) => {
+				e.preventDefault();
+				const password = document.getElementById("password").value;
+				if (password) {
+					this.unlock(password);
+				}
+			};
+		}
+	}
 
-  attachDisconnectedEvents() {
-    const connectBtn = document.getElementById('connect-btn');
-    if (connectBtn) {
-      connectBtn.onclick = async () => {
-        this.state.status = 'loading';
-        this.state.error = null;
-        this.render();
-        await this.init();
-      };
-    }
-  }
+	attachDisconnectedEvents() {
+		const connectBtn = document.getElementById("connect-btn");
+		if (connectBtn) {
+			connectBtn.onclick = async () => {
+				this.state.status = "loading";
+				this.state.error = null;
+				this.render();
+				await this.init();
+			};
+		}
+	}
 
-  attachMainEvents() {
-    // Theme toggle
-    const themeDot = document.getElementById('theme-toggle');
-    if (themeDot) {
-      themeDot.onclick = () => {
-        this.setTheme(this.state.theme === 'light' ? 'dark' : 'light');
-      };
-    }
+	attachMainEvents() {
+		// Theme toggle
+		const themeDot = document.getElementById("theme-toggle");
+		if (themeDot) {
+			themeDot.onclick = () => {
+				this.setTheme(this.state.theme === "light" ? "dark" : "light");
+			};
+		}
 
-    // Search
-    const search = document.getElementById('search');
-    if (search) {
-      search.oninput = (e) => {
-        this.state.searchQuery = e.target.value;
-        const entries = this.getFilteredEntries();
-        const list = document.querySelector('.list');
-        if (list) {
-          this.replaceMarkup(
-            list,
-            entries.length === 0
-              ? this.renderEmpty()
-              : entries.map(entry => this.renderEntry(entry)).join('')
-          );
-          this.attachEntryEvents();
-        }
-      };
-    }
+		// Search
+		const search = document.getElementById("search");
+		if (search) {
+			search.oninput = (e) => {
+				this.state.searchQuery = e.target.value;
+				const entries = this.getFilteredEntries();
+				const list = document.querySelector(".list");
+				if (list) {
+					this.replaceMarkup(
+						list,
+						entries.length === 0
+							? this.renderEmpty()
+							: entries.map((entry) => this.renderEntry(entry)).join(""),
+					);
+					this.attachEntryEvents();
+				}
+			};
+		}
 
-    // Group tabs
-    document.querySelectorAll('.group-tab').forEach(tab => {
-      tab.onclick = () => {
-        this.state.selectedGroupId = tab.dataset.groupId || null;
-        const entries = this.getFilteredEntries();
-        const list = document.querySelector('.list');
-        if (list) {
-          this.replaceMarkup(
-            list,
-            entries.length === 0
-              ? this.renderEmpty()
-              : entries.map(entry => this.renderEntry(entry)).join('')
-          );
-          this.attachEntryEvents();
-        }
-        // Update active tab
-        document.querySelectorAll('.group-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        // Update footer count
-        const footer = document.querySelector('.footer-count span');
-        if (footer) {
-          footer.textContent = `${entries.length} password${entries.length !== 1 ? 's' : ''}`;
-        }
-      };
-    });
+		// Group tabs
+		document.querySelectorAll(".group-tab").forEach((tab) => {
+			tab.onclick = () => {
+				this.state.selectedGroupId = tab.dataset.groupId || null;
+				const entries = this.getFilteredEntries();
+				const list = document.querySelector(".list");
+				if (list) {
+					this.replaceMarkup(
+						list,
+						entries.length === 0
+							? this.renderEmpty()
+							: entries.map((entry) => this.renderEntry(entry)).join(""),
+					);
+					this.attachEntryEvents();
+				}
+				// Update active tab
+				document
+					.querySelectorAll(".group-tab")
+					.forEach((t) => t.classList.remove("active"));
+				tab.classList.add("active");
+				// Update footer count
+				const footer = document.querySelector(".footer-count span");
+				if (footer) {
+					footer.textContent = `${entries.length} password${entries.length !== 1 ? "s" : ""}`;
+				}
+			};
+		});
 
-    // Add button
-    const addBtn = document.getElementById('add-btn');
-    if (addBtn) {
-      addBtn.onclick = () => {
-        this.state.status = 'creating';
-        this.state.error = null;
-        this.state.createFormDirty = false;
-        this.state.createPending = false;
-        this.render();
-      };
-    }
+		// Add button
+		const addBtn = document.getElementById("add-btn");
+		if (addBtn) {
+			addBtn.onclick = () => {
+				this.state.status = "creating";
+				this.state.error = null;
+				this.state.createFormDirty = false;
+				this.state.createPending = false;
+				this.render();
+			};
+		}
 
-    // Lock button
-    const lockBtn = document.getElementById('lock-btn');
-    if (lockBtn) {
-      lockBtn.onclick = () => this.lock();
-    }
+		// Lock button
+		const lockBtn = document.getElementById("lock-btn");
+		if (lockBtn) {
+			lockBtn.onclick = () => this.lock();
+		}
 
-    // Generator button — now opens generator screen
-    const genBtn = document.getElementById('generator-btn');
-    if (genBtn) {
-      genBtn.onclick = () => {
-        this.state.status = 'generator';
-        this.state.generatedPassword = '';
-        this.state.generatorCopied = false;
-        this.render();
-      };
-    }
+		// Generator button — now opens generator screen
+		const genBtn = document.getElementById("generator-btn");
+		if (genBtn) {
+			genBtn.onclick = () => {
+				this.state.status = "generator";
+				this.state.generatedPassword = "";
+				this.state.generatorCopied = false;
+				this.render();
+			};
+		}
 
-    // Entry items
-    this.attachEntryEvents();
-  }
+		// Entry items
+		this.attachEntryEvents();
+	}
 
-  attachCreateFormEvents() {
-    // Back button
-    const backBtn = document.getElementById('back-btn');
-    if (backBtn) {
-      backBtn.onclick = () => {
-        if (this.state.createFormDirty && !window.confirm('Discard unsaved changes?')) return;
-        this.state.status = 'unlocked';
-        this.state.error = null;
-        this.state.createFormDirty = false;
-        this.render();
-      };
-    }
+	attachCreateFormEvents() {
+		// Back button
+		const backBtn = document.getElementById("back-btn");
+		if (backBtn) {
+			backBtn.onclick = () => {
+				if (
+					this.state.createFormDirty &&
+					!window.confirm("Discard unsaved changes?")
+				)
+					return;
+				this.state.status = "unlocked";
+				this.state.error = null;
+				this.state.createFormDirty = false;
+				this.render();
+			};
+		}
 
-    const form = document.getElementById('create-form');
-    if (form) {
-      form.oninput = () => { this.state.createFormDirty = true; };
-    }
+		const form = document.getElementById("create-form");
+		if (form) {
+			form.oninput = () => {
+				this.state.createFormDirty = true;
+			};
+		}
 
-    // Toggle password visibility
-    const togglePwBtn = document.getElementById('toggle-pw-visibility');
-    if (togglePwBtn) {
-      togglePwBtn.onclick = () => {
-        const pwInput = document.getElementById('entry-password');
-        pwInput.type = pwInput.type === 'password' ? 'text' : 'password';
-      };
-    }
+		// Toggle password visibility
+		const togglePwBtn = document.getElementById("toggle-pw-visibility");
+		if (togglePwBtn) {
+			togglePwBtn.onclick = () => {
+				const pwInput = document.getElementById("entry-password");
+				pwInput.type = pwInput.type === "password" ? "text" : "password";
+			};
+		}
 
-    // Generate password in form
-    const genPwBtn = document.getElementById('gen-pw-btn');
-    if (genPwBtn) {
-      genPwBtn.onclick = async () => {
-        try {
-          const password = await this.sendMessage({
-            type: 'GENERATE_PASSWORD',
-            options: { length: 20 }
-          });
-          if (password) {
-            const pwInput = document.getElementById('entry-password');
-            pwInput.value = password;
-            pwInput.type = 'text';
-            this.state.createFormDirty = true;
-          }
-        } catch {
-          this.showToast('Failed to generate password');
-        }
-      };
-    }
+		// Generate password in form
+		const genPwBtn = document.getElementById("gen-pw-btn");
+		if (genPwBtn) {
+			genPwBtn.onclick = async () => {
+				try {
+					const password = await this.sendMessage({
+						type: "GENERATE_PASSWORD",
+						options: { length: 20 },
+					});
+					if (password) {
+						const pwInput = document.getElementById("entry-password");
+						pwInput.value = password;
+						pwInput.type = "text";
+						this.state.createFormDirty = true;
+					}
+				} catch {
+					this.showToast("Failed to generate password");
+				}
+			};
+		}
 
-    // Submit form
-    if (form) {
-      form.onsubmit = async (e) => {
-        e.preventDefault();
-        if (this.state.createPending) return;
+		// Submit form
+		if (form) {
+			form.onsubmit = async (e) => {
+				e.preventDefault();
+				if (this.state.createPending) return;
 
-        const title = document.getElementById('entry-title').value.trim();
-        const username = document.getElementById('entry-username').value.trim();
-        const password = document.getElementById('entry-password').value;
-        const url = document.getElementById('entry-url').value.trim();
-        const notes = document.getElementById('entry-notes').value.trim();
-        const groupId = document.getElementById('entry-group')?.value || null;
+				const title = document.getElementById("entry-title").value.trim();
+				const username = document.getElementById("entry-username").value.trim();
+				const password = document.getElementById("entry-password").value;
+				const url = document.getElementById("entry-url").value.trim();
+				const notes = document.getElementById("entry-notes").value.trim();
+				const groupId = document.getElementById("entry-group")?.value || null;
 
-        if (!title || !username || !password) {
-          this.state.error = 'Title, username, and password are required';
-          this.render();
-          return;
-        }
+				if (!title || !username || !password) {
+					this.state.error = "Title, username, and password are required";
+					this.render();
+					return;
+				}
 
-        try {
-          this.state.createPending = true;
-          const submitButton = form.querySelector('button[type="submit"]');
-          if (submitButton) submitButton.disabled = true;
-          const result = await this.sendMessage({
-            type: 'CREATE_ENTRY',
-            entry: {
-              title,
-              username,
-              password,
-              url: url || null,
-              notes: notes || null,
-              tags: [],
-              group_id: groupId,
-            },
-          });
+				try {
+					this.state.createPending = true;
+					const submitButton = form.querySelector('button[type="submit"]');
+					if (submitButton) submitButton.disabled = true;
+					const result = await this.sendMessage({
+						type: "CREATE_ENTRY",
+						entry: {
+							title,
+							username,
+							password,
+							url: url || null,
+							notes: notes || null,
+							tags: [],
+							group_id: groupId,
+						},
+					});
 
-          if (result && result.error) {
-            this.state.error = result.error;
-            this.render();
-            return;
-          }
+					if (result && result.error) {
+						this.state.error = result.error;
+						this.render();
+						return;
+					}
 
-          this.state.status = 'unlocked';
-          this.state.error = null;
-          this.state.createFormDirty = false;
-          await Promise.all([this.loadEntries(), this.loadGroups()]);
-          this.render();
-          this.showToast('Password saved!');
-        } catch (error) {
-          this.state.error = error.message;
-          this.render();
-        } finally {
-          this.state.createPending = false;
-          const submitButton = document.querySelector('#create-form button[type="submit"]');
-          if (submitButton) submitButton.disabled = false;
-        }
-      };
-    }
-  }
+					this.state.status = "unlocked";
+					this.state.error = null;
+					this.state.createFormDirty = false;
+					await Promise.all([this.loadEntries(), this.loadGroups()]);
+					this.render();
+					this.showToast("Password saved!");
+				} catch (error) {
+					this.state.error = error.message;
+					this.render();
+				} finally {
+					this.state.createPending = false;
+					const submitButton = document.querySelector(
+						'#create-form button[type="submit"]',
+					);
+					if (submitButton) submitButton.disabled = false;
+				}
+			};
+		}
+	}
 
-  attachGeneratorEvents() {
-    // Back button
-    const backBtn = document.getElementById('back-btn');
-    if (backBtn) {
-      backBtn.onclick = () => {
-        this.state.status = 'unlocked';
-        this.state.generatedPassword = '';
-        this.render();
-      };
-    }
+	attachGeneratorEvents() {
+		// Back button
+		const backBtn = document.getElementById("back-btn");
+		if (backBtn) {
+			backBtn.onclick = () => {
+				this.state.status = "unlocked";
+				this.state.generatedPassword = "";
+				this.render();
+			};
+		}
 
-    // Length slider — while dragging, only update the display and state.
-    // Generation fires on `change` (release): every `input` event used to
-    // spawn a native-messaging host process, one per pixel of drag.
-    const lengthSlider = document.getElementById('gen-length');
-    if (lengthSlider) {
-      lengthSlider.oninput = (e) => {
-        this.state.generatorOptions.length = parseInt(e.target.value);
-        const lengthLabel = document.querySelector('.option-row label');
-        if (lengthLabel) {
-          lengthLabel.textContent = `Length: ${this.state.generatorOptions.length}`;
-        }
-      };
-      lengthSlider.onchange = () => {
-        this.handleGenerate();
-      };
-    }
+		// Length slider — while dragging, only update the display and state.
+		// Generation fires on `change` (release): every `input` event used to
+		// spawn a native-messaging host process, one per pixel of drag.
+		const lengthSlider = document.getElementById("gen-length");
+		if (lengthSlider) {
+			lengthSlider.oninput = (e) => {
+				this.state.generatorOptions.length = parseInt(e.target.value);
+				const lengthLabel = document.getElementById("gen-length-label");
+				if (lengthLabel) {
+					lengthLabel.textContent = `Length: ${this.state.generatorOptions.length}`;
+				}
+			};
+			lengthSlider.onchange = () => {
+				this.handleGenerate();
+			};
+		}
 
-    // Checkboxes
-    const checkboxes = [
-      { id: 'gen-uppercase', key: 'includeUppercase' },
-      { id: 'gen-lowercase', key: 'includeLowercase' },
-      { id: 'gen-numbers', key: 'includeNumbers' },
-      { id: 'gen-symbols', key: 'includeSymbols' },
-    ];
+		// Checkboxes
+		const checkboxes = [
+			{ id: "gen-uppercase", key: "includeUppercase" },
+			{ id: "gen-lowercase", key: "includeLowercase" },
+			{ id: "gen-numbers", key: "includeNumbers" },
+			{ id: "gen-symbols", key: "includeSymbols" },
+		];
 
-    checkboxes.forEach(({ id, key }) => {
-      const cb = document.getElementById(id);
-      if (cb) {
-        cb.onchange = (e) => {
-          const selectedCount = checkboxes.reduce((count, item) => {
-            const input = document.getElementById(item.id);
-            return count + (input?.checked ? 1 : 0);
-          }, 0);
-          if (!e.target.checked && selectedCount === 0) {
-            e.target.checked = true;
-            this.showToast('Select at least one character set');
-            return;
-          }
-          this.state.generatorOptions[key] = e.target.checked;
-          this.handleGenerate();
-        };
-      }
-    });
+		checkboxes.forEach(({ id, key }) => {
+			const cb = document.getElementById(id);
+			if (cb) {
+				cb.onchange = (e) => {
+					const selectedCount = checkboxes.reduce((count, item) => {
+						const input = document.getElementById(item.id);
+						return count + (input?.checked ? 1 : 0);
+					}, 0);
+					if (!e.target.checked && selectedCount === 0) {
+						e.target.checked = true;
+						this.showToast("Select at least one character set");
+						return;
+					}
+					this.state.generatorOptions[key] = e.target.checked;
+					this.handleGenerate();
+				};
+			}
+		});
 
-    // Regenerate button
-    const regenBtn = document.getElementById('gen-regenerate');
-    if (regenBtn) {
-      regenBtn.onclick = () => this.handleGenerate();
-    }
+		// Regenerate button
+		const regenBtn = document.getElementById("gen-regenerate");
+		if (regenBtn) {
+			regenBtn.onclick = () => this.handleGenerate();
+		}
 
-    // Copy button
-    const copyBtn = document.getElementById('gen-copy');
-    if (copyBtn) {
-      copyBtn.onclick = async () => {
-        if (this.state.generatedPassword) {
-          await this.copyToClipboard(this.state.generatedPassword, 'Password copied!', true);
-          this.state.generatorCopied = true;
-          copyBtn.textContent = 'Copied!';
-          setTimeout(() => {
-            this.state.generatorCopied = false;
-            if (copyBtn) copyBtn.textContent = 'Copy to Clipboard';
-          }, 2000);
-        }
-      };
-    }
-  }
+		// Copy button
+		const copyBtn = document.getElementById("gen-copy");
+		if (copyBtn) {
+			copyBtn.onclick = async () => {
+				if (this.state.generatedPassword) {
+					await this.copyToClipboard(
+						this.state.generatedPassword,
+						"Password copied!",
+						true,
+					);
+					this.state.generatorCopied = true;
+					copyBtn.textContent = "Copied!";
+					setTimeout(() => {
+						this.state.generatorCopied = false;
+						if (copyBtn) copyBtn.textContent = "Copy to Clipboard";
+					}, 2000);
+				}
+			};
+		}
+	}
 
-  async handleGenerate() {
-    try {
-      const opts = this.state.generatorOptions;
-      const password = await this.sendMessage({
-        type: 'GENERATE_PASSWORD',
-        options: {
-          length: opts.length,
-          uppercase: opts.includeUppercase,
-          lowercase: opts.includeLowercase,
-          numbers: opts.includeNumbers,
-          symbols: opts.includeSymbols,
-        },
-      });
+	async handleGenerate() {
+		try {
+			const opts = this.state.generatorOptions;
+			const password = await this.sendMessage({
+				type: "GENERATE_PASSWORD",
+				options: {
+					length: opts.length,
+					uppercase: opts.includeUppercase,
+					lowercase: opts.includeLowercase,
+					numbers: opts.includeNumbers,
+					symbols: opts.includeSymbols,
+				},
+			});
 
-      if (password) {
-        this.state.generatedPassword = password;
-        this.state.generatorCopied = false;
+			if (password) {
+				this.state.generatedPassword = password;
+				this.state.generatorCopied = false;
 
-        // Update preview and strength meter without full re-render
-        const preview = document.getElementById('password-preview');
-        if (preview) {
-          preview.textContent = password;
-        }
+				// Update preview and strength meter without full re-render
+				const preview = document.getElementById("password-preview");
+				if (preview) {
+					preview.textContent = password;
+				}
 
-        const strength = this.getPasswordStrength(password);
-        const barFill = document.querySelector('.strength-bar-fill');
-        if (barFill) {
-          barFill.style.width = `${strength.score}%`;
-          barFill.style.backgroundColor = strength.color;
-        }
+				const strength = this.getPasswordStrength(password);
+				const barFill = document.querySelector(".strength-bar-fill");
+				if (barFill) {
+					barFill.style.width = `${strength.score}%`;
+					barFill.style.backgroundColor = strength.color;
+				}
 
-        const label = document.querySelector('.strength-label');
-        if (label) {
-          label.textContent = strength.label;
-          label.style.color = strength.color;
-        }
+				const label = document.querySelector(".strength-label");
+				if (label) {
+					label.textContent = strength.label;
+					label.style.color = strength.color;
+				}
 
-        // Update length label
-        const lengthLabel = document.querySelector('.option-row label');
-        if (lengthLabel) {
-          lengthLabel.textContent = `Length: ${opts.length}`;
-        }
-      }
-    } catch {
-      this.showToast('Failed to generate password');
-    }
-  }
+				// Update length label
+				const lengthLabel = document.getElementById("gen-length-label");
+				if (lengthLabel) {
+					lengthLabel.textContent = `Length: ${opts.length}`;
+				}
+			}
+		} catch {
+			this.showToast("Failed to generate password");
+		}
+	}
 
-  attachEntryEvents() {
-    // Entry header clicks (expand/collapse)
-    document.querySelectorAll('.entry-header').forEach(header => {
-      const toggle = () => {
-        const card = header.closest('.entry-card');
-        const id = card.dataset.id;
-        this.toggleEntryExpansion(id);
-      };
-      header.onclick = toggle;
-      header.onkeydown = (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          toggle();
-        }
-      };
-    });
+	attachEntryEvents() {
+		// Entry header clicks (expand/collapse)
+		document.querySelectorAll(".entry-header").forEach((header) => {
+			const toggle = () => {
+				const card = header.closest(".entry-card");
+				const id = card.dataset.id;
+				this.toggleEntryExpansion(id);
+			};
+			header.onclick = toggle;
+			header.onkeydown = (event) => {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					toggle();
+				}
+			};
+		});
 
-    // Detail action buttons
-    document.querySelectorAll('.detail-btn, .action-btn').forEach(btn => {
-      btn.onclick = async (e) => {
-        e.stopPropagation();
-        const action = btn.dataset.action;
+		// Detail action buttons
+		document.querySelectorAll(".detail-btn, .action-btn").forEach((btn) => {
+			btn.onclick = async (e) => {
+				e.stopPropagation();
+				const action = btn.dataset.action;
 
-        switch (action) {
-          case 'copy-username': {
-            const ue = this.state.entries.find(e => e.id === btn.dataset.id);
-            await this.copyToClipboard(ue ? ue.username : '', 'Username copied!');
-            break;
-          }
-          case 'copy-password': {
-            const details = await this.getEntryDetails(btn.dataset.id);
-            if (details && details.password) {
-              await this.copyToClipboard(details.password, 'Password copied!', true);
-            }
-            break;
-          }
-          case 'toggle-password':
-            this.togglePasswordVisibility(btn.dataset.id);
-            break;
-          case 'go-to-url':
-            await this.goToUrl(btn.dataset.url);
-            break;
-          case 'autofill':
-            const entry = this.state.entries.find(e => e.id === btn.dataset.id);
-            if (entry) {
-              await this.autofill(entry);
-            }
-            break;
-          case 'copy-both':
-            const details = await this.getEntryDetails(btn.dataset.id);
-            if (details && details.password) {
-              await this.copyToClipboard(details.password, 'Password copied!', true);
-            }
-            break;
-        }
-      };
-    });
-  }
+				switch (action) {
+					case "copy-username": {
+						const ue = this.state.entries.find((e) => e.id === btn.dataset.id);
+						await this.copyToClipboard(
+							ue ? ue.username : "",
+							"Username copied!",
+						);
+						break;
+					}
+					case "copy-password": {
+						const details = await this.getEntryDetails(btn.dataset.id);
+						if (details && details.password) {
+							await this.copyToClipboard(
+								details.password,
+								"Password copied!",
+								true,
+							);
+						}
+						break;
+					}
+					case "toggle-password":
+						this.togglePasswordVisibility(btn.dataset.id);
+						break;
+					case "go-to-url":
+						await this.goToUrl(btn.dataset.url);
+						break;
+					case "autofill":
+						const entry = this.state.entries.find(
+							(e) => e.id === btn.dataset.id,
+						);
+						if (entry) {
+							await this.autofill(entry);
+						}
+						break;
+					case "copy-both":
+						const details = await this.getEntryDetails(btn.dataset.id);
+						if (details && details.password) {
+							await this.copyToClipboard(
+								details.password,
+								"Password copied!",
+								true,
+							);
+						}
+						break;
+				}
+			};
+		});
+	}
 
-  // === Utilities ===
+	// === Utilities ===
 
-  formatUrl(url) {
-    try {
-      const urlObj = new URL(url.startsWith('http') ? url : 'https://' + url);
-      return urlObj.hostname.replace('www.', '');
-    } catch {
-      return url;
-    }
-  }
+	formatUrl(url) {
+		try {
+			const urlObj = new URL(url.startsWith("http") ? url : "https://" + url);
+			return urlObj.hostname.replace("www.", "");
+		} catch {
+			return url;
+		}
+	}
 
-  escapeHtml(text) {
-    if (text === null || text === undefined) return '';
-    return String(text)
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;');
-  }
+	escapeHtml(text) {
+		if (text === null || text === undefined) return "";
+		return String(text)
+			.replaceAll("&", "&amp;")
+			.replaceAll("<", "&lt;")
+			.replaceAll(">", "&gt;")
+			.replaceAll('"', "&quot;")
+			.replaceAll("'", "&#39;");
+	}
 }
 
 // Initialize app

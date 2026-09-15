@@ -62,6 +62,11 @@ pub fn create_v1_0_5_digest_v3(entry_count: usize) -> DbFixture {
     // non-deterministic results under parallel test load — causing the
     // re-derived mac_key in verification tests to differ from the one used
     // to build the fixture.
+    //
+    // X6: 16384/1/1 is intentionally KEPT below the new import floor
+    // (19 MiB / t=2): it represents a vault from the old adaptive-floor era,
+    // exercising that the UNLOCK path still accepts historical parameters
+    // (only the backup-import path rejects them now).
     let params = crypto::kdf::AdaptiveParams {
         m_cost: 16384,
         t_cost: 1,
@@ -296,6 +301,7 @@ mod tests {
         let fixture = create_v1_0_5_digest_v3(3);
         assert_eq!(database::count_entries(&fixture.db).unwrap(), 3);
         // Recompute mac_key from fixture credentials using the same fixed params
+        // (X6: 16384/1/1 kept on purpose — see comment in create_v1_0_5_digest_v3).
         let salt = fixture.salt;
         let (master_key, _) = crypto::kdf::derive_key_with_params(
             FIXTURE_PASSWORD,

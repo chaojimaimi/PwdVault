@@ -22,6 +22,9 @@ pub enum VaultError {
     DatabaseError(String),
     InternalError(String),
     InvalidBackup(String),
+    /// X6: the backup's embedded KDF parameters are below the import-side
+    /// product floor (OWASP baseline). Rejected before any key derivation.
+    WeakKdfParams,
     InvalidInput { code: String, message: String },
     RateLimited { retry_after_secs: u64 },
 }
@@ -75,6 +78,10 @@ impl std::fmt::Display for VaultError {
             VaultError::DatabaseError(e) => write!(f, "Database error: {}", e),
             VaultError::InternalError(e) => write!(f, "Internal error: {}", e),
             VaultError::InvalidBackup(e) => write!(f, "Invalid backup: {}", e),
+            VaultError::WeakKdfParams => write!(
+                f,
+                "Backup KDF parameters are below the import policy floor"
+            ),
             VaultError::InvalidInput { code, message } => write!(f, "{}: {}", code, message),
             VaultError::RateLimited { retry_after_secs } => {
                 write!(
@@ -106,6 +113,8 @@ impl VaultError {
                 format!("Too many attempts. Retry in {}s", retry_after_secs)
             }
             VaultError::InvalidBackup(_) => "Invalid backup file".to_string(),
+            VaultError::WeakKdfParams => "This backup uses weak KDF parameters and is rejected by the import policy"
+                .to_string(),
             VaultError::InvalidInput { code, message } => format!("{}: {}", code, message),
             VaultError::EncryptionFailed(_)
             | VaultError::DecryptionFailed(_)

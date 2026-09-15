@@ -9,6 +9,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use socket2::{Domain, Protocol, Socket, Type};
+use std::net::SocketAddr;
 use tauri::Emitter;
 use zeroize::Zeroizing;
 
@@ -112,6 +114,48 @@ pub struct NativeResponse {
     pub retry_after: Option<u64>,
 }
 
+/// Build the listening socket with `SO_REUSEADDR` (X2).
+///
+/// std sets it on Windows but not on Unix, where a previous instance's
+/// TIME_WAIT sockets made quick app restarts fail with `AddrInUse`. socket2
+/// normalizes the behavior across all three platforms.
+fn bind_listener(addr: &SocketAddr) -> std::io::Result<TcpListener> {
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
+    socket.set_reuse_address(true)?;
+    socket.bind(&(*addr).into())?;
+    socket.listen(128)?;
+    Ok(TcpListener::from(socket))
+}
+
+/// Bind with a bounded retry schedule for `AddrInUse` only (X2): 1s / 2s / 4s,
+/// i.e. a worst case of ~7s before giving up. A live port holder is expected
+/// to release the port (app restart race), while permission errors must fail
+/// immediately. Persistent failure returns through the existing
+/// `native-server-error` emit path in the caller.
+fn bind_with_retry(addr: &SocketAddr) -> std::io::Result<TcpListener> {
+    const RETRY_DELAYS_MS: [u64; 3] = [1_000, 2_000, 4_000];
+    let mut attempt = 0usize;
+    loop {
+        match bind_listener(addr) {
+            Ok(listener) => return Ok(listener),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AddrInUse
+                    && attempt < RETRY_DELAYS_MS.len() =>
+            {
+                attempt += 1;
+                tracing::warn!(
+                    attempt,
+                    port = addr.port(),
+                    error = %error,
+                    "native messaging port busy; retrying bind"
+                );
+                std::thread::sleep(Duration::from_millis(RETRY_DELAYS_MS[attempt - 1]));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 /// Start the native messaging HTTP server
 ///
 /// Requests are processed by a fixed worker pool and bounded queue. This keeps
@@ -121,8 +165,11 @@ pub fn start_server(
     state: Arc<AppState>,
     app_handle: Option<tauri::AppHandle>,
 ) -> Result<(), String> {
-    let addr = format!("127.0.0.1:{}", port);
-    let listener = TcpListener::bind(&addr).map_err(|error| format!("Server error: {error}"))?;
+    let addr: SocketAddr = format!("127.0.0.1:{}", port)
+        .parse()
+        .map_err(|error| format!("Server error: {error}"))?;
+    let listener =
+        bind_with_retry(&addr).map_err(|error| format!("Server error: {error}"))?;
 
     tracing::info!(port = port, "native messaging server started");
 
@@ -846,6 +893,10 @@ mod tests {
     /// B3: when another listener already holds the port, `start_server` must
     /// fail with an error (which the app then surfaces in the UI) instead of
     /// silently running without the extension bridge.
+    ///
+    /// X2: the holder below is an ACTIVE listener, which `SO_REUSEADDR` does
+    /// not override on Unix — so the bounded bind retry runs its full
+    /// 1s + 2s + 4s schedule before failing. Expect this test to take ~7s.
     #[test]
     fn start_server_fails_when_port_is_already_bound() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");

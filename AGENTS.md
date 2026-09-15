@@ -2,10 +2,10 @@
 
 A secure, local-first password manager built with Tauri + React.
 
-**Last Updated**: 2026-07-21
+**Last Updated**: 2026-09-15
 **Repository**: https://github.com/chaojimaimi/PwdVault (Private)
 **Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.1.4
-**Current Version**: `v1.1.5` (release candidate)
+**Current Version**: `v1.1.5` (release candidate) — 2026-09 security audit fixes + Phase 0 hardening landed
 **Current Branch**: `main`
 
 ---
@@ -29,7 +29,11 @@ PwdVault/
 │   ├── api/
 │   │   └── vault.ts              # Unified Tauri/HTTP API client
 │   ├── context/
-│   │   └── AppContext.tsx        # Global state management
+│   │   ├── AppContext.tsx        # Provider composition bucket (useApp facade removed);
+│   │   │                         # state lives in the three Contexts below
+│   │   ├── AuthContext.tsx       # Unlock/session state
+│   │   ├── SettingsContext.tsx   # Auto-lock timeout, generator defaults
+│   │   └── VaultContext.tsx      # Entries/groups/selection
 │   ├── screens/
 │   │   ├── SetupScreen.tsx       # Initial vault creation
 │   │   ├── UnlockScreen.tsx      # Master password input
@@ -54,21 +58,19 @@ PwdVault/
 │       ├── clipboard.ts          # Clipboard with 30s auto-clear
 │       └── toast.ts              # Toast notification system
 │
-├── src-tauri/                    # Rust backend
-│   ├── src/
+├── src-tauri/                    # Rust backend (Cargo workspace)
+│   ├── src/                      # Tauri adapter layer (tauri-app crate)
 │   │   ├── main.rs               # Binary entry point
-│   │   ├── lib.rs                # Tauri commands + state + system tray
-│   │   ├── native_messaging.rs   # HTTP server (port 17429) for browser extension
-│   │   ├── paths.rs              # Shared path utilities (db path resolution)
-│   │   ├── crypto/               # Encryption module
-│   │   │   ├── mod.rs
-│   │   │   ├── cipher.rs         # AES-256-GCM encryption
-│   │   │   ├── kdf.rs            # Argon2id key derivation
-│   │   │   ├── keystore.rs       # In-memory key management
-│   │   │   └── verification.rs   # Password verification
-│   │   └── database/             # Database module
-│   │       └── mod.rs            # redb tables and operations
-│   ├── Cargo.toml                # Rust dependencies
+│   │   ├── lib.rs                # Tauri setup + state + system tray
+│   │   ├── commands.rs           # #[tauri::command] IPC wrappers (incl. touch_activity heartbeat)
+│   │   └── native_messaging.rs   # HTTP server (port 17429) for browser extension
+│   ├── crates/                   # Business-logic workspace members (§5.6.3)
+│   │   ├── domain/               # constants, DTOs, entities, validation
+│   │   ├── infrastructure/       # crypto (cipher/kdf/keystore/verification), redb database,
+│   │   │                         #   auth, pairing, paths, native_host_setup
+│   │   └── application/          # AppState, session, VaultError, services (incl. backup), fixtures
+│   ├── tests/                    # capability_contract.rs, golden_contract.rs
+│   ├── Cargo.toml                # Workspace root + tauri-app dependencies
 │   └── tauri.conf.json           # Tauri configuration
 │
 ├── extensions/                   # Browser extension
@@ -180,18 +182,18 @@ PwdVault/
 ### v0.1.0 Release (2026-03-27)
 - Initial release: Tauri v2 + React 5 screens, AES-256-GCM + Argon2id, redb, HTTP API, Chrome extension, CI/CD
 
-**Test Suite Summary:**
+**Test Suite Summary** (counts from actual test output, 2026-09-15):
 
 | Module | Tests | Command |
 |--------|-------|---------|
-| Rust (total) | 81 | `cd src-tauri && cargo test` |
-| crypto | 10 | cipher (4), kdf (3), keystore (2), verification (2) |
-| database | 5 | init, CRUD, list, count, delete, integrity |
-| lib.rs | 18+ | AppState, generate_password, VaultError, vault lifecycle, CRUD, export/import |
-| native_messaging | 20+ | 15 API endpoints + locked state checks + export/import |
-| Frontend (total) | 27 | `pnpm test` |
-| passwordStrength | 10 | scoring, penalties, edge cases |
-| vault API client | 7 | HTTP fallback, error handling, request structure |
+| Rust tauri-app lib | 28 | `cd src-tauri && cargo test` |
+| Rust capability contract | 1 | (same run) |
+| Rust golden contract | 2 | (same run) |
+| Rust application crate | 35 | `cd src-tauri && cargo test --workspace` |
+| Rust infrastructure crate | 51 | (same run) |
+| Rust domain crate | 4 | (same run) |
+| Rust native-host | 19 | `cd extensions/native-host && cargo test` |
+| Frontend (total) | 137 (38 files) | `pnpm test` |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -290,6 +292,42 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-09 (Security Audit + Phase 0 Hardening)
+
+**Three-way audit → verification → fixes** (backend / extension / desktop):
+- **Commits**: `a519ee1` (backend: integrity fail-open, init/port/blob paths),
+  `43ae1d3` (desktop: auto-lock activity reporting, clipboard/lock/dialog
+  hardening), `ad5cb61` (extension: deferred secret fetch, register-form
+  gating, autofill/pairing UX), `c557492` (follow-up: activity throttle from
+  auto-lock timeout, SPA register gating), `1da542b` (extension: keep live
+  pairing code across popup reopen)
+- Findings were re-verified against the code before each fix; regressions
+  covered by new unit tests on both Rust and frontend sides.
+
+**Phase 0 hardening (this release candidate):**
+- **X1** Extension handshake errors now distinguish "cannot reach the app"
+  (connection copy) from "protocol version mismatch" (upgrade copy), and
+  surface the desktop-provided error message when the host responds.
+- **X2** Native messaging listener binds with `SO_REUSEADDR` (socket2) plus a
+  bounded 1s/2s/4s retry for `AddrInUse` only — quick app restarts no longer
+  leave the extension bridge silently down.
+- **X3** `AccessibleDialog` keeps ONE owner-owned snapshot of the pre-dialog
+  background state; out-of-order dialog closes no longer leave `aria-hidden`
+  on `#root` (screen-reader regression).
+- **X4** Popup generator length label addressed by `id="gen-length-label"`
+  instead of fragile DOM-order selectors.
+- **X5** Tauri capabilities: `fs:allow-read-file/write-file/stat` scoped to
+  user locations (`$HOME/**`, `/Volumes/**`, `$TEMP/**`) with explicit deny
+  for the vault database directories (macOS `com.pwdvault.app`, Windows
+  `%LOCALAPPDATA%/PwdVault`).
+- **X6** Import-side KDF floor (19 MiB / t=2, OWASP baseline) enforced before
+  backup key derivation; unlock path deliberately unchanged so historical
+  vaults keep opening; `AdaptiveParams::adaptive` start clamped to the floor.
+  Behavior change: backups created by older versions on slow machines with
+  t=1 params are now rejected on import (re-export from the unlocked vault
+  to migrate).
+- **X7** AGENTS.md factual refresh (this document).
 
 ### 2026-05-01 (Phase G — v1.0.0 Release)
 **Tag**: `v1.0.0`
@@ -554,7 +592,7 @@ encrypted vault (redb)
 |------|------|
 | `extensions/native-host/src/main.rs` | Host binary: stdio↔HTTP bridge |
 | `extensions/chrome/src/background.js` | Extension: sendNativeMessage transport |
-| `src-tauri/src/native_host_setup.rs` | Manifest generation + browser registration |
+| `src-tauri/crates/infrastructure/src/native_host_setup.rs` | Manifest generation + browser registration |
 | `src-tauri/src/lib.rs` `register_native_host()` | Auto-register on startup (chmod +x, read IDs from config) |
 | `extensions/chrome/scripts/install-native-host.sh` | Write extension IDs to config file |
 

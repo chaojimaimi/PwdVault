@@ -13,8 +13,17 @@ const FOCUSABLE = [
 // A8: module-level coordination between stacked dialog instances.
 // `openCount` keeps the background inert until the LAST dialog closes;
 // `escapeStack` makes Escape close only the topmost (last registered) dialog.
+// X3: `snapshot` records the pre-dialog background aria-hidden state and the
+// focused element exactly once, owned by the instance that opened while
+// `openCount === 0` (the one that sets the background inert). Per-instance
+// snapshots would go stale on out-of-order closes: an inner dialog mounted
+// after the outer one would snapshot the outer dialog's own `aria-hidden
+// "true"` and later "restore" it, leaving the whole app invisible to screen
+// readers.
 let openCount = 0;
 const escapeStack: symbol[] = [];
+let snapshot: { ariaHidden: string | null; focused: HTMLElement | null } | null =
+  null;
 
 interface Props {
   isOpen: boolean;
@@ -43,11 +52,22 @@ export function AccessibleDialog({
 
   useEffect(() => {
     if (!isOpen) return;
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const root = document.getElementById('root');
-    const previousAriaHidden = root?.getAttribute('aria-hidden');
     const dialogId = Symbol('accessible-dialog');
     escapeStack.push(dialogId);
+    // X3: only the instance that opens on a clean count (the owner) takes the
+    // snapshot; inner dialogs must not overwrite it, otherwise an
+    // out-of-order close would restore the outer dialog's own background
+    // state instead of the original one.
+    if (openCount === 0) {
+      snapshot = {
+        ariaHidden: root?.getAttribute('aria-hidden') ?? null,
+        focused:
+          document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null,
+      };
+    }
     openCount += 1;
     // Only the FIRST dialog makes the background inert; stacked dialogs keep
     // it inert until the last one unmounts.
@@ -101,14 +121,17 @@ export function AccessibleDialog({
       openCount -= 1;
       const stackIndex = escapeStack.indexOf(dialogId);
       if (stackIndex !== -1) escapeStack.splice(stackIndex, 1);
-      // Restore background interactivity only when the LAST dialog closes;
-      // closing an inner dialog of a stack must keep the background inert.
-      if (openCount === 0) {
+      // X3: restore background interactivity, the original aria-hidden value,
+      // and focus ONLY when the last dialog closes and the snapshot exists
+      // (i.e. this instance is the owner). Closing an inner dialog of a
+      // stack must leave all three untouched.
+      if (openCount === 0 && snapshot) {
         root?.removeAttribute('inert');
-        if (previousAriaHidden == null) root?.removeAttribute('aria-hidden');
-        else root?.setAttribute('aria-hidden', previousAriaHidden);
+        if (snapshot.ariaHidden == null) root?.removeAttribute('aria-hidden');
+        else root?.setAttribute('aria-hidden', snapshot.ariaHidden);
+        snapshot.focused?.focus();
+        snapshot = null;
       }
-      previouslyFocused?.focus();
     };
   }, [isOpen, initialFocusSelector]);
 

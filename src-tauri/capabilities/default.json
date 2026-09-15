@@ -8,8 +8,41 @@
     "opener:default",
     "dialog:default",
     "fs:default",
-    "fs:allow-write-file",
-    "fs:allow-read-file",
-    "fs:allow-stat"
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "/Volumes/**" },
+        { "path": "$TEMP/**" }
+      ],
+      "deny": [
+        { "path": "$HOME/Library/Application Support/com.pwdvault.app/**" },
+        { "path": "$LOCALDATA/PwdVault/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "/Volumes/**" },
+        { "path": "$TEMP/**" }
+      ],
+      "deny": [
+        { "path": "$HOME/Library/Application Support/com.pwdvault.app/**" },
+        { "path": "$LOCALDATA/PwdVault/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-stat",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "/Volumes/**" },
+        { "path": "$TEMP/**" }
+      ],
+      "deny": [
+        { "path": "$HOME/Library/Application Support/com.pwdvault.app/**" },
+        { "path": "$LOCALDATA/PwdVault/**" }
+      ]
+    }
   ]
 }

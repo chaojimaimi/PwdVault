@@ -51,9 +51,14 @@ impl AdaptiveParams {
         let password = b"benchmark_password";
         let salt = [0u8; SALT_SIZE];
 
+        // X6: the starting point is clamped to the import-side floor so every
+        // newly generated parameter set (vault creation, export) satisfies the
+        // import policy — on a slow machine the benchmark loop below returns
+        // the starting point immediately, which previously could yield t=1
+        // backups that the importer would now reject ("generate-then-reject").
         let mut params = Self {
-            m_cost: 16384,
-            t_cost: 1,
+            m_cost: KdfPolicy::IMPORT_MIN_MEMORY_KIB,
+            t_cost: KdfPolicy::IMPORT_MIN_ITERATIONS,
             p_cost: 4,
         };
 
@@ -106,6 +111,24 @@ impl KdfPolicy {
     pub const MIN_PARALLELISM: u32 = 1;
     pub const MAX_PARALLELISM: u32 = 8;
     pub const MAX_MEMORY_TIME_COST: u64 = 1024 * 1024;
+
+    /// X6: import-side product floor (OWASP baseline: 19 MiB / t=2).
+    ///
+    /// Deliberately separate from `validate`: `validate` serves the UNLOCK
+    /// path and must keep accepting any historical parameter set stored in a
+    /// vault's verification row (including 16 MiB / t=1 from the old adaptive
+    /// floor), while the IMPORT path rejects backups whose embedded params
+    /// fall below this baseline.
+    pub const IMPORT_MIN_MEMORY_KIB: u32 = 19 * 1024;
+    pub const IMPORT_MIN_ITERATIONS: u32 = 2;
+
+    /// X6: import-policy check applied to the KDF params embedded in a
+    /// backup before any key derivation. Returns `true` when the params are
+    /// at or above the import floor.
+    pub fn meets_import_floor(params: &AdaptiveParams) -> bool {
+        params.m_cost >= Self::IMPORT_MIN_MEMORY_KIB
+            && params.t_cost >= Self::IMPORT_MIN_ITERATIONS
+    }
 
     pub fn validate(params: &AdaptiveParams) -> Result<(), KdfError> {
         if !(Self::MIN_MEMORY_KIB..=Self::MAX_MEMORY_KIB).contains(&params.m_cost) {
@@ -201,6 +224,43 @@ mod tests {
     fn test_adaptive_params() {
         let params = AdaptiveParams::adaptive(100);
         assert!(params.m_cost >= 16384);
+    }
+
+    /// X6: the adaptive starting point must never fall below the import-side
+    /// floor, so freshly generated vault/export parameters always satisfy the
+    /// import policy. A zero target makes the benchmark loop return the
+    /// starting point on its first pass, isolating the clamp.
+    #[test]
+    fn test_adaptive_start_clamped_to_import_floor() {
+        let params = AdaptiveParams::adaptive(0);
+        assert!(params.m_cost >= KdfPolicy::IMPORT_MIN_MEMORY_KIB);
+        assert!(params.t_cost >= KdfPolicy::IMPORT_MIN_ITERATIONS);
+    }
+
+    /// X6: the import floor accepts exactly the boundary values and rejects
+    /// anything one step below on either axis.
+    #[test]
+    fn test_import_floor_boundary() {
+        let at_floor = AdaptiveParams {
+            m_cost: KdfPolicy::IMPORT_MIN_MEMORY_KIB,
+            t_cost: KdfPolicy::IMPORT_MIN_ITERATIONS,
+            p_cost: 1,
+        };
+        assert!(KdfPolicy::meets_import_floor(&at_floor));
+
+        let weak_memory = AdaptiveParams {
+            m_cost: KdfPolicy::IMPORT_MIN_MEMORY_KIB - 1,
+            t_cost: KdfPolicy::IMPORT_MIN_ITERATIONS,
+            p_cost: 1,
+        };
+        assert!(!KdfPolicy::meets_import_floor(&weak_memory));
+
+        let weak_iterations = AdaptiveParams {
+            m_cost: KdfPolicy::IMPORT_MIN_MEMORY_KIB,
+            t_cost: KdfPolicy::IMPORT_MIN_ITERATIONS - 1,
+            p_cost: 1,
+        };
+        assert!(!KdfPolicy::meets_import_floor(&weak_iterations));
     }
 
     #[test]

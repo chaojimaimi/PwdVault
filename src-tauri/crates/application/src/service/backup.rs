@@ -235,6 +235,14 @@ pub fn import_vault(
     };
     crypto::kdf::KdfPolicy::validate(&params)
         .map_err(|_| VaultError::InvalidBackup("Invalid KDF parameters".to_string()))?;
+    // X6: import-side product floor — backups whose embedded KDF params fall
+    // below the OWASP baseline (19 MiB / t=2) are rejected before derivation.
+    // Deliberately stricter than the structural `validate` above and applied
+    // ONLY here: the unlock path (`verification.rs`) keeps accepting every
+    // historical parameter set so existing vaults keep unlocking.
+    if !crypto::kdf::KdfPolicy::meets_import_floor(&params) {
+        return Err(VaultError::WeakKdfParams);
+    }
     let (mut import_key, _params) =
         crypto::kdf::derive_key_with_params(import_password.as_str(), &salt_array, &params)?;
 
@@ -598,5 +606,78 @@ mod tests {
                 .saturating_add(5),
         );
         assert!(import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).is_err());
+    }
+
+    /// X6 helper: build a minimal VALID backup-v1 envelope whose KDF params
+    /// are fixed explicitly (v1 has no AAD, so the params are freely chosen
+    /// without breaking the ciphertext). Used to probe the import floor.
+    fn v1_backup_with_params(params: AdaptiveParams) -> VaultBackup {
+        let payload = BackupPayload {
+            entries: vec![],
+            groups: vec![],
+            settings: Settings::default(),
+        };
+        let payload_json = serde_json::to_vec(&payload).unwrap();
+        let salt = [0x42u8; 16];
+        let (key, _) =
+            crypto::kdf::derive_key_with_params(TEST_PASSWORD, &salt, &params).unwrap();
+        let encrypted = crypto::encrypt(&key, &payload_json).unwrap();
+        let b64 = base64::engine::general_purpose::STANDARD;
+        VaultBackup {
+            version: BACKUP_VERSION_V1,
+            created_at: 0,
+            magic: None,
+            kdf_name: None,
+            cipher_name: None,
+            salt: b64.encode(salt),
+            kdf_memory: params.m_cost,
+            kdf_iterations: params.t_cost,
+            kdf_parallelism: params.p_cost,
+            nonce: b64.encode(&encrypted.nonce),
+            data: b64.encode(&encrypted.ciphertext),
+        }
+    }
+
+    /// X6: a backup embedded with params exactly at the import floor
+    /// (19456 KiB / t=2) is accepted.
+    #[test]
+    fn import_accepts_backup_exactly_at_kdf_floor() {
+        let (state, _dir) = unlocked_state();
+        let backup = v1_backup_with_params(AdaptiveParams {
+            m_cost: crypto::kdf::KdfPolicy::IMPORT_MIN_MEMORY_KIB,
+            t_cost: crypto::kdf::KdfPolicy::IMPORT_MIN_ITERATIONS,
+            p_cost: 1,
+        });
+        let result =
+            import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
+        assert_eq!(result.entries_imported, 0);
+    }
+
+    /// X6: params one step below the floor on either axis (19455 KiB, or the
+    /// legacy t=1 shape) are rejected with the dedicated error — without ever
+    /// reaching key derivation.
+    #[test]
+    fn import_rejects_backup_below_kdf_floor() {
+        let (state, _dir) = unlocked_state();
+
+        let weak_memory = v1_backup_with_params(AdaptiveParams {
+            m_cost: crypto::kdf::KdfPolicy::IMPORT_MIN_MEMORY_KIB - 1,
+            t_cost: crypto::kdf::KdfPolicy::IMPORT_MIN_ITERATIONS,
+            p_cost: 1,
+        });
+        assert!(matches!(
+            import_vault(&state, weak_memory, Zeroizing::new(TEST_PASSWORD.to_string())),
+            Err(VaultError::WeakKdfParams)
+        ));
+
+        let weak_iterations = v1_backup_with_params(AdaptiveParams {
+            m_cost: crypto::kdf::KdfPolicy::IMPORT_MIN_MEMORY_KIB,
+            t_cost: crypto::kdf::KdfPolicy::IMPORT_MIN_ITERATIONS - 1,
+            p_cost: 1,
+        });
+        assert!(matches!(
+            import_vault(&state, weak_iterations, Zeroizing::new(TEST_PASSWORD.to_string())),
+            Err(VaultError::WeakKdfParams)
+        ));
     }
 }
