@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Change master password: the whole vault is re-encrypted in a single
+  transaction under a freshly benchmarked KDF parameter set, serialized
+  against concurrent writes through an exclusive session drain, and a
+  timestamped `.bak` of the database file is taken automatically. Enabling
+  recovery requires re-entering the recovery key as proof of custody.
+- Touch ID unlock (macOS): a random wrap key is stored in the macOS Keychain
+  under a biometric access control (current fingerprint set, this device
+  only); the master key is wrapped with AES-256-GCM and unlocked through the
+  same integrity verification chain as password unlock. Requires the current
+  master password to enable; legacy (unmigrated) vaults must migrate first.
+- Recovery key (Emergency Kit): a random 256-bit recovery key is shown exactly
+  once at enable time (copy or export as a text file). If the master password
+  is ever forgotten, the recovery key unlocks the vault and sets a new master
+  password — all from the lock screen, no other machine required.
+- New Security section in Settings and a recovery entry point on the lock
+  screen; all nine security commands are desktop-only and are never exposed
+  to the browser extension bridge.
+
 ### Security
 
 - Import policy: backups whose KDF parameters fall below the OWASP floor

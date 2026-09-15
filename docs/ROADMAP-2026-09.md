@@ -35,9 +35,15 @@ Phase 3 多设备云同步
 
 ## 2. 各阶段明细
 
-### Phase 0 — 安全与质量收尾（~1.5 天，随时可做）
+### Phase 0 — 安全与质量收尾（~1.5 天）✅ 已完成（2026-09-16，commits 6934bf8/519e0e2）
 
-审计与使用中发现、但未进入已修复范围的遗留项：
+遗留跟进项（Phase 1 code-review 记录，低成本硬化）：
+- `session.unlock` CAS 化：拒绝覆盖已解锁会话，消除 change_password/recover
+  排他窗口内并发 unlock 的"迟发布"残余竞态（code-review P2-1，触发条件苛刻）
+- recovery key / wrap_key 局部变量的 Zeroizing 卫生统一（code-review P3-1/2）
+- RecoveryScreen 增加恢复路径的 Touch ID 预告文案（code-review P3-6）
+
+原清单——审计与使用中发现、但未进入已修复范围的遗留项：
 
 | 项                                                      | 来源                     | 量级 |
 | ------------------------------------------------------- | ------------------------ | ---- |
