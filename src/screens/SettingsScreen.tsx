@@ -8,6 +8,7 @@ import { UnsavedChangesModal } from "../components/UnsavedChangesModal";
 import { UPDATE_CHECK_AVAILABLE } from "../api/vault";
 import { revokeExtensionAccess } from "../api/vault";
 import { AccessibleDialog } from "../components/AccessibleDialog";
+import { SecuritySettingsSection } from "../components/SecuritySettingsSection";
 
 const AUTO_LOCK_OPTIONS = [
 	{ label: "1 minute", value: 60 },
@@ -309,6 +310,11 @@ export function SettingsScreen() {
 						)}
 					</div>
 				</fieldset>
+
+				{/* Phase 1: master password change / Touch ID / recovery key.
+				    Owns its state and busy-guard, independent of the settings
+				    load status above. */}
+				<SecuritySettingsSection />
 			</div>
 
 			<div className="generator-actions">

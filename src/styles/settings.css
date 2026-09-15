@@ -134,3 +134,55 @@
   padding: 0;
   border: 0;
 }
+
+/* --- Security section (Phase 1: password change / Touch ID / recovery key) --- */
+
+.settings-subsection-title {
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: var(--space-md) 0 var(--space-sm);
+}
+
+.settings-subsection-title:first-of-type {
+  margin-top: 0;
+}
+
+.security-inline-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+  max-width: 24rem;
+}
+
+.security-inline-form label {
+  font-size: var(--text-label);
+  color: var(--color-text-secondary);
+}
+
+.security-status-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.security-enabled-badge {
+  font-size: var(--text-label);
+  font-weight: 600;
+  color: var(--color-success);
+}
+
+.recovery-key-display {
+  background: var(--color-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  margin: var(--space-sm) 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-mono);
+  color: var(--color-text);
+  word-break: break-all;
+  user-select: all;
+}

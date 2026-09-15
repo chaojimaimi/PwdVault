@@ -66,7 +66,15 @@ export type VaultError =
 
 // App State Types
 
-export type AppScreen = 'setup' | 'unlock' | 'vault' | 'entry' | 'generator' | 'groupManager' | 'settings' | 'importExport';
+export type AppScreen = 'setup' | 'unlock' | 'vault' | 'entry' | 'generator' | 'groupManager' | 'settings' | 'importExport' | 'recovery';
+
+// Phase 1 security: mirrors pwdvault_domain::BiometricStatus. `available` —
+// the platform can prompt for biometry (device support + enrollment);
+// `enabled` — the vault has a biometric wrap blob (Touch ID unlock set up).
+export interface BiometricStatus {
+  available: boolean;
+  enabled: boolean;
+}
 
 export interface VaultState {
   isInitialized: boolean;

@@ -5,6 +5,7 @@ import { useSettings } from "./context/SettingsContext";
 import { touchActivity } from "./api/vault";
 import { SetupScreen } from "./screens/SetupScreen";
 import { UnlockScreen } from "./screens/UnlockScreen";
+import { RecoveryScreen } from "./screens/RecoveryScreen";
 import { VaultScreen } from "./screens/VaultScreen";
 import { EntryScreen } from "./screens/EntryScreen";
 import { GeneratorScreen } from "./screens/GeneratorScreen";
@@ -108,6 +109,8 @@ function AppContent() {
 			return <SetupScreen />;
 		case "unlock":
 			return <UnlockScreen />;
+		case "recovery":
+			return <RecoveryScreen />;
 		case "vault":
 			return <VaultScreen />;
 		case "entry":

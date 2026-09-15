@@ -1,11 +1,18 @@
 import { createContext, useContext, useReducer, useEffect, useMemo, type ReactNode } from 'react';
 import type { AppScreen } from '../types';
 import * as api from '../api/vault';
+import { errorMessage } from '../utils/errorMessage';
 
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
   try { return JSON.stringify(error); } catch { return 'Unknown error'; }
+}
+
+// The Tauri layer rejects with the serialized VaultError enum; a dismissed
+// Touch ID prompt arrives as the plain string "BiometricCancelled".
+function isBiometricCancelled(error: unknown): boolean {
+  return errorMessage(error, '') === 'BiometricCancelled';
 }
 
 // ---------------------------------------------------------------------------
@@ -70,6 +77,8 @@ export interface AuthContextValue {
   actions: {
     initialize: (password: string) => Promise<void>;
     unlock: (password: string) => Promise<boolean>;
+    unlockBiometric: () => Promise<boolean>;
+    recover: (recoveryKey: string, newPassword: string) => Promise<boolean>;
     lock: () => Promise<void>;
     navigate: (screen: AppScreen) => void;
     retryBoot: () => Promise<void>;
@@ -99,6 +108,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void boot();
   }, []);
 
+  // Shared post-unlock transition (Phase 1): password unlock, Touch ID unlock,
+  // and vault recovery all land here. SettingsContext / VaultContext watch
+  // `isUnlocked` and perform the post-unlock state loading themselves.
+  const postUnlock = () => {
+    dispatch({ type: 'SET_UNLOCKED', payload: true });
+    dispatch({ type: 'SET_SCREEN', payload: 'vault' });
+  };
+
   const actions = useMemo(() => ({
     initialize: async (password: string) => {
       dispatch({ type: 'SET_LOADING', payload: true });
@@ -122,10 +139,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const success = await api.unlockVault(password);
         if (success) {
-          dispatch({ type: 'SET_UNLOCKED', payload: true });
-          dispatch({ type: 'SET_SCREEN', payload: 'vault' });
+          postUnlock();
         }
         return success;
+      } catch (error) {
+        dispatch({ type: 'SET_ERROR', payload: formatError(error) });
+        return false;
+      } finally {
+        dispatch({ type: 'SET_LOADING', payload: false });
+      }
+    },
+
+    // Touch ID unlock: the backend publishes the session keys itself, so
+    // success only needs the shared post-unlock transition. A dismissed
+    // Touch ID prompt is a normal outcome — stay silent, surface every
+    // other failure through state.error.
+    unlockBiometric: async () => {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      dispatch({ type: 'SET_ERROR', payload: null });
+      try {
+        await api.unlockBiometric();
+        postUnlock();
+        return true;
+      } catch (error) {
+        if (!isBiometricCancelled(error)) {
+          dispatch({ type: 'SET_ERROR', payload: formatError(error) });
+        }
+        return false;
+      } finally {
+        dispatch({ type: 'SET_LOADING', payload: false });
+      }
+    },
+
+    // Recovery unlock: recover_vault publishes the new session keys on
+    // success (vault ends up unlocked), so this mirrors `unlock`.
+    recover: async (recoveryKey: string, newPassword: string) => {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      dispatch({ type: 'SET_ERROR', payload: null });
+      try {
+        await api.recoverVault(recoveryKey, newPassword);
+        postUnlock();
+        return true;
       } catch (error) {
         dispatch({ type: 'SET_ERROR', payload: formatError(error) });
         return false;

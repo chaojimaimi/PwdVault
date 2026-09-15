@@ -1,10 +1,33 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../context/AppContext";
+import { biometricStatus, recoveryStatus } from "../api/vault";
+import type { BiometricStatus } from "../types";
 
 export function UnlockScreen() {
 	const { state, actions } = useAuth();
 	const [password, setPassword] = useState("");
 	const [localError, setLocalError] = useState<string | null>(null);
+	// Phase 1 affordances. Both probes fail silently: they only enable extra
+	// UI, so a transport failure must degrade to the plain password form
+	// (never show an error for a missing Touch ID / recovery option).
+	const [bioStatus, setBioStatus] = useState<BiometricStatus | null>(null);
+	const [recoveryEnabled, setRecoveryEnabled] = useState(false);
+
+	useEffect(() => {
+		let cancelled = false;
+		Promise.all([biometricStatus(), recoveryStatus()])
+			.then(([bio, recovery]) => {
+				if (cancelled) return;
+				setBioStatus(bio);
+				setRecoveryEnabled(recovery);
+			})
+			.catch(() => {
+				/* silently degrade: probes are optional affordances */
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -22,6 +45,14 @@ export function UnlockScreen() {
 		}
 	};
 
+	// Touch ID unlock: success transitions to the vault through the shared
+	// post-unlock path; BiometricCancelled (dismissed prompt) stays silent.
+	const handleTouchId = async () => {
+		setLocalError(null);
+		await actions.unlockBiometric();
+	};
+
+	const showTouchId = !!bioStatus?.available && !!bioStatus?.enabled;
 	const error = localError || state.error;
 
 	return (
@@ -70,6 +101,27 @@ export function UnlockScreen() {
 						)}
 					</button>
 				</form>
+
+				{showTouchId && (
+					<button
+						type="button"
+						className="btn btn-secondary btn-full"
+						onClick={() => void handleTouchId()}
+						disabled={state.isLoading}
+					>
+						Use Touch ID
+					</button>
+				)}
+
+				{recoveryEnabled && (
+					<button
+						type="button"
+						className="btn btn-link btn-full"
+						onClick={() => actions.navigate("recovery")}
+					>
+						Forgot password?
+					</button>
+				)}
 			</div>
 		</div>
 	);

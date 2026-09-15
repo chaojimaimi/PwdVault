@@ -1,4 +1,4 @@
-import type { CreateEntryRequest, UpdateEntryRequest, EntrySecretResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, UpdateInfo, Group } from '../types';
+import type { CreateEntryRequest, UpdateEntryRequest, EntrySecretResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, UpdateInfo, Group, BiometricStatus } from '../types';
 
 // Private-repository builds have no suitable unauthenticated release feed.
 // A release pipeline may explicitly enable this only after publishing a public,
@@ -139,4 +139,55 @@ export async function importVault(backup: VaultBackup, importPassword: string): 
 
 export async function checkForUpdates(): Promise<UpdateInfo> {
   return invoke('check_for_updates');
+}
+
+// Security operations (Phase 1) — Tauri-IPC only (D6, touch_activity
+// precedent). Password arguments use camelCase keys; Tauri v2 maps them onto
+// the snake_case parameters of the Rust commands (same convention as
+// generate_password above).
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+  recoveryKey?: string | null,
+): Promise<void> {
+  return invoke('change_password', {
+    currentPassword,
+    newPassword,
+    recoveryKey: recoveryKey ?? null,
+  });
+}
+
+export async function biometricStatus(): Promise<BiometricStatus> {
+  return invoke('biometric_status');
+}
+
+export async function enableBiometric(password: string): Promise<void> {
+  return invoke('enable_biometric', { password });
+}
+
+export async function disableBiometric(): Promise<void> {
+  return invoke('disable_biometric');
+}
+
+export async function unlockBiometric(): Promise<void> {
+  return invoke('unlock_biometric');
+}
+
+export async function recoveryStatus(): Promise<boolean> {
+  return invoke('recovery_status');
+}
+
+/** One-time plaintext recovery key (base64url, 43 chars). */
+export async function enableRecovery(password: string): Promise<string> {
+  return invoke('enable_recovery', { password });
+}
+
+export async function disableRecovery(currentPassword: string): Promise<void> {
+  return invoke('disable_recovery', { currentPassword });
+}
+
+/** Backend publishes the new session keys on success — no unlock call needed. */
+export async function recoverVault(recoveryKey: string, newPassword: string): Promise<void> {
+  return invoke('recover_vault', { recoveryKey, newPassword });
 }
