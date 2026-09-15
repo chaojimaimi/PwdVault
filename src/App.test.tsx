@@ -13,9 +13,15 @@ import { useAutoLockActivity } from './App';
 
 const mockTouchActivity = vi.mocked(touchActivity);
 
-function Harness({ enabled }: { enabled: boolean }) {
-  useAutoLockActivity(enabled);
-  return <div>activity harness</div>;
+function Harness({
+	enabled,
+	autoLockSecs = 600,
+}: {
+	enabled: boolean;
+	autoLockSecs?: number;
+}) {
+	useAutoLockActivity(enabled, autoLockSecs);
+	return <div>activity harness</div>;
 }
 
 function movePointer(): void {
@@ -51,14 +57,49 @@ describe('useAutoLockActivity (A1)', () => {
     expect(mockTouchActivity).toHaveBeenCalledTimes(2);
   });
 
-  it('does not report when disabled', () => {
-    render(<Harness enabled={false} />);
+	it('does not report when disabled', () => {
+		render(<Harness enabled={false} />);
 
-    movePointer();
-    fireEvent.keyDown(window, { key: 'Enter' });
+		movePointer();
+		fireEvent.keyDown(window, { key: 'Enter' });
 
-    expect(mockTouchActivity).not.toHaveBeenCalled();
-  });
+		expect(mockTouchActivity).not.toHaveBeenCalled();
+	});
+
+	it('throttles at half a short auto-lock timeout so activity beats the lock deadline', () => {
+		// P2-1 follow-up: with a 30s timeout the throttle must shrink to 15s;
+		// a fixed 60s throttle would let the lock thread fire before any
+		// report window reopens despite continuous user activity.
+		render(<Harness enabled autoLockSecs={30} />);
+
+		movePointer();
+		expect(mockTouchActivity).toHaveBeenCalledTimes(1);
+
+		// Still inside the 15s throttle window.
+		vi.advanceTimersByTime(10_000);
+		movePointer();
+		expect(mockTouchActivity).toHaveBeenCalledTimes(1);
+
+		// Past 15s the window reopens well before the 30s lock deadline.
+		vi.advanceTimersByTime(5_000);
+		movePointer();
+		expect(mockTouchActivity).toHaveBeenCalledTimes(2);
+	});
+
+	it('caps the throttle at one minute for long timeouts', () => {
+		render(<Harness enabled autoLockSecs={3600} />);
+
+		movePointer();
+		expect(mockTouchActivity).toHaveBeenCalledTimes(1);
+
+		vi.advanceTimersByTime(59_000);
+		movePointer();
+		expect(mockTouchActivity).toHaveBeenCalledTimes(1);
+
+		vi.advanceTimersByTime(2_000);
+		movePointer();
+		expect(mockTouchActivity).toHaveBeenCalledTimes(2);
+	});
 
   it('stops reporting after the vault locks', () => {
     const { rerender } = render(<Harness enabled />);

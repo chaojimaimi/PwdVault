@@ -7,6 +7,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+- Close a vault-integrity bypass: a deleted vault header no longer falls back
+  to silent legacy migration — unlock now fails closed with migration guidance,
+  the migration branch verifies any existing digest before re-baselining, and
+  plaintext record decoding is restricted to the legacy migration path so
+  injected plaintext entries can no longer be accepted at runtime. Users
+  upgrading from pre-1.0.5 vaults that were never opened by v1.0.5+ must first
+  migrate with PwdVault 1.1.4, or restore from a backup.
+- Refuse `init_vault` when a verification row already exists on disk,
+  preventing a startup race from overwriting an existing vault.
+- Alert in the UI when the extension bridge server cannot bind its port
+  (previously a silent log entry), since a pre-bound port could capture
+  unlock requests including the master password.
+- Cap decoded blob sizes (1 MiB) before bincode deserialization of on-disk
+  records, preventing allocation abuse from tampered databases.
+- Browser extension: the autofill prompt no longer prefetches the plaintext
+  password on page load — the secret is fetched only when the user clicks
+  Fill; authorization now uses the frame's own URL; register/change-password
+  forms gate automatic prompts; pairing codes are no longer auto-rotated on
+  a failed confirm; generator slider changes no longer spawn a native host
+  process per pixel.
+- Compare pairing codes and nonces in constant time; validate native-host
+  command names against a strict `[a-z_]` whitelist; cap update-check
+  response bodies at 1 MiB.
+
+### Fixed
+- Auto-lock now counts local user activity (typing, pointer) via a throttled
+  `touch_activity` IPC, not only vault API calls, so editing an entry no
+  longer risks a silent mid-edit lock and reload.
+- Clipboard auto-clear timers are reset on re-copy of the same value, and the
+  content-script variant compares digests instead of keeping plaintext in a
+  closure.
+- Manual lock uses try/finally so the UI always returns to the unlock screen
+  even if the backend call errors.
+- Floating autofill button positions correctly while scrolling and removes
+  itself when the login form disappears.
+- EntryScreen quick generator now honors the default generator settings.
+- Remove dead `KeyStore` module, unused strength color metadata, and
+  non-constant-time pairing comparisons; harden startup unwrap points
+  (`current_dir`, window icon) and add a re-entrancy guard to Restore
+  Backup; `AccessibleDialog` now supports nested dialogs (inert reference
+  counting, stack-top Escape handling).
+
 ## [1.1.5] - 2026-07-22
 
 ### Fixed

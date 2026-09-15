@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { AppProvider, useAuth } from "./context/AppContext";
+import { useSettings } from "./context/SettingsContext";
 import { touchActivity } from "./api/vault";
 import { SetupScreen } from "./screens/SetupScreen";
 import { UnlockScreen } from "./screens/UnlockScreen";
@@ -20,24 +21,32 @@ import "./styles/vault.css";
 import "./styles/groups.css";
 import "./styles/settings.css";
 
-// A1: report user activity to the backend auto-lock timer at most once per
-// minute. The timer previously advanced only on vault API traffic, so a user
-// who was reading (no vault operations) could be locked out mid-session.
-const ACTIVITY_THROTTLE_MS = 60_000;
+// A1: report user activity to the backend auto-lock timer so that reading or
+// editing locally (no vault operations) keeps the session alive. The throttle
+// is derived from the configured timeout in useAutoLockActivity — a fixed
+// value would race the lock thread at short timeouts.
+const MAX_ACTIVITY_THROTTLE_MS = 60_000;
 
 /**
  * Forward pointer/keyboard activity to `touch_activity` while the vault is
- * unlocked. Listeners are capture+passive (never block or reorder page
- * handling) and are removed as soon as the vault locks. Exported for tests.
+ * unlocked. Reports at most once per `min(60s, autoLockSecs / 2)` so a report
+ * window always opens strictly before the lock deadline can fire, even at the
+ * shortest configured timeouts. Listeners are capture+passive (never block or
+ * reorder page handling) and are removed as soon as the vault locks. Exported
+ * for tests.
  */
-export function useAutoLockActivity(enabled: boolean) {
+export function useAutoLockActivity(enabled: boolean, autoLockSecs: number) {
 	const lastReportRef = useRef(0);
 
 	useEffect(() => {
 		if (!enabled) return;
+		const throttleMs = Math.max(
+			5_000,
+			Math.min(MAX_ACTIVITY_THROTTLE_MS, autoLockSecs * 500),
+		);
 		const reportActivity = () => {
 			const now = Date.now();
-			if (now - lastReportRef.current < ACTIVITY_THROTTLE_MS) return;
+			if (now - lastReportRef.current < throttleMs) return;
 			lastReportRef.current = now;
 			// Failures are expected right after a lock (vault no longer
 			// unlocked) and must never surface as user-visible errors.
@@ -52,16 +61,19 @@ export function useAutoLockActivity(enabled: boolean) {
 			window.removeEventListener("pointerdown", reportActivity, options);
 			window.removeEventListener("keydown", reportActivity, options);
 		};
-	}, [enabled]);
+	}, [enabled, autoLockSecs]);
 }
 
 function AppContent() {
-	// AppContent subscribes only to AuthContext (§5.6.1). Screen routing depends
-	// solely on auth state; the screens themselves pull vault/settings directly.
+	// AppContent subscribes to AuthContext (§5.6.1): screen routing depends
+	// solely on auth state. The single SettingsContext read below feeds only
+	// the auto-lock activity throttle period; screens pull vault/settings
+	// directly.
 	const { state, actions } = useAuth();
+	const { state: settingsState } = useSettings();
 
 	// A1: keep the auto-lock timer alive on local user input while unlocked.
-	useAutoLockActivity(state.isUnlocked);
+	useAutoLockActivity(state.isUnlocked, settingsState.settings.auto_lock_secs);
 
 	if (state.isLoading) {
 		return (

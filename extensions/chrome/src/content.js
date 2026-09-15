@@ -1059,12 +1059,18 @@
   }
 
   // Re-anchor the button to the current password field (scroll/resize/SPA
-  // navigation) and remove it entirely once no login form remains.
+  // navigation) and remove it entirely once no login form remains. The
+  // register gate is rechecked here so an SPA navigation from a login page
+  // to a register page also removes an already-visible button.
   function positionFloatingButton() {
     if (!floatingButton) return;
 
     const loginForm = findLoginForm();
     if (!loginForm || !loginForm.passwordField) {
+      removeFloatingButton();
+      return;
+    }
+    if (loginForm.formType === FORM_TYPES.REGISTER) {
       removeFloatingButton();
       return;
     }
