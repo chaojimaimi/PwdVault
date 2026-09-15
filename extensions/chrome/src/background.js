@@ -5,6 +5,7 @@
 
 import { authorizeMessage, entryMatchesSenderUrl } from './sender-auth.js';
 import { createTokenStorage } from './token-storage.js';
+import { createPairNonceStorage } from './pair-nonce-storage.js';
 import { friendlyConnectionError, isAuthenticationError } from './connection-errors.js';
 
 // The native messaging host name; must match the "name" field in the manifest
@@ -18,11 +19,37 @@ const PROTOCOL_VERSION = 1;
 const TOKEN_STORAGE_KEY = 'pwdvault_api_token';
 const tokenStoragePromise = createTokenStorage(chrome.storage, TOKEN_STORAGE_KEY);
 
+// The pending pairing nonce is also persisted to session storage so
+// `pair_confirm` still works after the service worker is killed while the
+// user is typing the 6-digit code displayed by the desktop app.
+const PAIR_NONCE_STORAGE_KEY = 'pwdvault_pair_nonce';
+const pairNonceStoragePromise = createPairNonceStorage(chrome.storage, PAIR_NONCE_STORAGE_KEY);
+
 let connectionStatus = 'disconnected';
 let requestId = 0;
 let apiToken = null;
 let pendingPairNonce = null;
 let lastConnectionError = null;
+
+// Memory cache stays the fast path; session storage is the suspension-proof
+// backing store (same pattern as saveToken/restoreToken above).
+function savePendingPairNonce(nonce) {
+  pendingPairNonce = nonce || null;
+  void pairNonceStoragePromise
+    .then(storage => storage.save(nonce))
+    .catch(() => {});
+}
+
+async function restorePendingPairNonce() {
+  if (pendingPairNonce) return pendingPairNonce;
+  try {
+    const storage = await pairNonceStoragePromise;
+    pendingPairNonce = await storage.load();
+  } catch {
+    // ignore — memory-only fallback
+  }
+  return pendingPairNonce;
+}
 
 // Persist in trusted-context-only storage. Session storage survives MV3 worker
 // suspension but intentionally clears on browser restart. If a browser cannot
@@ -112,7 +139,7 @@ async function pairWithApp() {
         return 'paired';
       }
       if (data.data.pending) {
-        pendingPairNonce = data.data.session_nonce || null;
+        savePendingPairNonce(data.data.session_nonce || null);
         if (!pendingPairNonce) return 'failed';
         return 'needs_code';
       }
@@ -125,20 +152,24 @@ async function pairWithApp() {
   }
 }
 
-// Submit the user-entered 6-digit code to complete pairing.
+// Submit the user-entered 6-digit code to complete pairing. The nonce is
+// re-read from storage so a suspended-and-restarted service worker can still
+// finish a pairing session. A failed attempt keeps the nonce so the user can
+// retry the same code; only success clears it.
 async function pairConfirm(code) {
-  if (!pendingPairNonce) return false;
+  const nonce = await restorePendingPairNonce();
+  if (!nonce) return false;
   try {
     const data = await sendNativeMessageP({
       id: 0,
       protocol_version: PROTOCOL_VERSION,
       command: 'pair_confirm',
       code,
-      session_nonce: pendingPairNonce,
+      session_nonce: nonce,
     });
     if (data && data.success && data.data && data.data.token) {
       saveToken(data.data.token);
-      pendingPairNonce = null;
+      savePendingPairNonce(null);
       return true;
     }
     return false;
@@ -361,12 +392,13 @@ async function getEntryForSender(id, senderUrl) {
 async function getEntriesForUrl(url) {
   const entries = await getEntries();
   const urlObj = new URL(url);
-  const domain = urlObj.hostname.replace('www.', '');
+  // Anchored so only a leading "www." is stripped (matches sender-auth.js).
+  const domain = urlObj.hostname.replace(/^www\./, '');
 
   return entries.filter(entry => {
     if (!entry.url) return false;
     try {
-      const entryDomain = new URL(entry.url).hostname.replace('www.', '');
+      const entryDomain = new URL(entry.url).hostname.replace(/^www\./, '');
       return entryDomain === domain;
     } catch {
       return false;

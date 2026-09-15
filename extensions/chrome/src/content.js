@@ -21,9 +21,12 @@
     /login/i, /sign.?in/i, /log.?in/i, /submit/i, /enter/i,
     /continue/i, /next/i, /auth/i, /go/i
   ];
-  // Patterns for registration/change password forms
+  // Patterns for registration/change password forms. Deliberately narrow
+  // ("create an account", "join now") — bare /create/i and /join/i matched
+  // ordinary login pages ("Sign in or create a workspace") and mislabelled
+  // them as register forms.
   const REGISTER_PATTERNS = [
-    /register/i, /sign.?up/i, /create/i, /join/i, /new.?account/i
+    /register/i, /sign.?up/i, /create\s+(an\s+)?account/i, /join\s+now/i, /new.?account/i
   ];
   const CHANGE_PASSWORD_PATTERNS = [
     /change.?pass/i, /update.?pass/i, /new.?pass/i, /reset.?pass/i,
@@ -51,6 +54,19 @@
     return FORM_TYPES.LOGIN;
   }
 
+  // Pick the login password field from every password input on the page:
+  // 1. autocomplete="current-password" wins outright;
+  // 2. a single password field is unambiguous — take it;
+  // 3. multiple unlabelled fields (register / change-password layouts) fall
+  //    back to the first, with the formType gate deciding whether any
+  //    automatic fill is allowed.
+  function selectPasswordField(passwordInputs) {
+    const explicit = passwordInputs.find(
+      input => (input.getAttribute('autocomplete') || '').toLowerCase() === 'current-password'
+    );
+    return explicit || passwordInputs[0];
+  }
+
   function findLoginForm() {
     const passwordInputs = Array.from(document.querySelectorAll('input[type="password"]'));
 
@@ -58,52 +74,49 @@
       return null;
     }
 
-    // Try to find the associated username field
-    for (const passwordInput of passwordInputs) {
-      const form = passwordInput.closest('form');
-      const container = form || passwordInput.closest('div, section, article') || document.body;
+    const passwordInput = selectPasswordField(passwordInputs);
 
-      // Detect form type
-      const formType = detectFormType(container);
+    const form = passwordInput.closest('form');
+    const container = form || passwordInput.closest('div, section, article') || document.body;
 
-      // Look for username field
-      const textInputs = Array.from(container.querySelectorAll('input'))
-        .filter(input => USERNAME_INPUT_TYPES.includes(input.type) && input !== passwordInput);
+    // Detect form type
+    const formType = detectFormType(container);
 
-      // Sort by position (above the password field)
-      const passwordRect = passwordInput.getBoundingClientRect();
+    // Look for username field
+    const textInputs = Array.from(container.querySelectorAll('input'))
+      .filter(input => USERNAME_INPUT_TYPES.includes(input.type) && input !== passwordInput);
 
-      const usernameCandidates = textInputs.filter(input => {
-        const rect = input.getBoundingClientRect();
-        return rect.top < passwordRect.top + 50; // Within 50px above
-      });
+    // Sort by position (above the password field)
+    const passwordRect = passwordInput.getBoundingClientRect();
 
-      // Score by patterns
-      let usernameField = null;
-      let bestScore = -1;
+    const usernameCandidates = textInputs.filter(input => {
+      const rect = input.getBoundingClientRect();
+      return rect.top < passwordRect.top + 50; // Within 50px above
+    });
 
-      for (const input of usernameCandidates) {
-        const score = scoreInput(input, USERNAME_PATTERNS);
-        if (score > bestScore) {
-          bestScore = score;
-          usernameField = input;
-        }
+    // Score by patterns
+    let usernameField = null;
+    let bestScore = -1;
+
+    for (const input of usernameCandidates) {
+      const score = scoreInput(input, USERNAME_PATTERNS);
+      if (score > bestScore) {
+        bestScore = score;
+        usernameField = input;
       }
-
-      // Find submit button
-      const submitButton = findSubmitButton(container);
-
-      return {
-        passwordField: passwordInput,
-        usernameField,
-        submitButton,
-        form,
-        formType,
-        container
-      };
     }
 
-    return null;
+    // Find submit button
+    const submitButton = findSubmitButton(container);
+
+    return {
+      passwordField: passwordInput,
+      usernameField,
+      submitButton,
+      form,
+      formType,
+      container
+    };
   }
 
   function scoreInput(input, patterns) {
@@ -273,14 +286,29 @@
   // Clipboard with auto-clear
   // ============================================================================
 
+  // Handle of the pending clear timer. Copying again cancels the previous
+  // timer so the 30s window restarts from the most recent copy instead of an
+  // old timer wiping the fresh value early.
+  let activeClearTimer = null;
+
+  async function digestText(text) {
+    const bytes = new TextEncoder().encode(text);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
   async function copyWithTimeout(text, timeoutMs = 30000) {
     try {
       await navigator.clipboard.writeText(text);
 
-      setTimeout(async () => {
+      if (activeClearTimer) clearTimeout(activeClearTimer);
+      // Compare digests instead of plaintext so the copied secret never
+      // lingers in a closure (same approach as the popup script).
+      const expectedDigest = await digestText(text);
+      activeClearTimer = setTimeout(async () => {
         try {
           const current = await navigator.clipboard.readText();
-          if (current === text) {
+          if (await digestText(current) === expectedDigest) {
             await navigator.clipboard.writeText('');
           }
         } catch {
@@ -300,6 +328,23 @@
 
   let notificationBar = null;
 
+  // Renders an error inside the existing prompt bar without dismissing it,
+  // so the user can retry Fill after e.g. unlocking the vault.
+  function showAutoFillPromptError(message) {
+    if (!notificationBar) return;
+    const text = notificationBar.querySelector('.pv-text');
+    if (!text) return;
+
+    let errorEl = notificationBar.querySelector('.pv-error');
+    if (!errorEl) {
+      errorEl = document.createElement('span');
+      errorEl.className = 'pv-error';
+      text.appendChild(errorEl);
+    }
+    errorEl.textContent = message;
+  }
+
+  // entry is a summary (id/title/username) — never a decrypted entry.
   function showAutoFillPrompt(entry) {
     hideNotificationBar();
 
@@ -356,6 +401,10 @@
       #pwdvault-autofill-bar .pv-subtitle {
         font-size: 12px;
         color: #888;
+      }
+      #pwdvault-autofill-bar .pv-error {
+        font-size: 12px;
+        color: #f87171;
       }
       #pwdvault-autofill-bar .pv-actions {
         display: flex;
@@ -427,9 +476,42 @@
 
     notificationBar.appendChild(actions);
 
+    // The bar only ever receives an entry summary (title/username, no
+    // password). The secret is fetched here, at click time, through the
+    // background's URL-scoped gate, and dropped after autofill — so a page
+    // load never pulls plaintext credentials into the content script.
     notificationBar.querySelector('#pv-fill').addEventListener('click', async () => {
-      hideNotificationBar();
-      autofillLogin(entry.username, entry.password);
+      const fillBtn = notificationBar && notificationBar.querySelector('#pv-fill');
+      if (fillBtn) fillBtn.disabled = true;
+
+      try {
+        const full = await chrome.runtime.sendMessage({
+          type: 'GET_ENTRY',
+          id: entry.id
+        });
+
+        if (!full || full.error) {
+          showAutoFillPromptError(
+            full && full.error && /lock/i.test(full.error)
+              ? 'Vault is locked — unlock PwdVault and try again'
+              : (full && full.error) || 'Failed to fetch the entry. Try again.'
+          );
+          return;
+        }
+
+        hideNotificationBar();
+        autofillLogin(full.username, full.password);
+      } catch (error) {
+        const message = error && error.message ? error.message : '';
+        showAutoFillPromptError(
+          /lock/i.test(message)
+            ? 'Vault is locked — unlock PwdVault and try again'
+            : 'Failed to fetch the entry. Try again.'
+        );
+      } finally {
+        // No-op once the bar is hidden; keeps Fill usable after an error.
+        if (fillBtn && notificationBar) fillBtn.disabled = false;
+      }
     });
 
     notificationBar.querySelector('#pv-dismiss').addEventListener('click', () => {
@@ -866,6 +948,11 @@
 
     const loginForm = findLoginForm();
     if (!loginForm || !loginForm.passwordField) return;
+    // Register pages never get the floating button. Gating here (not at the
+    // call sites) covers all three callers: checkForAutoFillPrompt, the init
+    // ready callback, and the MutationObserver callback. Explicit user
+    // actions (popup fill, overlay, context menu) are unaffected.
+    if (loginForm.formType === FORM_TYPES.REGISTER) return;
 
     entryCount = entries ? entries.length : 0;
 
@@ -925,9 +1012,11 @@
       <span id="pwdvault-badge"></span>
     `;
 
-    // Position near password field
+    // Position near password field. The button is position:fixed, so it
+    // takes viewport coordinates — adding window.scrollY would push it
+    // off-screen below the fold on scrolled pages.
     const rect = loginForm.passwordField.getBoundingClientRect();
-    floatingButton.style.top = `${window.scrollY + rect.top - 50}px`;
+    floatingButton.style.top = `${rect.top - 50}px`;
     floatingButton.style.right = '20px';
 
     floatingButton.addEventListener('click', (e) => {
@@ -962,6 +1051,45 @@
     }
   }
 
+  function removeFloatingButton() {
+    if (floatingButton) {
+      floatingButton.remove();
+      floatingButton = null;
+    }
+  }
+
+  // Re-anchor the button to the current password field (scroll/resize/SPA
+  // navigation) and remove it entirely once no login form remains.
+  function positionFloatingButton() {
+    if (!floatingButton) return;
+
+    const loginForm = findLoginForm();
+    if (!loginForm || !loginForm.passwordField) {
+      removeFloatingButton();
+      return;
+    }
+
+    const rect = loginForm.passwordField.getBoundingClientRect();
+    floatingButton.style.top = `${rect.top - 50}px`;
+  }
+
+  // Simple timestamp throttle — no library, no timer leak; trailing calls
+  // within the window are dropped because the next event will reposition.
+  function throttle(fn, waitMs) {
+    let lastRun = 0;
+    return () => {
+      const now = Date.now();
+      if (now - lastRun >= waitMs) {
+        lastRun = now;
+        fn();
+      }
+    };
+  }
+
+  const repositionFloatingButton = throttle(positionFloatingButton, 200);
+  window.addEventListener('scroll', repositionFloatingButton, { passive: true });
+  window.addEventListener('resize', repositionFloatingButton, { passive: true });
+
   // ============================================================================
   // Keyboard Shortcuts
   // ============================================================================
@@ -982,6 +1110,11 @@
     const loginForm = findLoginForm();
     if (!loginForm || !loginForm.passwordField) return;
 
+    // Register pages never get the automatic prompt bar. Explicit fill paths
+    // (popup, overlay, context menu) stay available; the floating button has
+    // its own register gate, so skipping both calls here is safe.
+    if (loginForm.formType === FORM_TYPES.REGISTER) return;
+
     try {
       const entries = await chrome.runtime.sendMessage({
         type: 'GET_ENTRIES_FOR_URL',
@@ -989,14 +1122,10 @@
       });
 
       if (entries && !entries.error && entries.length === 1) {
-        // Exactly one matching entry - show prompt
-        const entry = await chrome.runtime.sendMessage({
-          type: 'GET_ENTRY',
-          id: entries[0].id
-        });
-        if (entry && !entry.error) {
-          showAutoFillPrompt(entry);
-        }
+        // Exactly one matching entry - show the prompt from the summary only
+        // (title/username, no password). The plaintext secret is fetched at
+        // Fill-click time inside showAutoFillPrompt, not on page load.
+        showAutoFillPrompt(entries[0]);
       }
 
       // Update floating button with entry count
@@ -1025,11 +1154,6 @@
       case 'SHOW_POPUP':
         showOverlay();
         sendResponse({ success: true });
-        break;
-
-      case 'DETECT_FORM':
-        const form = findLoginForm();
-        sendResponse({ hasForm: !!form, formType: form?.formType });
         break;
 
       case 'VAULT_LOCKED':
@@ -1075,7 +1199,12 @@
   const observer = new MutationObserver(() => {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      if (!floatingButton) {
+      if (floatingButton) {
+        // SPA navigation can move or remove the form while the button is
+        // already on screen — re-anchor it, or remove it when the form is
+        // gone.
+        positionFloatingButton();
+      } else {
         createFloatingButton();
         checkForAutoFillPrompt();
       }

@@ -1,6 +1,11 @@
 // PwdVault Popup Script - Enhanced with Groups, Generator UI, and Theme Switching
 import Fuse from './fuse.min.mjs';
 
+// Handle of the pending clipboard auto-clear timer. Copying again cancels
+// the previous timer so the 30s window restarts from the most recent copy
+// (same pattern as the desktop app's clipboard utility).
+let activeClearTimer = null;
+
 class PopupApp {
   constructor() {
     this.state = {
@@ -192,8 +197,9 @@ class PopupApp {
       await navigator.clipboard.writeText(text);
 
       if (autoClear) {
+        if (activeClearTimer) clearTimeout(activeClearTimer);
         const expectedDigest = await this.digestText(text);
-        setTimeout(async () => {
+        activeClearTimer = setTimeout(async () => {
           try {
             const current = await navigator.clipboard.readText();
             if (await this.digestText(current) === expectedDigest) {
@@ -852,8 +858,11 @@ class PopupApp {
           this.state.pairingStarted = false;
           await this.init();
         } else {
+          // Keep pairingStarted=true: resetting it here would make the next
+          // render auto-call startPairing(), invalidating the code the
+          // desktop app is still displaying. The user retries the same code
+          // or requests a new one explicitly via "Get New Code".
           this.state.error = (result && result.error) || 'Invalid or expired code';
-          this.state.pairingStarted = false;
           this.render();
         }
       };
@@ -1151,11 +1160,19 @@ class PopupApp {
       };
     }
 
-    // Length slider
+    // Length slider — while dragging, only update the display and state.
+    // Generation fires on `change` (release): every `input` event used to
+    // spawn a native-messaging host process, one per pixel of drag.
     const lengthSlider = document.getElementById('gen-length');
     if (lengthSlider) {
       lengthSlider.oninput = (e) => {
         this.state.generatorOptions.length = parseInt(e.target.value);
+        const lengthLabel = document.querySelector('.option-row label');
+        if (lengthLabel) {
+          lengthLabel.textContent = `Length: ${this.state.generatorOptions.length}`;
+        }
+      };
+      lengthSlider.onchange = () => {
         this.handleGenerate();
       };
     }

@@ -12,6 +12,16 @@ describe('extension sender authorization', () => {
     expect(() => authorizeMessage({ type: 'EXPORT_VAULT' }, sender, RUNTIME_ID)).toThrow();
   });
 
+  it('prefers the frame URL (sender.url) over the top-level tab URL', () => {
+    const sender = {
+      id: RUNTIME_ID,
+      url: 'https://login.example.com/inline-frame',
+      tab: { url: 'https://top.example.com/page' },
+    };
+    expect(authorizeMessage({ type: 'GET_ENTRY', id: 'entry-1' }, sender, RUNTIME_ID))
+      .toEqual({ senderKind: 'content', senderUrl: 'https://login.example.com/inline-frame' });
+  });
+
   it('rejects cross-domain entry IDs before secret retrieval', () => {
     expect(entryMatchesSenderUrl({ url: 'https://example.com/account' }, 'https://www.example.com/login'))
       .toBe(true);

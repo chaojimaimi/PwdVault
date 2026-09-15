@@ -23,7 +23,11 @@ export function authorizeMessage(message, sender, runtimeId) {
   const senderKind = classifySender(sender, runtimeId);
   if (senderKind === 'popup') return { senderKind, senderUrl: null };
   if (senderKind === 'content' && CONTENT_SCRIPT_COMMANDS.has(message?.type)) {
-    return { senderKind, senderUrl: sender.tab.url };
+    // Authorize against the frame URL (sender.url) — the document that
+    // actually sent the message. For top-level frames it equals tab.url, and
+    // if all_frames is ever enabled the authorization stays on the right
+    // frame instead of the top-level page.
+    return { senderKind, senderUrl: sender.url || sender.tab.url };
   }
   throw new Error('Message sender is not authorized for this operation');
 }
