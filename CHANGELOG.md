@@ -7,6 +7,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- Import policy: backups whose KDF parameters fall below the OWASP floor
+  (19 MiB / 2 iterations) are now rejected at import. Vault unlock is
+  unaffected — vaults created with legacy parameters keep unlocking; newly
+  generated exports/parameters always meet the floor. Note: backups exported
+  by old versions on very slow machines (t=1) can no longer be re-imported —
+  unlock the vault and re-export to produce a compliant backup.
+- Narrow the WebView filesystem scope: import/export can only read/write the
+  user's home directory tree, external volumes, and temp folders, and can
+  never touch the vault's own data directory (macOS Library path and Windows
+  LOCALAPPDATA), limiting blast radius if the WebView is compromised.
+
+### Fixed
+- The extension server now binds its port with SO_REUSEADDR and retries
+  address-in-use errors (1s/2s/4s), surviving the TIME_WAIT window after an
+  app restart; other bind errors fail fast into the existing warning toast.
+- Pairing errors are no longer misleading: a host-launch failure shows
+  "Cannot reach the PwdVault desktop app…", a server rejection shows the
+  server's message, and only a real protocol mismatch shows the
+  update-your-app guidance.
+- Nested dialogs closing out of order no longer leave the app invisible to
+  screen readers (inert/aria-hidden snapshot is owned by the first dialog
+  and restored only when the last one closes).
+- The extension generator slider label is addressed by id instead of a
+  fragile DOM-order selector.
+
+### Security
 
 - Close a vault-integrity bypass: a deleted vault header no longer falls back
   to silent legacy migration — unlock now fails closed with migration guidance,
