@@ -150,3 +150,14 @@ pub struct UpdateInfo {
     pub release_notes: String,
     pub download_url: String,
 }
+
+/// Biometric unlock availability (Phase 1).
+///
+/// `available` — the platform credential store can prompt for biometry
+/// (device support + enrolled biometry). `enabled` — the vault has a
+/// biometric wrap blob, i.e. Touch ID unlock was set up for this vault.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BiometricStatus {
+    pub available: bool,
+    pub enabled: bool,
+}

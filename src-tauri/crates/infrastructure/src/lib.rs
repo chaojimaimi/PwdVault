@@ -8,6 +8,7 @@
 pub mod auth;
 pub mod crypto;
 pub mod database;
+pub mod keychain;
 pub mod native_host_setup;
 pub mod pairing;
 pub mod paths;

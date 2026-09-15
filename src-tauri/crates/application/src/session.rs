@@ -44,6 +44,12 @@ enum SessionInner {
         /// Used by [`SessionLease`] to detect that the session changed
         /// (lock → re-unlock) while the lease was held.
         generation: u64,
+        /// Phase 1 (D5): biometric wrap key, cached ONLY by the session that
+        /// unlocked via Touch ID. Deliberately a session slot — never an
+        /// AppState field — so a password-derived session naturally has none,
+        /// a republish (key change) naturally drops it, and locking naturally
+        /// zeroizes it.
+        wrap_key: Option<SecretKey>,
     },
 }
 
@@ -87,6 +93,10 @@ impl VaultSession {
             mac_key: mac_key.into(),
             last_activity: Mutex::new(Instant::now()),
             generation: next_generation,
+            // A fresh session never carries a wrap key; only
+            // [`VaultSession::set_wrap_key`] installs one after a
+            // successful Touch ID unlock (D5).
+            wrap_key: None,
         };
     }
 
@@ -121,6 +131,35 @@ impl VaultSession {
         let inner = self.inner.read().expect("session lock poisoned");
         if let SessionInner::Unlocked { last_activity, .. } = &*inner {
             *last_activity.lock().expect("activity lock poisoned") = Instant::now();
+        }
+    }
+
+    /// Cache the biometric wrap key into the current Unlocked session (D5).
+    ///
+    /// Must only be called after a successful Touch ID unlock. If the session
+    /// has been locked (or replaced) meanwhile, the key is dropped — a Locked
+    /// session never stores wrap keys.
+    pub fn set_wrap_key(&self, wrap_key: SecretKey) {
+        let mut inner = self.inner.write().expect("session lock poisoned");
+        if let SessionInner::Unlocked { wrap_key: slot, .. } = &mut *inner {
+            *slot = Some(wrap_key);
+        }
+        // Locked: `wrap_key` is dropped here and zeroized.
+    }
+
+    /// Get the cached biometric wrap key, if this session unlocked via
+    /// Touch ID. Returns `None` when the caller must fall back to the
+    /// credential store (which may prompt).
+    ///
+    /// The 32-byte copy is intended for immediate wrap/unwrap use; it is
+    /// never written to disk or logs by any caller in this codebase.
+    pub fn cached_wrap_key(&self) -> Option<[u8; 32]> {
+        let inner = self.inner.read().expect("session lock poisoned");
+        match &*inner {
+            SessionInner::Unlocked {
+                wrap_key: Some(key), ..
+            } => Some(*key.as_ref()),
+            _ => None,
         }
     }
 
@@ -191,12 +230,15 @@ impl VaultSession {
             SessionInner::Unlocked {
                 enc_key,
                 mac_key,
+                last_activity,
+                wrap_key,
                 generation,
-                ..
             } => {
-                // SecretKey zeroizes both values when they are dropped here.
+                // All secret material zeroizes when dropped here.
                 drop(enc_key);
                 drop(mac_key);
+                drop(last_activity);
+                drop(wrap_key);
                 *inner = SessionInner::Locked { generation };
                 true
             }
@@ -392,6 +434,32 @@ mod tests {
     fn test_exclusive_lock_on_already_locked() {
         let session = VaultSession::new();
         assert!(!session.exclusive_lock_and_clear());
+    }
+
+    /// Phase 1 (D5): the wrap key slot lives only in the session that
+    /// unlocked via Touch ID — a republish (session.unlock) drops it and an
+    /// exclusive lock zeroizes it.
+    #[test]
+    fn test_wrap_key_slot_lifecycle() {
+        let session = VaultSession::new();
+        session.unlock(TEST_ENC_KEY, TEST_MAC_KEY);
+        assert_eq!(session.cached_wrap_key(), None);
+
+        session.set_wrap_key(SecretKey::new([0xCC; 32]));
+        assert_eq!(session.cached_wrap_key(), Some([0xCC_u8; 32]));
+
+        // Republish (e.g. change_password) rebuilds the session without it.
+        session.unlock(TEST_ENC_KEY, TEST_MAC_KEY);
+        assert_eq!(session.cached_wrap_key(), None);
+
+        session.set_wrap_key(SecretKey::new([0xDD; 32]));
+        // Locking clears the slot entirely.
+        assert!(session.exclusive_lock_and_clear());
+        assert_eq!(session.cached_wrap_key(), None);
+
+        // set_wrap_key on a Locked session is a silent no-op (key dropped).
+        session.set_wrap_key(SecretKey::new([0xEE; 32]));
+        assert_eq!(session.cached_wrap_key(), None);
     }
 
     #[test]

@@ -44,5 +44,21 @@ tracing = "0.1"
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
 
+# macOS Keychain + LocalAuthentication for biometric unlock (Phase 1).
+# Platform-scoped like winreg above so Windows/Linux builds never pull them.
+# - security-framework: SecItem dictionary path (ACLs are not exposed by the
+#   high-level `passwords` module); OSX_10_15 enables kSecUseDataProtectionKeychain.
+# - objc2-local-authentication: LAContext canEvaluatePolicy availability check.
+#   objc2 0.6 is already in the dependency tree (0.6.4), so no extra copy.
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = { version = "3", features = ["OSX_10_15"] }
+security-framework-sys = { version = "2", features = ["OSX_10_15"] }
+core-foundation = "0.10"
+objc2 = "0.6"
+objc2-local-authentication = { version = "0.3", default-features = false, features = [
+    "std",
+    "LAContext",
+] }
+
 [dev-dependencies]
 tempfile = "3"

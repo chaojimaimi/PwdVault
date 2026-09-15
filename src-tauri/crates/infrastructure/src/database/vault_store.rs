@@ -106,6 +106,50 @@ pub fn save_verification_data_in_txn(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Opaque blob rows (Phase 1 wrap blobs: "bio_wrap", "recovery_wrap")
+// ---------------------------------------------------------------------------
+
+/// Save an opaque blob row in VAULT_TABLE within an existing write transaction.
+///
+/// The blob is already ciphertext (AES-GCM, self-authenticating), so no
+/// encryption happens here. Always call through [`VaultStore::write`] so the
+/// integrity digest covers the change.
+pub fn save_blob_in_txn(
+    txn: &WriteTransaction,
+    key: &str,
+    blob: &[u8],
+) -> Result<(), DatabaseError> {
+    let mut table = txn.open_table(super::VAULT_TABLE)?;
+    table.insert(key, blob)?;
+    Ok(())
+}
+
+/// Load an opaque blob row from VAULT_TABLE (keyless read).
+///
+/// No key is required: the blob is GCM ciphertext whose authenticity is
+/// checked at unwrap time, and disk-level tampering is caught by the
+/// integrity digest on unlock.
+pub fn load_blob(db: &Database, key: &str) -> Result<Option<Vec<u8>>, DatabaseError> {
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(super::VAULT_TABLE)?;
+    match table.get(key)? {
+        Some(value) => {
+            super::check_encoded_blob_size(value.value())?;
+            Ok(Some(value.value().to_vec()))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Remove an opaque blob row within an existing write transaction.
+/// Returns whether the row existed. Use through [`VaultStore::write`].
+pub fn remove_blob_in_txn(txn: &WriteTransaction, key: &str) -> Result<bool, DatabaseError> {
+    let mut table = txn.open_table(super::VAULT_TABLE)?;
+    let existed = table.remove(key)?.is_some();
+    Ok(existed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +222,69 @@ mod tests {
 
         // The entry should still be there (rollback)
         assert_eq!(super::super::count_entries(&db).unwrap(), 1);
+    }
+
+    /// Phase 1 (P1.2): blob rows round-trip through VaultStore::write and the
+    /// digest covers them; removal keeps the digest consistent.
+    #[test]
+    fn test_blob_rows_roundtrip_and_remove_with_digest() {
+        let temp = NamedTempFile::new().unwrap();
+        let db = super::super::init_database(temp.path()).unwrap();
+        let store = VaultStore::new(&db);
+
+        assert!(load_blob(&db, "bio_wrap").unwrap().is_none());
+
+        let blob = vec![7u8; 64];
+        store
+            .write(&TEST_MAC_KEY, |txn| {
+                save_blob_in_txn(txn, "bio_wrap", &blob)?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(integrity::verify_integrity(&db, &TEST_MAC_KEY).unwrap());
+        assert_eq!(load_blob(&db, "bio_wrap").unwrap().as_deref(), Some(blob.as_slice()));
+
+        store
+            .write(&TEST_MAC_KEY, |txn| {
+                assert!(remove_blob_in_txn(txn, "bio_wrap")?);
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(integrity::verify_integrity(&db, &TEST_MAC_KEY).unwrap());
+        assert!(load_blob(&db, "bio_wrap").unwrap().is_none());
+        // Second remove reports absence.
+        store
+            .write(&TEST_MAC_KEY, |txn| {
+                assert!(!remove_blob_in_txn(txn, "bio_wrap")?);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    /// Blob writes that skip VaultStore::write leave the digest stale —
+    /// exactly the property D8 relies on: plain transactions must not be used
+    /// for blob rows.
+    #[test]
+    fn test_plain_txn_blob_write_breaks_digest() {
+        let temp = NamedTempFile::new().unwrap();
+        let db = super::super::init_database(temp.path()).unwrap();
+        let store = VaultStore::new(&db);
+
+        store
+            .write(&TEST_MAC_KEY, |txn| {
+                save_blob_in_txn(txn, "bio_wrap", &[1, 2, 3])?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(integrity::verify_integrity(&db, &TEST_MAC_KEY).unwrap());
+
+        // Bypass the digest refresh.
+        let txn = db.begin_write().unwrap();
+        save_blob_in_txn(&txn, "bio_wrap", &[9, 9, 9]).unwrap();
+        txn.commit().unwrap();
+
+        assert!(!integrity::verify_integrity(&db, &TEST_MAC_KEY).unwrap());
     }
 }

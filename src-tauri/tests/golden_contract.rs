@@ -74,6 +74,18 @@ fn tauri_ipc_commands() -> HashSet<&'static str> {
         "export_vault",
         "import_vault",
         "check_for_updates",
+        // Phase 1 security operations — desktop-only (D6): they drive the
+        // local credential store / touch the session state machine and must
+        // never be reachable from the browser extension.
+        "change_password",
+        "biometric_status",
+        "enable_biometric",
+        "disable_biometric",
+        "unlock_biometric",
+        "recovery_status",
+        "enable_recovery",
+        "disable_recovery",
+        "recover_vault",
     ]
     .into_iter()
     .collect()
@@ -155,10 +167,19 @@ fn adapter_only_commands_are_documented() {
     assert_eq!(
         ipc_only,
         vec![
+            &"biometric_status",
+            &"change_password",
+            &"disable_biometric",
+            &"disable_recovery",
+            &"enable_biometric",
+            &"enable_recovery",
             &"get_entry_meta",
             &"is_vault_initialized",
             &"is_vault_unlocked",
-            &"touch_activity"
+            &"recover_vault",
+            &"recovery_status",
+            &"touch_activity",
+            &"unlock_biometric",
         ],
         "IPC-only command set changed — update this test if intentional"
     );

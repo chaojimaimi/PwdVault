@@ -3,6 +3,7 @@
 pub mod backup;
 pub mod entries;
 pub mod groups;
+pub mod security;
 pub mod settings;
 pub mod update;
 pub mod utils;
@@ -14,6 +15,11 @@ pub use entries::{
     remove_entry, update_entry,
 };
 pub use groups::{create_group, list_all_groups, remove_group, update_group};
+pub use security::{
+    biometric_status, change_password, complete_unlock, derive_master_for_unlock,
+    disable_biometric, disable_recovery, enable_biometric, enable_recovery, recover_vault,
+    recovery_status, unlock_biometric, verify_master_and_integrity,
+};
 pub use settings::{get_settings, update_settings};
 pub use update::{cancel_update_check, check_for_updates};
 pub use utils::generate_password;

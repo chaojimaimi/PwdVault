@@ -21,6 +21,9 @@ bincode = "1"
 
 # Crypto types appear in signatures (SecretKey, VerificationData)
 zeroize = { version = "1", features = ["derive", "serde"] }
+# Constant-time comparison for the master-key verification helper (same
+# primitive verification.rs uses; single shared version in the workspace).
+subtle = "2"
 
 # Database handle leaks through get_db() (pragmatic; see §5.6.3 analysis)
 redb = "2"

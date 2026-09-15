@@ -244,6 +244,103 @@ pub async fn check_for_updates(
         .map_err(|e| VaultError::InternalError(format!("update check join error: {}", e)))?
 }
 
+// ---------------------------------------------------------------------------
+// Security operations (Phase 1) — Tauri-IPC only (D6, touch_activity precedent)
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn change_password(
+    current_password: Zeroizing<String>,
+    new_password: Zeroizing<String>,
+    recovery_key: Option<String>,
+    state: State<'_, AppHandle>,
+) -> Result<(), VaultError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        app::change_password(&state, current_password, new_password, recovery_key)
+    })
+    .await
+    .map_err(|e| VaultError::InternalError(format!("change password task join error: {}", e)))?
+}
+
+#[tauri::command]
+pub fn biometric_status(
+    state: State<'_, AppHandle>,
+) -> Result<pwdvault_domain::BiometricStatus, VaultError> {
+    app::biometric_status(state.inner(), state.inner().secret_store.as_ref())
+}
+
+#[tauri::command]
+pub async fn enable_biometric(
+    password: Zeroizing<String>,
+    state: State<'_, AppHandle>,
+) -> Result<(), VaultError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        app::enable_biometric(&state, password, state.secret_store.as_ref())
+    })
+    .await
+    .map_err(|e| VaultError::InternalError(format!("enable biometric task join error: {}", e)))?
+}
+
+#[tauri::command]
+pub fn disable_biometric(state: State<'_, AppHandle>) -> Result<(), VaultError> {
+    app::disable_biometric(state.inner(), state.inner().secret_store.as_ref())
+}
+
+#[tauri::command]
+pub async fn unlock_biometric(state: State<'_, AppHandle>) -> Result<(), VaultError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        app::unlock_biometric(&state, state.secret_store.as_ref())
+    })
+    .await
+    .map_err(|e| VaultError::InternalError(format!("biometric unlock task join error: {}", e)))?
+}
+
+#[tauri::command]
+pub fn recovery_status(state: State<'_, AppHandle>) -> Result<bool, VaultError> {
+    app::recovery_status(state.inner())
+}
+
+#[tauri::command]
+pub async fn enable_recovery(
+    password: Zeroizing<String>,
+    state: State<'_, AppHandle>,
+) -> Result<String, VaultError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        app::enable_recovery(&state, password)
+    })
+    .await
+    .map_err(|e| VaultError::InternalError(format!("enable recovery task join error: {}", e)))?
+}
+
+#[tauri::command]
+pub async fn disable_recovery(
+    current_password: Zeroizing<String>,
+    state: State<'_, AppHandle>,
+) -> Result<(), VaultError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || app::disable_recovery(&state, current_password))
+        .await
+        .map_err(|e| VaultError::InternalError(format!("disable recovery task join error: {}", e)))?
+}
+
+#[tauri::command]
+pub async fn recover_vault(
+    recovery_key: String,
+    new_password: Zeroizing<String>,
+    state: State<'_, AppHandle>,
+) -> Result<(), VaultError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        app::recover_vault(&state, &recovery_key, new_password)
+    })
+    .await
+    .map_err(|e| VaultError::InternalError(format!("recover vault task join error: {}", e)))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

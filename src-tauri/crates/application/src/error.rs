@@ -27,6 +27,26 @@ pub enum VaultError {
     WeakKdfParams,
     InvalidInput { code: String, message: String },
     RateLimited { retry_after_secs: u64 },
+    // --- Phase 1 (change password / Touch ID / recovery key) ---
+    /// The platform cannot offer biometric unlock right now (unsupported,
+    /// not enrolled, or the stored credentials are out of sync).
+    BiometricUnavailable,
+    /// The user dismissed the Touch ID prompt.
+    BiometricCancelled,
+    /// Biometry is locked out after repeated failed attempts.
+    BiometricLockedOut,
+    /// A stored wrap blob failed authentication/parsing (tampered, corrupt,
+    /// or out of sync with the credential store).
+    WrapBlobCorrupt,
+    /// The pasted recovery key has a bad format or does not match the vault.
+    RecoveryKeyInvalid,
+    /// No recovery wrap blob exists for this vault.
+    RecoveryNotEnabled,
+    /// The "current master password" field of a settings operation is wrong.
+    CurrentPasswordInvalid,
+    /// The platform credential store failed in an unexpected way. The string
+    /// carries user guidance only — never secret material.
+    KeychainError(String),
 }
 
 impl From<DomainError> for VaultError {
@@ -62,6 +82,17 @@ impl From<DatabaseError> for VaultError {
     }
 }
 
+impl From<pwdvault_infrastructure::crypto::WrapError> for VaultError {
+    fn from(e: pwdvault_infrastructure::crypto::WrapError) -> Self {
+        match e {
+            pwdvault_infrastructure::crypto::WrapError::InvalidBlob => VaultError::WrapBlobCorrupt,
+            pwdvault_infrastructure::crypto::WrapError::RecoveryKeyInvalid => {
+                VaultError::RecoveryKeyInvalid
+            }
+        }
+    }
+}
+
 impl std::fmt::Display for VaultError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -90,6 +121,27 @@ impl std::fmt::Display for VaultError {
                     retry_after_secs
                 )
             }
+            VaultError::BiometricUnavailable => write!(
+                f,
+                "Biometric unlock is not available or is out of sync with this vault"
+            ),
+            VaultError::BiometricCancelled => write!(f, "Touch ID was cancelled"),
+            VaultError::BiometricLockedOut => write!(
+                f,
+                "Biometric authentication is locked out. Unlock with your master password and try again"
+            ),
+            VaultError::WrapBlobCorrupt => write!(
+                f,
+                "Stored credential blob is corrupt or out of sync. Disable and re-enable the affected unlock method"
+            ),
+            VaultError::RecoveryKeyInvalid => write!(f, "Recovery key is invalid"),
+            VaultError::RecoveryNotEnabled => {
+                write!(f, "Recovery key is not enabled for this vault")
+            }
+            VaultError::CurrentPasswordInvalid => {
+                write!(f, "Current password is incorrect")
+            }
+            VaultError::KeychainError(e) => write!(f, "Keychain error: {}", e),
         }
     }
 }
@@ -120,6 +172,31 @@ impl VaultError {
             | VaultError::DecryptionFailed(_)
             | VaultError::DatabaseError(_)
             | VaultError::InternalError(_) => "Internal error".to_string(),
+            VaultError::BiometricUnavailable => {
+                "Biometric unlock is not available on this device or is out of sync with this vault. \
+                Unlock with your master password and set it up again"
+                    .to_string()
+            }
+            VaultError::BiometricCancelled => "Touch ID was cancelled".to_string(),
+            VaultError::BiometricLockedOut => {
+                "Biometric authentication is locked out. Unlock with your master password and try again"
+                    .to_string()
+            }
+            VaultError::WrapBlobCorrupt => {
+                "Stored credential is corrupt or out of sync. Unlock with your master password, \
+                then disable and re-enable the affected unlock method in Settings"
+                    .to_string()
+            }
+            VaultError::RecoveryKeyInvalid => {
+                "Recovery key is invalid. Check the saved key and try again".to_string()
+            }
+            VaultError::RecoveryNotEnabled => {
+                "Recovery key is not enabled for this vault".to_string()
+            }
+            VaultError::CurrentPasswordInvalid => {
+                "Current password is incorrect".to_string()
+            }
+            VaultError::KeychainError(e) => format!("Keychain error: {}", e),
         }
     }
 }

@@ -14,6 +14,7 @@ use redb::Database;
 
 use pwdvault_domain::constants::AUTO_LOCK_SECS;
 use pwdvault_infrastructure::crypto::VerificationData;
+use pwdvault_infrastructure::keychain::{SecretStore, platform_default};
 
 use crate::error::VaultError;
 use crate::session::{SessionLease, VaultSession};
@@ -45,6 +46,11 @@ pub struct AppState {
     pub pair_last_reset: Mutex<Option<Instant>>,
     /// Cancellation flag for the in-flight update check (§5.6.2).
     pub update_check_cancel: AtomicBool,
+    /// Phase 1: platform credential store for the biometric wrap key
+    /// (macOS Keychain; `UnavailableSecretStore` stub elsewhere). Tests
+    /// replace this field with a `MemorySecretStore` — commands need no
+    /// platform special-casing.
+    pub secret_store: Arc<dyn SecretStore>,
 }
 
 impl AppState {
@@ -107,6 +113,7 @@ impl Default for AppState {
             pair_request_count: Mutex::new(0),
             pair_last_reset: Mutex::new(None),
             update_check_cancel: AtomicBool::new(false),
+            secret_store: platform_default(),
         }
     }
 }

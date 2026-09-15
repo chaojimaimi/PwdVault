@@ -308,6 +308,16 @@ pub fn run() {
             commands::export_vault,
             commands::import_vault,
             commands::check_for_updates,
+            // Phase 1 security operations — Tauri IPC only (D6).
+            commands::change_password,
+            commands::biometric_status,
+            commands::enable_biometric,
+            commands::disable_biometric,
+            commands::unlock_biometric,
+            commands::recovery_status,
+            commands::enable_recovery,
+            commands::disable_recovery,
+            commands::recover_vault,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -27,6 +27,7 @@ pub use validation::ValidationPolicy;
 // Re-export domain types that adapters commonly need, so they can depend on
 // `pwdvault_application` alone without also naming `pwdvault_domain`.
 pub use pwdvault_domain::{
-    BackupPayload, CreateEntryRequest, EntrySecretResponse, EntrySummary, ExportEntry, Group,
-    ImportResult, PasswordEntry, Settings, UpdateEntryRequest, UpdateInfo, VaultBackup,
+    BackupPayload, BiometricStatus, CreateEntryRequest, EntrySecretResponse, EntrySummary,
+    ExportEntry, Group, ImportResult, PasswordEntry, Settings, UpdateEntryRequest, UpdateInfo,
+    VaultBackup,
 };

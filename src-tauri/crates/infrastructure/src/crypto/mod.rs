@@ -9,6 +9,7 @@
 pub mod cipher;
 pub mod kdf;
 pub mod verification;
+pub mod wrap;
 
 // Re-export commonly used types and functions
 pub use cipher::{
@@ -18,6 +19,10 @@ pub use kdf::{derive_key, derive_key_with_params, generate_salt, AdaptiveParams,
 pub use verification::{
     create_verification_header, unlock_with_password, verify_password, VerificationData,
     VerificationError,
+};
+pub use wrap::{
+    generate_recovery_key, generate_wrap_key, recovery_wrap_key, unwrap_secret, wrap_secret,
+    WrapError, WRAP_AAD_BIO, WRAP_AAD_RECOVERY,
 };
 
 use zeroize::Zeroizing;

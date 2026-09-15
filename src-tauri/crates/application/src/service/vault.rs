@@ -1,12 +1,14 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use crate::{AppState, VaultError};
 use pwdvault_domain::constants;
-use pwdvault_infrastructure::crypto::{self, create_verification_header, unlock_with_password};
+use pwdvault_infrastructure::crypto::{self, create_verification_header};
 use pwdvault_infrastructure::database::{self, load_settings, Settings};
 use pwdvault_infrastructure::paths;
+
+use super::security::{complete_unlock, derive_master_for_unlock, verify_master_and_integrity};
 
 /// Check if the rate limiter is currently blocking unlock attempts.
 pub fn check_rate_limit(state: &AppState) -> Result<(), VaultError> {
@@ -196,8 +198,8 @@ pub fn unlock_vault(
     password: Zeroizing<String>,
 ) -> Result<bool, VaultError> {
     // §5.1.3: Two-phase unlock — keys are NOT published until ALL
-    // verification completes. Any error before step 8 leaves the vault
-    // in the Locked state.
+    // verification completes. Any error before the publish step leaves the
+    // vault in the Locked state.
 
     // Step 1: Check rate limit
     check_rate_limit(state)?;
@@ -210,114 +212,27 @@ pub fn unlock_vault(
         .ok_or(VaultError::VaultLocked)?
         .clone();
 
-    // Step 2: Verify password and derive keys in local variables.
-    // The keys stay in local scope — they are NOT published to the session yet.
-    let keys = unlock_with_password(password.as_str(), &verification_data)?;
+    // Step 2: Verify password and derive the master key (single Argon2 pass,
+    // same constant-time header check as `unlock_with_password` — the master
+    // key is kept for the legacy-transparency migration branch).
+    let master_key =
+        match derive_master_for_unlock(password.as_str(), &verification_data)? {
+            Some(master_key) => master_key,
+            None => {
+                record_failed_attempt(state);
+                return Ok(false);
+            }
+        };
 
     // `password` zeroizes on drop here.
 
-    let (enc_key, mac_key) = match keys {
-        Some(k) => k,
-        None => {
-            record_failed_attempt(state);
-            return Ok(false);
-        }
-    };
+    // Steps 3-7: subkey derivation, header read/version check, integrity
+    // verification (or legacy migration), settings validation. Nothing is
+    // published yet.
+    let (enc_key, mac_key) = verify_master_and_integrity(state, &master_key)?;
 
-    // Step 3: Acquire database handle
-    let db = get_db(state)?;
-
-    // Step 4: Read and verify the AEAD-authenticated vault header (§5.1.4).
-    // The header determines whether this is a legacy DB that needs migration,
-    // or a modern DB that must fail-closed on integrity issues.
-    let header = pwdvault_infrastructure::vault_header::load_header(&db, enc_key.as_ref())?;
-    if header
-        .as_ref()
-        .is_some_and(|value| !pwdvault_infrastructure::vault_header::is_supported(value))
-    {
-        return Err(VaultError::InvalidBackup(
-            "Database format is newer than this application".to_string(),
-        ));
-    }
-    // Step 5-6: Verify integrity and migrate if needed.
-    match header.as_ref() {
-        // Modern database with integrity_required=true.
-        // §5.1.4: Missing or unknown digest → REJECT (no auto-migration).
-        Some(value) if value.integrity_required => {
-            if !database::integrity::has_digest(&db)? {
-                tracing::error!("integrity_required but digest missing — possible tampering");
-                return Err(VaultError::InvalidBackup(
-                    "Database integrity check failed".to_string(),
-                ));
-            }
-            if database::integrity::needs_digest_rebuild(&db)? {
-                // Unknown digest version → REJECT (not auto-rebuild)
-                tracing::error!("integrity_required but digest version unknown — possible downgrade");
-                return Err(VaultError::InvalidBackup(
-                    "Database integrity check failed".to_string(),
-                ));
-            }
-            if !database::integrity::verify_integrity(&db, mac_key.as_ref())? {
-                // Digest mismatch → tampering detected → REJECT
-                return Err(VaultError::InvalidBackup(
-                    "Database integrity check failed".to_string(),
-                ));
-            }
-        }
-        // Header present but integrity not yet enforced: one-time legacy
-        // migration. If a digest is already stored it must match BEFORE the
-        // migration runs — otherwise a downgrade header (e.g. spliced in from
-        // an old backup) could launder tampered records by silently rebuilding
-        // the digest baseline (B1 fail-closed).
-        Some(_) => {
-            if database::integrity::has_digest(&db)?
-                && !database::integrity::verify_integrity(&db, mac_key.as_ref())?
-            {
-                tracing::error!("legacy migration blocked: stored digest does not match contents");
-                return Err(VaultError::InvalidBackup(
-                    "Database integrity check failed".to_string(),
-                ));
-            }
-            tracing::info!("migrating database from legacy format");
-            let steps = database::migrations::plan(
-                0,
-                pwdvault_infrastructure::vault_header::VAULT_FORMAT_VERSION,
-            )?;
-            if steps != vec![database::migrations::MigrationStep::LegacyToV1] {
-                return Err(VaultError::InvalidBackup(
-                    "Unsupported database migration path".to_string(),
-                ));
-            }
-            let (mut master_key, _) = crypto::kdf::derive_key_with_params(
-                password.as_str(),
-                &verification_data.salt,
-                &verification_data.params,
-            )?;
-            let migrate_result =
-                migrate_database(&db, &master_key, enc_key.as_ref(), mac_key.as_ref());
-            master_key.zeroize();
-            migrate_result?; // Error = stay Locked
-        }
-        // No header at all: fail closed (B1). Treating a missing header as
-        // "legacy, migrate silently" would let anyone with file write access
-        // delete one row and rebuild the integrity baseline over injected
-        // records. Pre-1.0.5 vaults must be migrated explicitly with
-        // PwdVault 1.1.4.
-        None => return Err(VaultError::LegacyVaultRequiresMigration),
-    }
-
-    // Step 7: Load and validate settings
-    let settings = load_settings(&db)?;
-
-    // Step 8: Atomically publish UnlockedSession — THE LAST STEP.
-    // Only now are the keys exposed to other threads.
-    state.session.unlock(enc_key, mac_key);
-
-    // Step 9: Reset rate limit and start activity timer
-    reset_rate_limit(state);
-    *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
-    state.touch_activity();
-    state.update_lock_menu("Lock Vault");
+    // Steps 8-9: publish + side effects — THE LAST STEP.
+    complete_unlock(state, enc_key, mac_key)?;
 
     Ok(true)
 }
@@ -341,11 +256,10 @@ pub fn lock_vault(state: &Arc<AppState>) {
 ///
 /// All writes (steps 2-5) happen in a single VaultStore transaction (§5.1.2).
 ///
-/// Unlock no longer triggers this automatically (B1 fail-closed): it is kept
-/// for tests and for a future explicit migration tool only, hence the
-/// `dead_code` allowance in non-test builds.
-#[cfg_attr(not(test), allow(dead_code))]
-fn migrate_database(
+/// Unlock no longer triggers this automatically (B1 fail-closed); it is
+/// reached through `verify_master_and_integrity` (password path) and kept
+/// callable for tests and a future explicit migration tool.
+pub(crate) fn migrate_database(
     db: &Arc<redb::Database>,
     master_key: &[u8; 32],
     enc_key: &[u8; 32],
@@ -354,18 +268,7 @@ fn migrate_database(
     use pwdvault_infrastructure::crypto::{decrypt, encrypt, EncryptedData};
 
     // §5.1.4: Create non-overwriting backup before migration.
-    let db_path = paths::get_db_path();
-    if db_path.exists() {
-        let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S");
-        let backup_path = db_path.with_extension(format!("db.{}.bak", timestamp));
-        if !backup_path.exists() {
-            if let Err(e) = std::fs::copy(&db_path, &backup_path) {
-                tracing::warn!("failed to create pre-migration backup: {}", e);
-            } else {
-                tracing::info!("pre-migration backup created");
-            }
-        }
-    }
+    backup_db_file("pre-migration");
 
     // Pre-process entries: decrypt inner fields and re-seal with AAD.
     let entry_ids = database::list_entries(db)?;
@@ -458,6 +361,25 @@ fn migrate_database(
     );
 
     Ok(())
+}
+
+/// Non-overwriting `.bak` copy of the vault file before a destructive
+/// operation (§5.1.4 migration precedent; reused by Phase 1 password
+/// change / recovery). Best-effort: a failed copy is logged, never fatal —
+/// the caller's transaction remains the atomicity boundary.
+pub(crate) fn backup_db_file(reason: &str) {
+    let db_path = paths::get_db_path();
+    if db_path.exists() {
+        let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S");
+        let backup_path = db_path.with_extension(format!("db.{reason}-{timestamp}.bak"));
+        if !backup_path.exists() {
+            if let Err(e) = std::fs::copy(&db_path, &backup_path) {
+                tracing::warn!("failed to create {reason} backup: {}", e);
+            } else {
+                tracing::info!("{reason} backup created");
+            }
+        }
+    }
 }
 
 pub fn setup_vault(state: &Arc<AppState>) -> Result<bool, VaultError> {
