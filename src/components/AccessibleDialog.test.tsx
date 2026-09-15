@@ -54,3 +54,104 @@ describe('AccessibleDialog', () => {
     root.remove();
   });
 });
+
+// A8: stacked dialogs must coordinate through the module-level refcount and
+// Escape stack — closing an inner dialog keeps the background inert, and
+// one Escape press closes only the topmost dialog.
+function StackedHarness() {
+  const [openOuter, setOpenOuter] = useState(false);
+  const [openInner, setOpenInner] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpenOuter(true)}>Open outer</button>
+      <AccessibleDialog
+        isOpen={openOuter}
+        onClose={() => setOpenOuter(false)}
+        labelledBy="outer-title"
+        initialFocusSelector="[data-outer-first]"
+      >
+        <h2 id="outer-title">Outer dialog</h2>
+        <button data-outer-first onClick={() => setOpenInner(true)}>
+          Open inner
+        </button>
+        <button onClick={() => setOpenOuter(false)}>Close outer</button>
+      </AccessibleDialog>
+      <AccessibleDialog
+        isOpen={openInner}
+        onClose={() => setOpenInner(false)}
+        labelledBy="inner-title"
+        initialFocusSelector="[data-inner-first]"
+      >
+        <h2 id="inner-title">Inner dialog</h2>
+        <button data-inner-first onClick={() => setOpenInner(false)}>
+          Close inner
+        </button>
+      </AccessibleDialog>
+    </>
+  );
+}
+
+function mountStackedHarness() {
+  const root = document.createElement('div');
+  root.id = 'root';
+  document.body.appendChild(root);
+  render(<StackedHarness />, { container: root });
+  return root;
+}
+
+describe('AccessibleDialog stacking (A8)', () => {
+  it('keeps #root inert when only the inner dialog of a stack closes', async () => {
+    const root = mountStackedHarness();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open outer' }));
+    await screen.findByRole('dialog', { name: 'Outer dialog' });
+    expect(root).toHaveAttribute('inert');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open inner' }));
+    await screen.findByRole('dialog', { name: 'Inner dialog' });
+    expect(root).toHaveAttribute('inert');
+
+    // Close the INNER dialog via its button (not Escape): the outer dialog
+    // is still open, so the background must stay inert.
+    fireEvent.click(screen.getByRole('button', { name: 'Close inner' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Inner dialog' })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('dialog', { name: 'Outer dialog' })).toBeInTheDocument();
+    expect(root).toHaveAttribute('inert');
+
+    // Last dialog closes: the background becomes interactive again.
+    fireEvent.click(screen.getByRole('button', { name: 'Close outer' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Outer dialog' })).not.toBeInTheDocument(),
+    );
+    expect(root).not.toHaveAttribute('inert');
+    root.remove();
+  });
+
+  it('closes only the topmost dialog per Escape press', async () => {
+    const root = mountStackedHarness();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open outer' }));
+    await screen.findByRole('dialog', { name: 'Outer dialog' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open inner' }));
+    await screen.findByRole('dialog', { name: 'Inner dialog' });
+
+    // First Escape: only the inner (topmost) dialog closes.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Inner dialog' })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('dialog', { name: 'Outer dialog' })).toBeInTheDocument();
+    expect(root).toHaveAttribute('inert');
+
+    // Second Escape: now the outer dialog closes.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Outer dialog' })).not.toBeInTheDocument(),
+    );
+    expect(root).not.toHaveAttribute('inert');
+    root.remove();
+  });
+});

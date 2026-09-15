@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useAuth, useVault } from "../context/AppContext";
+import { useAuth, useSettings, useVault } from "../context/AppContext";
 import { generatePassword } from "../api/vault";
 import { copyWithTimeout } from "../utils/clipboard";
 import { showToast } from "../utils/toast";
@@ -25,6 +25,9 @@ import type {
 export function EntryScreen() {
 	const { actions: authActions } = useAuth();
 	const { state, actions } = useVault();
+	// A5: the quick generator must honour the user's saved generator
+	// defaults (same source as GeneratorScreen), not hardcoded values.
+	const { state: settingsState } = useSettings();
 	const isEditing = !!state.selectedEntry?.id;
 	const isNew = !state.selectedEntry;
 
@@ -328,11 +331,11 @@ export function EntryScreen() {
 	const handleGeneratePassword = async () => {
 		try {
 			const pwd = await generatePassword({
-				length: 16,
-				includeUppercase: true,
-				includeLowercase: true,
-				includeNumbers: true,
-				includeSymbols: true,
+				length: settingsState.settings.default_length,
+				includeUppercase: settingsState.settings.default_include_uppercase,
+				includeLowercase: settingsState.settings.default_include_lowercase,
+				includeNumbers: settingsState.settings.default_include_numbers,
+				includeSymbols: settingsState.settings.default_include_symbols,
 			});
 			setGeneratedPassword(pwd);
 		} catch {

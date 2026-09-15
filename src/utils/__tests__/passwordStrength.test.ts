@@ -6,7 +6,6 @@ describe('getPasswordStrength', () => {
     const result = getPasswordStrength('');
     expect(result.score).toBe(0);
     expect(result.label).toBe('');
-    expect(result.color).toBe('transparent');
   });
 
   it('should return a low score for a single character', () => {

@@ -288,6 +288,7 @@ pub fn run() {
             commands::init_vault,
             commands::unlock_vault,
             commands::lock_vault,
+            commands::touch_activity,
             commands::generate_password,
             commands::setup_vault,
             commands::create_entry,

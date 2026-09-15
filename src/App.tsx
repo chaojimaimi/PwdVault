@@ -1,6 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { AppProvider, useAuth } from "./context/AppContext";
+import { touchActivity } from "./api/vault";
 import { SetupScreen } from "./screens/SetupScreen";
 import { UnlockScreen } from "./screens/UnlockScreen";
 import { VaultScreen } from "./screens/VaultScreen";
@@ -19,10 +20,48 @@ import "./styles/vault.css";
 import "./styles/groups.css";
 import "./styles/settings.css";
 
+// A1: report user activity to the backend auto-lock timer at most once per
+// minute. The timer previously advanced only on vault API traffic, so a user
+// who was reading (no vault operations) could be locked out mid-session.
+const ACTIVITY_THROTTLE_MS = 60_000;
+
+/**
+ * Forward pointer/keyboard activity to `touch_activity` while the vault is
+ * unlocked. Listeners are capture+passive (never block or reorder page
+ * handling) and are removed as soon as the vault locks. Exported for tests.
+ */
+export function useAutoLockActivity(enabled: boolean) {
+	const lastReportRef = useRef(0);
+
+	useEffect(() => {
+		if (!enabled) return;
+		const reportActivity = () => {
+			const now = Date.now();
+			if (now - lastReportRef.current < ACTIVITY_THROTTLE_MS) return;
+			lastReportRef.current = now;
+			// Failures are expected right after a lock (vault no longer
+			// unlocked) and must never surface as user-visible errors.
+			touchActivity().catch(() => {});
+		};
+		const options: AddEventListenerOptions = { capture: true, passive: true };
+		window.addEventListener("pointermove", reportActivity, options);
+		window.addEventListener("pointerdown", reportActivity, options);
+		window.addEventListener("keydown", reportActivity, options);
+		return () => {
+			window.removeEventListener("pointermove", reportActivity, options);
+			window.removeEventListener("pointerdown", reportActivity, options);
+			window.removeEventListener("keydown", reportActivity, options);
+		};
+	}, [enabled]);
+}
+
 function AppContent() {
 	// AppContent subscribes only to AuthContext (§5.6.1). Screen routing depends
 	// solely on auth state; the screens themselves pull vault/settings directly.
 	const { state, actions } = useAuth();
+
+	// A1: keep the auto-lock timer alive on local user input while unlocked.
+	useAutoLockActivity(state.isUnlocked);
 
 	if (state.isLoading) {
 		return (

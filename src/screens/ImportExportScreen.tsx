@@ -312,7 +312,7 @@ export function ImportExportScreen() {
 						<button
 							className="btn btn-danger"
 							onClick={confirmImport}
-							disabled={restoreConfirmation !== "RESTORE"}
+							disabled={importing || restoreConfirmation !== "RESTORE"}
 						>
 							Restore
 						</button>

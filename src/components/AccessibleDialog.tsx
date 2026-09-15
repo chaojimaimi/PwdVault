@@ -10,6 +10,12 @@ const FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
+// A8: module-level coordination between stacked dialog instances.
+// `openCount` keeps the background inert until the LAST dialog closes;
+// `escapeStack` makes Escape close only the topmost (last registered) dialog.
+let openCount = 0;
+const escapeStack: symbol[] = [];
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -40,8 +46,15 @@ export function AccessibleDialog({
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const root = document.getElementById('root');
     const previousAriaHidden = root?.getAttribute('aria-hidden');
-    root?.setAttribute('inert', '');
-    root?.setAttribute('aria-hidden', 'true');
+    const dialogId = Symbol('accessible-dialog');
+    escapeStack.push(dialogId);
+    openCount += 1;
+    // Only the FIRST dialog makes the background inert; stacked dialogs keep
+    // it inert until the last one unmounts.
+    if (openCount === 1) {
+      root?.setAttribute('inert', '');
+      root?.setAttribute('aria-hidden', 'true');
+    }
 
     const focusInitial = () => {
       const dialog = dialogRef.current;
@@ -57,6 +70,8 @@ export function AccessibleDialog({
       const dialog = dialogRef.current;
       if (!dialog) return;
       if (event.key === 'Escape') {
+        // Only the topmost dialog responds, so one Escape closes one dialog.
+        if (escapeStack[escapeStack.length - 1] !== dialogId) return;
         event.preventDefault();
         onCloseRef.current();
         return;
@@ -83,9 +98,16 @@ export function AccessibleDialog({
     return () => {
       cancelAnimationFrame(frame);
       document.removeEventListener('keydown', handleKeyDown);
-      root?.removeAttribute('inert');
-      if (previousAriaHidden == null) root?.removeAttribute('aria-hidden');
-      else root?.setAttribute('aria-hidden', previousAriaHidden);
+      openCount -= 1;
+      const stackIndex = escapeStack.indexOf(dialogId);
+      if (stackIndex !== -1) escapeStack.splice(stackIndex, 1);
+      // Restore background interactivity only when the LAST dialog closes;
+      // closing an inner dialog of a stack must keep the background inert.
+      if (openCount === 0) {
+        root?.removeAttribute('inert');
+        if (previousAriaHidden == null) root?.removeAttribute('aria-hidden');
+        else root?.setAttribute('aria-hidden', previousAriaHidden);
+      }
       previouslyFocused?.focus();
     };
   }, [isOpen, initialFocusSelector]);

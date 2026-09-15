@@ -135,7 +135,11 @@ export function VaultScreen() {
 					</button>
 					<button
 						className="btn btn-icon"
-						onClick={() => authActions.lock()}
+						// A4: void + fallback catch — a lock rejection must not become
+						// an unhandled rejection in the browser console.
+						onClick={() => {
+							void authActions.lock().catch(() => {});
+						}}
 						title="Lock Vault"
 						aria-label="Lock vault"
 					>

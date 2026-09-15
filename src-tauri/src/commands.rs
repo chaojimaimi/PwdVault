@@ -56,6 +56,14 @@ pub fn lock_vault(state: State<'_, AppHandle>) {
     app::lock_vault(state.inner());
 }
 
+/// A1: reset the auto-lock activity timer. Called by the frontend on local
+/// user input (pointer/keyboard) so that reading an entry without any vault
+/// operation does not let the session time out under the user's hands.
+#[tauri::command]
+pub fn touch_activity(state: State<'_, AppHandle>) {
+    state.inner().touch_activity();
+}
+
 #[tauri::command]
 pub fn generate_password(
     length: usize,
@@ -234,4 +242,50 @@ pub async fn check_for_updates(
     tauri::async_runtime::spawn_blocking(move || app::check_for_updates(&state))
         .await
         .map_err(|e| VaultError::InternalError(format!("update check join error: {}", e)))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pwdvault_infrastructure::crypto;
+    use tauri::Manager;
+
+    /// A1: the `touch_activity` command must delegate to
+    /// `AppState::touch_activity` so pure-local user input advances the
+    /// auto-lock deadline exactly like vault operations do.
+    #[test]
+    fn touch_activity_command_advances_auto_lock_deadline() {
+        let app = tauri::test::mock_app();
+        let state = Arc::new(AppState::default());
+        app.manage(state.clone());
+
+        // Locked session: no deadline exists and touching stays a no-op.
+        assert!(state.session.auto_lock_deadline(600).is_none());
+
+        // Unlock the session (same helper pattern as the native messaging tests).
+        let salt = crypto::kdf::generate_salt();
+        let (master_key, _params) =
+            crypto::kdf::derive_key("correct horse battery staple", &salt)
+                .expect("derive master key");
+        let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &salt);
+        state.session.unlock(enc_key, mac_key);
+
+        let before = state
+            .session
+            .auto_lock_deadline(600)
+            .expect("unlocked deadline before touch");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        let ipc_state: State<'_, AppHandle> = app.state();
+        touch_activity(ipc_state);
+
+        let after = state
+            .session
+            .auto_lock_deadline(600)
+            .expect("deadline after touch");
+        assert!(
+            after > before,
+            "touch_activity must advance the auto-lock deadline"
+        );
+    }
 }

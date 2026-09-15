@@ -52,6 +52,10 @@ tracing-appender = "0.2"
 tempfile = "3"
 bincode = "1"
 redb = "2"
+# tauri "test" feature provides mock_app()/mock_builder() so IPC command
+# wrappers (which need a managed State) can be unit tested. Dev-only: the
+# feature is never enabled for production builds.
+tauri = { version = "2", features = ["test"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]

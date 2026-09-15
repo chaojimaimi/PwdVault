@@ -16,11 +16,10 @@ const SEQUENTIAL_PATTERNS = [
 export interface PasswordStrength {
   score: number;
   label: string;
-  color: string;
 }
 
 export function getPasswordStrength(password: string): PasswordStrength {
-  if (!password) return { score: 0, label: '', color: 'transparent' };
+  if (!password) return { score: 0, label: '' };
 
   let score = 0;
 
@@ -68,25 +67,20 @@ export function getPasswordStrength(password: string): PasswordStrength {
   // Clamp
   score = Math.max(0, Math.min(100, Math.round(score)));
 
-  // Determine label and color
+  // Determine label (color is owned by the theme via the strength-* CSS
+  // classes in StrengthMeter — see A6).
   let label: string;
-  let color: string;
   if (score <= 20) {
     label = 'Very Weak';
-    color = '#ef4444';
   } else if (score <= 40) {
     label = 'Weak';
-    color = '#f97316';
   } else if (score <= 60) {
     label = 'Fair';
-    color = '#eab308';
   } else if (score <= 80) {
     label = 'Strong';
-    color = '#22c55e';
   } else {
     label = 'Very Strong';
-    color = '#10b981';
   }
 
-  return { score, label, color };
+  return { score, label };
 }

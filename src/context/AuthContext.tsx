@@ -135,9 +135,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
 
     lock: async () => {
-      await api.lockVault();
-      dispatch({ type: 'RESET' });
-      dispatch({ type: 'SET_SCREEN', payload: 'unlock' });
+      // A4: the backend lock is idempotent, so a transport failure must not
+      // leave the UI on an unlocked screen. Reset to the unlock screen
+      // unconditionally in `finally`.
+      try {
+        await api.lockVault();
+      } catch (error) {
+        console.error('lock failed', error);
+      } finally {
+        dispatch({ type: 'RESET' });
+        dispatch({ type: 'SET_SCREEN', payload: 'unlock' });
+      }
     },
 
     navigate: (screen: AppScreen) => {

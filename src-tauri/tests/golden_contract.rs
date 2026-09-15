@@ -53,6 +53,8 @@ fn tauri_ipc_commands() -> HashSet<&'static str> {
         "init_vault",
         "unlock_vault",
         "lock_vault",
+        // A1: desktop-only auto-lock activity heartbeat (local user input).
+        "touch_activity",
         "generate_password",
         "setup_vault",
         "create_entry",
@@ -155,7 +157,8 @@ fn adapter_only_commands_are_documented() {
         vec![
             &"get_entry_meta",
             &"is_vault_initialized",
-            &"is_vault_unlocked"
+            &"is_vault_unlocked",
+            &"touch_activity"
         ],
         "IPC-only command set changed — update this test if intentional"
     );

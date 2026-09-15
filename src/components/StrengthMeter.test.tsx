@@ -2,7 +2,7 @@ import { render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { StrengthMeter } from './StrengthMeter';
 
-const mockedStrength = vi.hoisted(() => ({ score: 20, label: 'Weak', color: '#123456' }));
+const mockedStrength = vi.hoisted(() => ({ score: 20, label: 'Weak' }));
 
 vi.mock('../utils/passwordStrength', () => ({
   getPasswordStrength: () => mockedStrength,

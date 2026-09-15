@@ -6,6 +6,11 @@
 
 const DEFAULT_TIMEOUT_MS = 30000; // 30 seconds
 
+// A3: keep the pending clear timer at module level so a new copy cancels the
+// previous timer. Without this, copying the same secret twice in a row let
+// the FIRST timer fire early and wipe a secret the user just re-copied.
+let activeClearTimer: ReturnType<typeof setTimeout> | null = null;
+
 /**
  * Copy text to clipboard and auto-clear after timeout.
  *
@@ -20,7 +25,11 @@ export async function copyWithTimeout(
   await navigator.clipboard.writeText(text);
   const expectedDigest = await digestText(text);
 
-  setTimeout(async () => {
+  // Reset the 30s window: the most recent copy owns the clear timer.
+  if (activeClearTimer !== null) clearTimeout(activeClearTimer);
+
+  activeClearTimer = setTimeout(async () => {
+    activeClearTimer = null;
     try {
       const current = await navigator.clipboard.readText();
       // Only clear if the text hasn't been changed by the user

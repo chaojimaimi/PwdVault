@@ -44,6 +44,13 @@ export async function lockVault(): Promise<void> {
   return invoke('lock_vault');
 }
 
+// A1: auto-lock activity heartbeat. Called on local user input (pointer /
+// keyboard) so the auto-lock timer is advanced by real usage, not only by
+// vault API traffic.
+export async function touchActivity(): Promise<void> {
+  return invoke('touch_activity');
+}
+
 // Password Generator
 
 export async function generatePassword(options: PasswordGeneratorOptions): Promise<string> {
