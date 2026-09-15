@@ -42,4 +42,21 @@ describe('pairing nonce storage', () => {
     expect(storage.kind).toBe('memory');
     expect(await storage.load()).toBeNull();
   });
+
+  it('stamps savedAt so a fresh pending pairing can be distinguished', async () => {
+    const session = sessionArea();
+    const storage = await createPairNonceStorage({ session }, 'nonce');
+    await storage.save('nonce-123456');
+    const entry = await storage.loadEntry();
+    expect(entry.nonce).toBe('nonce-123456');
+    expect(entry.savedAt).toBeGreaterThan(0);
+    expect(Date.now() - entry.savedAt).toBeLessThan(5_000);
+  });
+
+  it('treats legacy bare-string entries as stale', async () => {
+    const session = sessionArea({ nonce: 'legacy-nonce' });
+    const storage = await createPairNonceStorage({ session }, 'nonce');
+    expect(await storage.load()).toBe('legacy-nonce');
+    expect(await storage.loadEntry()).toEqual({ nonce: 'legacy-nonce', savedAt: 0 });
+  });
 });

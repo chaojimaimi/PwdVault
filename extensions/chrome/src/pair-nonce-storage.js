@@ -24,20 +24,35 @@ export async function createPairNonceStorage(storageApi, key = DEFAULT_PAIR_NONC
 
   return {
     kind: area ? 'session' : 'memory',
-    async load() {
+    // Returns { nonce, savedAt } so callers can tell a pairing session that
+    // may still be live (saved seconds ago) from a stale one.
+    async loadEntry() {
       if (!area) return null;
       try {
         const result = await area.get(key);
-        const nonce = result?.[key];
-        return typeof nonce === 'string' && nonce ? nonce : null;
+        const value = result?.[key];
+        if (!value) return null;
+        // Legacy bare-string entries from an earlier build are treated as
+        // saved long ago so callers consider them stale.
+        if (typeof value === 'string') {
+          return { nonce: value, savedAt: 0 };
+        }
+        if (typeof value.nonce === 'string' && value.nonce) {
+          return { nonce: value.nonce, savedAt: Number(value.savedAt) || 0 };
+        }
+        return null;
       } catch {
         return null;
       }
     },
+    async load() {
+      const entry = await this.loadEntry();
+      return entry ? entry.nonce : null;
+    },
     async save(nonce) {
       if (!area) return;
       try {
-        if (nonce) await area.set({ [key]: nonce });
+        if (nonce) await area.set({ [key]: { nonce, savedAt: Date.now() } });
         else await area.remove(key);
       } catch {
         // Best effort: the in-memory cache still covers the common case.

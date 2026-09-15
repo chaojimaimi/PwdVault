@@ -32,6 +32,7 @@ class PopupApp {
       generatorCopied: false,
       // Pairing state
       pairingStarted: false,
+      pairingHint: null,
       createFormDirty: false,
       createPending: false,
     };
@@ -825,6 +826,7 @@ class PopupApp {
         </div>
         <h2>Pairing Required</h2>
         <p>Enter the 6-digit code shown in the PwdVault desktop app</p>
+        ${this.state.pairingHint ? `<p class="pairing-hint">${this.escapeHtml(this.state.pairingHint)}</p>` : ''}
         ${this.state.error ? `<div class="error-message">${this.escapeHtml(this.state.error)}</div>` : ''}
         <form id="pairing-form">
           <div class="form-group">
@@ -891,6 +893,24 @@ class PopupApp {
     if (this.state.pairingStarted) return;
     this.state.pairingStarted = true;
     try {
+      // A recently started pairing (nonce still pending) means the desktop
+      // app may still be displaying its code. Each `pair` call overwrites
+      // that code, so keep the existing session and let the user retry the
+      // displayed code or explicitly ask for a new one. Falls through when
+      // there is no pending session or it can no longer be fresh (30s TTL).
+      let pending = null;
+      try {
+        pending = await this.sendMessage({ type: 'GET_PAIRING_PENDING' });
+      } catch {
+        pending = null;
+      }
+      if (pending && pending.pending && pending.fresh) {
+        this.state.pairingHint =
+          'A pairing code was already requested — enter the one shown in the desktop app (it expires after 30 seconds), or click "Get New Code".';
+        this.render();
+        return;
+      }
+      this.state.pairingHint = null;
       const result = await this.sendMessage({ type: 'START_PAIRING' });
       if (result && result.result === 'failed') {
         this.state.status = 'disconnected';

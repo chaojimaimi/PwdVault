@@ -178,6 +178,24 @@ async function pairConfirm(code) {
   }
 }
 
+// Fresh window matches the server's 30s pairing-session TTL with a safety
+// margin: within it the desktop app may still be displaying the code, so an
+// implicit new `pair` (which overwrites that code) must not be sent.
+const PAIRING_FRESH_MS = 25_000;
+
+// True when a pairing session was started recently and not yet consumed —
+// the popup must not auto-request a competing code, only offer "Get New Code".
+async function pendingPairingFresh() {
+  try {
+    const storage = await pairNonceStoragePromise;
+    const entry = await storage.loadEntry();
+    if (!entry) return false;
+    return Date.now() - entry.savedAt <= PAIRING_FRESH_MS;
+  } catch {
+    return false;
+  }
+}
+
 async function sendToApp(command, params = {}) {
   const id = ++requestId;
 
@@ -572,6 +590,12 @@ async function handleMessage(message, sender) {
         return { success: true };
       }
       return { success: false, error: 'Invalid or expired code' };
+
+    case 'GET_PAIRING_PENDING':
+      return {
+        pending: !!(await restorePendingPairNonce()),
+        fresh: await pendingPairingFresh(),
+      };
 
     default:
       throw new Error(`Unknown message type: ${message.type}`);
