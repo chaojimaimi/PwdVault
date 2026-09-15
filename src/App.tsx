@@ -142,9 +142,16 @@ function App() {
 		// B3: warn loudly when the extension HTTP server could not start.
 		// Long-lived toast (10s) — the user must restart the app after
 		// freeing the port; there is no automatic retry by design.
-		const unlistenServerError = listen<string>("native-server-error", (event) => {
-			showToastWithType(`${event.payload}. Please restart PwdVault.`, "error", 10000);
-		});
+		const unlistenServerError = listen<string>(
+			"native-server-error",
+			(event) => {
+				showToastWithType(
+					`${event.payload}. Please restart PwdVault.`,
+					"error",
+					10000,
+				);
+			},
+		);
 		return () => {
 			unlistenPair.then((u) => u());
 			unlistenServerError.then((u) => u());

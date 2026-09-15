@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+
 - Import policy: backups whose KDF parameters fall below the OWASP floor
   (19 MiB / 2 iterations) are now rejected at import. Vault unlock is
   unaffected — vaults created with legacy parameters keep unlocking; newly
@@ -19,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   LOCALAPPDATA), limiting blast radius if the WebView is compromised.
 
 ### Fixed
+
 - The extension server now binds its port with SO_REUSEADDR and retries
   address-in-use errors (1s/2s/4s), surviving the TIME_WAIT window after an
   app restart; other bind errors fail fast into the existing warning toast.

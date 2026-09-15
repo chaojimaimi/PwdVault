@@ -12,6 +12,7 @@ pairWithApp handshake 分支约 134-146 行）
 protocol versions do not match"——端口占用/应用未启动时误导用户（2026-09-15 实测踩中）。
 
 **设计**：三分支：
+
 - 调用抛错或返回 null（host 启动失败/超时/连接拒绝）→ 复用既有
   `friendlyConnectionError`（可构造合成错误走既有映射，避免维护第二份近似文案；
   connection-errors.js:20 已有 "Cannot reach the PwdVault desktop app. Make sure
@@ -31,6 +32,7 @@ protocol versions do not match"——端口占用/应用未启动时误导用户
 （2026-09-15 实测：dev 重启后两次 `Address already in use`，扩展服务静默不可用）。
 
 **设计**：
+
 - 用 socket2 构建监听 socket：`Domain::IPV4` + `set_reuse_address(true)` +
   `bind("127.0.0.1:port".parse())` + `listen(queue)` → `TcpListener::from`。
   （Windows 上 std 本就设置 SO_REUSEADDR，socket2 统一三平台行为，无副作用）
@@ -49,6 +51,7 @@ protocol versions do not match"——端口占用/应用未启动时误导用户
 屏幕阅读器不可见（code-review P3-1）。
 
 **设计**：模块级 `snapshot: { ariaHidden: string | null; focused: Element | null } | null`：
+
 - mount 时若 `openCount === 0`（本实例是把背景置 inert 的 owner）→ 记录快照；
 - unmount 时若 `openCount` 归零且存在快照 → 恢复并清空；非归零不恢复；
 - `previouslyFocused` 焦点恢复同样仅 owner（归零）执行。
@@ -73,6 +76,7 @@ protocol versions do not match"——端口占用/应用未启动时误导用户
 （`ImportExportScreen.tsx:75,109,115`）。
 
 **设计**：三个 fs 权限改为带 scope 对象：
+
 - allow：`$HOME/**`、`/Volumes/**`、`$TEMP/**`（覆盖用户导出/导入的常规位置）
 - deny：`$HOME/Library/Application Support/com.pwdvault.app/**`（macOS 密文库目录）
   **以及 `$LOCALDATA/PwdVault/**`**（Windows 密文库目录，`paths.rs:21-26` 的
@@ -134,6 +138,7 @@ cd src-tauri && source ~/.cargo/env && cargo test && cargo clippy --all-targets 
 pnpm test && pnpm tsc --noEmit
 node --check extensions/chrome/src/background.js && node --check extensions/chrome/src/popup/popup.js
 ```
+
 手动 QA：导出到 ~/Documents 成功、导入任选路径成功（X5）；占用 17429 后启动应用 →
 红色告警 toast 仍出现（X2 不改变失败告警语义）。
 
