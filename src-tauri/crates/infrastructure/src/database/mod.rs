@@ -18,6 +18,13 @@ use crate::crypto::VerificationData;
 // ============================================================================
 
 pub const VAULT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vault");
+
+/// Upper bound for a single encoded record read from disk before it is handed
+/// to `bincode::deserialize`. Legitimate records (entries, groups, header,
+/// verification row, settings) are a few hundred bytes; bincode trusts length
+/// prefixes, so refusing oversized blobs up front bounds attacker-controlled
+/// input before any deserialization is attempted.
+pub const MAX_ENCODED_BLOB: usize = 1024 * 1024;
 pub const ENTRIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("entries");
 pub const GROUPS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("groups");
 pub const SETTINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("settings");
@@ -63,6 +70,9 @@ pub enum DatabaseError {
 
     #[error("Entry not found")]
     EntryNotFound,
+
+    #[error("Stored record exceeds the maximum encoded size of {} bytes", MAX_ENCODED_BLOB)]
+    BlobTooLarge,
 
     #[error("Vault not initialized")]
     VaultNotInitialized,
@@ -176,6 +186,18 @@ pub fn save_verification_data(db: &Database, data: &VerificationData) -> Result<
     Ok(())
 }
 
+/// Reject records read from disk that exceed [`MAX_ENCODED_BLOB`].
+///
+/// Every "disk bytes → `bincode::deserialize`" call site must run this check
+/// before deserializing: bincode trusts embedded length prefixes, so the blob
+/// size is the only attacker-controlled bound we get for free.
+pub fn check_encoded_blob_size(blob: &[u8]) -> Result<(), DatabaseError> {
+    if blob.len() > MAX_ENCODED_BLOB {
+        return Err(DatabaseError::BlobTooLarge);
+    }
+    Ok(())
+}
+
 /// Load verification data from the database
 pub fn load_verification_data(db: &Database) -> Result<Option<VerificationData>, DatabaseError> {
     let read_txn = db.begin_read()?;
@@ -183,6 +205,7 @@ pub fn load_verification_data(db: &Database) -> Result<Option<VerificationData>,
 
     match table.get("verification")? {
         Some(value) => {
+            check_encoded_blob_size(value.value())?;
             let data: VerificationData = bincode::deserialize(value.value())
                 .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
             Ok(Some(data))
@@ -209,18 +232,24 @@ pub fn save_entry(
     Ok(())
 }
 
-/// Load a password entry from the database (decrypts the stored blob)
+/// Load a password entry from the database (decrypts the stored blob).
+///
+/// `allow_plaintext` permits the pre-v1.0.5 plaintext-bincode fallback and is
+/// reserved for the explicit legacy migration path. All runtime callers must
+/// pass `false`: a plaintext record in a running vault is attacker-injectable
+/// and must fail closed instead of being silently accepted.
 pub fn load_entry(
     db: &Database,
     key: &[u8; 32],
     id: &str,
+    allow_plaintext: bool,
 ) -> Result<Option<PasswordEntry>, DatabaseError> {
     let read_txn = db.begin_read()?;
     let table = read_txn.open_table(ENTRIES_TABLE)?;
 
     match table.get(id)? {
         Some(value) => {
-            let entry = entry_codec::open_entry(value.value(), key, id)?;
+            let entry = entry_codec::open_entry(value.value(), key, id, allow_plaintext)?;
             Ok(Some(entry))
         }
         None => Ok(None),
@@ -270,7 +299,8 @@ pub fn list_all_entries_bulk(
     for result in table.iter()? {
         let (key_handle, value) = result?;
         let id = key_handle.value();
-        let entry = entry_codec::open_entry(value.value(), key, id)?;
+        // Bulk scans are runtime paths: never accept plaintext records.
+        let entry = entry_codec::open_entry(value.value(), key, id, false)?;
         if let Some(group) = filter_group {
             if entry.group_id.as_deref() != Some(group) {
                 continue;
@@ -302,14 +332,21 @@ pub fn save_group(db: &Database, key: &[u8; 32], group: &Group) -> Result<(), Da
     Ok(())
 }
 
-/// Load a group from the database (decrypts the stored blob)
-pub fn load_group(db: &Database, key: &[u8; 32], id: &str) -> Result<Option<Group>, DatabaseError> {
+/// Load a group from the database (decrypts the stored blob).
+///
+/// See [`load_entry`] for the `allow_plaintext` contract.
+pub fn load_group(
+    db: &Database,
+    key: &[u8; 32],
+    id: &str,
+    allow_plaintext: bool,
+) -> Result<Option<Group>, DatabaseError> {
     let read_txn = db.begin_read()?;
     let table = read_txn.open_table(GROUPS_TABLE)?;
 
     match table.get(id)? {
         Some(value) => {
-            let g = group_codec::open_group(value.value(), key, id)?;
+            let g = group_codec::open_group(value.value(), key, id, allow_plaintext)?;
             Ok(Some(g))
         }
         None => Ok(None),
@@ -353,7 +390,8 @@ pub fn list_all_groups_bulk(db: &Database, key: &[u8; 32]) -> Result<Vec<Group>,
     for result in table.iter()? {
         let (key_handle, value) = result?;
         let id = key_handle.value();
-        let group = group_codec::open_group(value.value(), key, id)?;
+        // Bulk scans are runtime paths: never accept plaintext records.
+        let group = group_codec::open_group(value.value(), key, id, false)?;
         groups.push(group);
     }
     Ok(groups)
@@ -386,6 +424,7 @@ pub fn load_settings(db: &Database) -> Result<Settings, DatabaseError> {
     match table.get("current")? {
         Some(value) => {
             let data = value.value();
+            check_encoded_blob_size(data)?;
             // Try JSON first (current format), then both bincode layouts used
             // by released versions. Keep malformed data fail-closed.
             if let Ok(settings) = serde_json::from_slice::<Settings>(data) {
@@ -436,7 +475,7 @@ mod tests {
         entry.encrypted_password = vec![1, 2, 3, 4];
 
         save_entry(&db, &TEST_KEY, &entry).unwrap();
-        let loaded = load_entry(&db, &TEST_KEY, &entry.id).unwrap();
+        let loaded = load_entry(&db, &TEST_KEY, &entry.id, false).unwrap();
 
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
@@ -452,11 +491,11 @@ mod tests {
         let entry = PasswordEntry::new("Test".to_string(), None, "user".to_string());
 
         save_entry(&db, &TEST_KEY, &entry).unwrap();
-        assert!(load_entry(&db, &TEST_KEY, &entry.id).unwrap().is_some());
+        assert!(load_entry(&db, &TEST_KEY, &entry.id, false).unwrap().is_some());
 
         let deleted = delete_entry(&db, &entry.id).unwrap();
         assert!(deleted);
-        assert!(load_entry(&db, &TEST_KEY, &entry.id).unwrap().is_none());
+        assert!(load_entry(&db, &TEST_KEY, &entry.id, false).unwrap().is_none());
     }
 
     #[test]
@@ -540,7 +579,7 @@ mod tests {
         let group = Group::new("Personal".to_string());
         save_group(&db, &TEST_KEY, &group).unwrap();
 
-        let loaded = load_group(&db, &TEST_KEY, &group.id).unwrap();
+        let loaded = load_group(&db, &TEST_KEY, &group.id, false).unwrap();
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
         assert_eq!(group.id, loaded.id);
@@ -553,11 +592,11 @@ mod tests {
 
         let group = Group::new("Work".to_string());
         save_group(&db, &TEST_KEY, &group).unwrap();
-        assert!(load_group(&db, &TEST_KEY, &group.id).unwrap().is_some());
+        assert!(load_group(&db, &TEST_KEY, &group.id, false).unwrap().is_some());
 
         let deleted = delete_group(&db, &group.id).unwrap();
         assert!(deleted);
-        assert!(load_group(&db, &TEST_KEY, &group.id).unwrap().is_none());
+        assert!(load_group(&db, &TEST_KEY, &group.id, false).unwrap().is_none());
     }
 
     #[test]
@@ -586,5 +625,77 @@ mod tests {
         save_group(&db, &TEST_KEY, &g).unwrap();
 
         assert_eq!(count_groups(&db).unwrap(), 1);
+    }
+
+    /// B1 test 5 (group side): the runtime channel rejects a plaintext
+    /// bincode group blob; only the migration channel accepts it.
+    #[test]
+    fn runtime_path_rejects_plaintext_group_blob() {
+        let (db, _temp) = get_test_db();
+        let group = Group::new("Plaintext Group".to_string());
+        let raw = bincode::serialize(&group).unwrap();
+        {
+            let txn = db.begin_write().unwrap();
+            {
+                let mut table = txn.open_table(GROUPS_TABLE).unwrap();
+                table.insert(group.id.as_str(), raw.as_slice()).unwrap();
+            }
+            txn.commit().unwrap();
+        }
+
+        assert!(load_group(&db, &TEST_KEY, &group.id, false).is_err());
+        assert!(list_all_groups_bulk(&db, &TEST_KEY).is_err());
+        assert!(load_group(&db, &TEST_KEY, &group.id, true).is_ok());
+    }
+
+    /// B4: blobs above MAX_ENCODED_BLOB must be refused before bincode ever
+    /// sees them, across every disk-bytes → deserialize entry point.
+    #[test]
+    fn oversized_blobs_fail_closed() {
+        let (db, _temp) = get_test_db();
+        let blob = vec![0u8; MAX_ENCODED_BLOB + 1];
+
+        // Entries / groups
+        {
+            let txn = db.begin_write().unwrap();
+            {
+                let mut table = txn.open_table(ENTRIES_TABLE).unwrap();
+                table.insert("big-entry", blob.as_slice()).unwrap();
+            }
+            {
+                let mut table = txn.open_table(GROUPS_TABLE).unwrap();
+                table.insert("big-group", blob.as_slice()).unwrap();
+            }
+            txn.commit().unwrap();
+        }
+        assert!(load_entry(&db, &TEST_KEY, "big-entry", false).is_err());
+        assert!(load_entry(&db, &TEST_KEY, "big-entry", true).is_err());
+        assert!(!entry_codec::is_encrypted(&blob));
+        assert!(load_group(&db, &TEST_KEY, "big-group", false).is_err());
+        assert!(load_group(&db, &TEST_KEY, "big-group", true).is_err());
+        assert!(list_all_entries_bulk(&db, &TEST_KEY, None).is_err());
+        assert!(list_all_groups_bulk(&db, &TEST_KEY).is_err());
+
+        // Verification row
+        {
+            let txn = db.begin_write().unwrap();
+            {
+                let mut table = txn.open_table(VAULT_TABLE).unwrap();
+                table.insert("verification", blob.as_slice()).unwrap();
+            }
+            txn.commit().unwrap();
+        }
+        assert!(load_verification_data(&db).is_err());
+
+        // Settings row
+        {
+            let txn = db.begin_write().unwrap();
+            {
+                let mut table = txn.open_table(SETTINGS_TABLE).unwrap();
+                table.insert("current", blob.as_slice()).unwrap();
+            }
+            txn.commit().unwrap();
+        }
+        assert!(load_settings(&db).is_err());
     }
 }

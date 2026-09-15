@@ -25,7 +25,7 @@ pub fn create_entry(
     let key = lease.enc_key()?;
     let mac_key = lease.mac_key()?;
     if let Some(group_id) = &request.group_id {
-        if database::load_group(&db, key, group_id)?.is_none() {
+        if database::load_group(&db, key, group_id, false)?.is_none() {
             return Err(VaultError::InvalidInput {
                 code: "UNKNOWN_GROUP".into(),
                 message: "Group does not exist".into(),
@@ -71,7 +71,7 @@ pub fn get_entry_meta(state: &Arc<AppState>, id: String) -> Result<EntrySummary,
     let lease = state.lease()?;
     let db = get_db(state)?;
     let key = lease.enc_key()?;
-    let entry = load_entry(&db, key, &id)?.ok_or(VaultError::EntryNotFound)?;
+    let entry = load_entry(&db, key, &id, false)?.ok_or(VaultError::EntryNotFound)?;
 
     lease.touch_activity();
 
@@ -86,7 +86,7 @@ pub fn get_entry_secret(
     let lease = state.lease()?;
     let db = get_db(state)?;
     let key = lease.enc_key()?;
-    let entry = load_entry(&db, key, &id)?.ok_or(VaultError::EntryNotFound)?;
+    let entry = load_entry(&db, key, &id, false)?.ok_or(VaultError::EntryNotFound)?;
 
     // Decrypt password. Try bincode format first (v1.0.5+ and v1.0.4 both use
     // bincode::serialize(EncryptedData)), then fall back to raw bytes
@@ -168,7 +168,7 @@ pub fn update_entry<R: Into<UpdateEntryRequest>>(
     let key = lease.enc_key()?;
     let mac_key = lease.mac_key()?;
     if let Some(group_id) = &request.group_id {
-        if database::load_group(&db, key, group_id)?.is_none() {
+        if database::load_group(&db, key, group_id, false)?.is_none() {
             return Err(VaultError::InvalidInput {
                 code: "UNKNOWN_GROUP".into(),
                 message: "Group does not exist".into(),
@@ -176,7 +176,7 @@ pub fn update_entry<R: Into<UpdateEntryRequest>>(
         }
     }
 
-    let mut entry = load_entry(&db, key, &id)?.ok_or(VaultError::EntryNotFound)?;
+    let mut entry = load_entry(&db, key, &id, false)?.ok_or(VaultError::EntryNotFound)?;
 
     // Update fields
     entry.title = request.title;

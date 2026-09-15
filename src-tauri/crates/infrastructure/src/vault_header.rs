@@ -83,6 +83,7 @@ impl VaultHeader {
 
     /// Decrypt and deserialize the header from a stored blob.
     pub fn open(blob: &[u8], enc_key: &[u8; 32]) -> Result<Self, DatabaseError> {
+        crate::database::check_encoded_blob_size(blob)?;
         let enc: EncryptedData = bincode::deserialize(blob)
             .map_err(|e| DatabaseError::DeserializationError(e.to_string()))?;
         let aad = b"vault_header";
@@ -178,6 +179,13 @@ mod tests {
         assert!(!is_integrity_required(None));
         let h = VaultHeader::new_initial();
         assert!(is_integrity_required(Some(&h)));
+    }
+
+    /// B4: an oversized header blob must be refused before bincode runs.
+    #[test]
+    fn oversized_header_blob_is_rejected() {
+        let blob = vec![0u8; crate::database::MAX_ENCODED_BLOB + 1];
+        assert!(VaultHeader::open(&blob, &TEST_KEY).is_err());
     }
 
     #[test]

@@ -43,13 +43,17 @@ pub fn seal_entry(entry: &PasswordEntry, key: &[u8; 32]) -> Result<Vec<u8>, Data
 /// 2. **v1**: AES-256-GCM without AAD (legacy v1.0.5)
 /// 3. **pre-v1.0.5**: plaintext bincode of PasswordEntry (no encryption)
 ///
-/// The fallbacks are only used during migration; after migration all entries
-/// are re-saved in the v2 format.
+/// The plaintext fallback is only permitted when `allow_plaintext` is true —
+/// reserved for the explicit legacy migration path. In the running vault a
+/// plaintext record is attacker-injectable (the attacker needs only file write
+/// access), so runtime callers must pass `false` and fail closed.
 pub fn open_entry(
     blob: &[u8],
     key: &[u8; 32],
     entry_id: &str,
+    allow_plaintext: bool,
 ) -> Result<PasswordEntry, DatabaseError> {
+    super::check_encoded_blob_size(blob)?;
     // Try v2 (AAD) first.
     if let Ok(enc) = bincode::deserialize::<EncryptedData>(blob) {
         let aad = entry_aad(entry_id);
@@ -63,11 +67,19 @@ pub fn open_entry(
                 .map_err(|e| DatabaseError::SerializationError(e.to_string()));
         }
     }
-    // Fallback: old plaintext format (pre-v1.0.5).
+    // Fallback: old plaintext format (pre-v1.0.5), migration path only.
+    if !allow_plaintext {
+        return Err(DatabaseError::DeserializationError(
+            "entry record is not in an encrypted format".to_string(),
+        ));
+    }
     bincode::deserialize(blob).map_err(|e| DatabaseError::SerializationError(e.to_string()))
 }
 
 /// Returns `true` if the blob is in the encrypted format (v1 or v2).
 pub fn is_encrypted(blob: &[u8]) -> bool {
+    if super::check_encoded_blob_size(blob).is_err() {
+        return false;
+    }
     bincode::deserialize::<EncryptedData>(blob).is_ok()
 }

@@ -10,7 +10,7 @@ import GroupManager from "./screens/GroupManager";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { ImportExportScreen } from "./screens/ImportExportScreen";
 import { ThemeProvider } from "./components/ThemeProvider";
-import { showPairingCodeToast } from "./utils/toast";
+import { showPairingCodeToast, showToastWithType } from "./utils/toast";
 import "./styles/themes.css";
 import "./styles/base.css";
 import "./styles/components.css";
@@ -81,14 +81,22 @@ function App() {
 		// and overwrites the previous code), making "Get New Code" in the
 		// extension appear to do nothing until the user dismisses the dialog.
 		// Toasts let multiple updates show in sequence without blocking.
-		const unlisten = listen("pair-request", (event) => {
+		const unlistenPair = listen("pair-request", (event) => {
 			const code = event.payload as string;
 			// V4 双主题配对码 toast：30s 与后端 SESSION_TTL 保持一致，
 			// 确保用户看到的码在有效期内。
 			showPairingCodeToast(code, 30000);
 		});
+
+		// B3: warn loudly when the extension HTTP server could not start.
+		// Long-lived toast (10s) — the user must restart the app after
+		// freeing the port; there is no automatic retry by design.
+		const unlistenServerError = listen<string>("native-server-error", (event) => {
+			showToastWithType(`${event.payload}. Please restart PwdVault.`, "error", 10000);
+		});
 		return () => {
-			unlisten.then((u) => u());
+			unlistenPair.then((u) => u());
+			unlistenServerError.then((u) => u());
 		};
 	}, []);
 

@@ -67,7 +67,7 @@ pub fn update_group(state: &Arc<AppState>, id: String, name: String) -> Result<G
             });
         }
     }
-    let mut group = load_group(&db, key, &id)?
+    let mut group = load_group(&db, key, &id, false)?
         .ok_or(VaultError::InternalError("Group not found".to_string()))?;
     group.name = name;
     group.updated_at = chrono::Utc::now().timestamp();

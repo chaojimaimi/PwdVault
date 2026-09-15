@@ -7,29 +7,32 @@ use std::path::{Path, PathBuf};
 
 /// Get the database file path
 /// Uses a consistent platform-specific app data directory
+///
+/// If the platform data dir cannot be resolved AND the working directory is
+/// unreadable, fall back to the OS temp dir instead of panicking at startup.
 pub fn get_db_path() -> PathBuf {
     let base_dir = {
         #[cfg(target_os = "macos")]
         {
             dirs::data_local_dir()
-                .unwrap_or_else(|| std::env::current_dir().unwrap())
+                .unwrap_or_else(std::env::temp_dir)
                 .join("com.pwdvault.app")
         }
         #[cfg(target_os = "windows")]
         {
             dirs::data_local_dir()
-                .unwrap_or_else(|| std::env::current_dir().unwrap())
+                .unwrap_or_else(std::env::temp_dir)
                 .join("PwdVault")
         }
         #[cfg(target_os = "linux")]
         {
             dirs::data_local_dir()
-                .unwrap_or_else(|| std::env::current_dir().unwrap())
+                .unwrap_or_else(std::env::temp_dir)
                 .join("pwdvault")
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
-            std::env::current_dir().unwrap()
+            std::env::temp_dir()
         }
     };
     base_dir.join("vault.db")

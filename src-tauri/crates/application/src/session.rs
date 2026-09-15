@@ -256,9 +256,8 @@ impl<'a> SessionLease<'a> {
     }
 }
 
-/// Backwards-compatibility shim: expose a `KeyStore`-like interface on
-/// `VaultSession` so the transition can be incremental. Once all callers
-/// are updated to use `lease()`, these thin wrappers can be removed.
+/// Legacy-named wrapper kept for callers of the pre-session API; prefer
+/// [`VaultSession::is_unlocked`] directly.
 impl VaultSession {
     /// Check if unlocked (compatibility wrapper).
     pub fn is_session_unlocked(&self) -> bool {

@@ -841,6 +841,25 @@ mod tests {
         }
     }
 
+    // ---- start_server ----
+
+    /// B3: when another listener already holds the port, `start_server` must
+    /// fail with an error (which the app then surfaces in the UI) instead of
+    /// silently running without the extension bridge.
+    #[test]
+    fn start_server_fails_when_port_is_already_bound() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let port = listener.local_addr().expect("local addr").port();
+
+        let (state, _temp) = setup_test_state();
+        let result = start_server(port, state, None);
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("Server error"),
+            "bind failure must surface as a server error"
+        );
+    }
+
     // ---- is_vault_initialized ----
 
     #[test]
@@ -1205,7 +1224,7 @@ mod tests {
         let db = state.database.lock().expect("db lock").clone().expect("db");
         let lease = state.lease().unwrap();
         let key = lease.enc_key().unwrap();
-        let entry = database::load_entry(&db, key, result["id"].as_str().unwrap())
+        let entry = database::load_entry(&db, key, result["id"].as_str().unwrap(), false)
             .unwrap()
             .unwrap();
         let enc: crypto::EncryptedData = bincode::deserialize(&entry.encrypted_password).unwrap();

@@ -117,6 +117,19 @@ fn main() {
             continue;
         }
 
+        // D4 (defence in depth): the command is interpolated into the HTTP
+        // request line. Restrict it to the extension's snake_case command
+        // names so a compromised or buggy caller cannot inject CRLF/header
+        // bytes. A malformed frame gets a protocol error response and kills
+        // the host, matching the existing malformed-message policy.
+        if let Some(command) = extract_command(&msg) {
+            if !is_valid_command(&command) {
+                let _ = send_error(&mut out, extract_id(&msg).unwrap_or(0), "Invalid command");
+                msg.fill(0);
+                std::process::exit(1);
+            }
+        }
+
         let mut response = match forward_to_server(&msg, &caller) {
             Ok(body) => body,
             Err(e) => {
@@ -381,6 +394,13 @@ fn extract_command(payload: &[u8]) -> Option<String> {
     value.get("command")?.as_str().map(str::to_owned)
 }
 
+/// Validate a command name before it is placed into the HTTP request path.
+/// Only `snake_case` identifiers (`[a-z_]`) are accepted; anything else could
+/// carry CR/LF or space bytes into the request line.
+fn is_valid_command(command: &str) -> bool {
+    command.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+}
+
 /// Extract the `auth_token` field the extension carries in the body (since NM
 /// has no HTTP headers). Returns `None` when absent (e.g. for the `pair`
 /// command). The caller lifts this into an `Authorization: Bearer` header.
@@ -421,6 +441,20 @@ mod tests {
     fn extract_command_missing_returns_none() {
         let payload = br#"{"id":1}"#;
         assert_eq!(extract_command(payload), None);
+    }
+
+    #[test]
+    fn snake_case_commands_pass_the_whitelist() {
+        let payload = br#"{"id":1,"command":"get_entry"}"#;
+        let command = extract_command(payload).expect("command present");
+        assert!(is_valid_command(&command));
+    }
+
+    #[test]
+    fn command_with_crlf_fails_the_whitelist() {
+        let payload = br#"{"id":1,"command":"get_entry\r\nX-Injected: 1"}"#;
+        let command = extract_command(payload).expect("command present");
+        assert!(!is_valid_command(&command));
     }
 
     #[test]

@@ -41,7 +41,17 @@ pub fn seal_group(group: &Group, key: &[u8; 32]) -> Result<Vec<u8>, DatabaseErro
 /// 1. **v2**: AES-256-GCM with AAD (current, §5.1.4)
 /// 2. **v1**: AES-256-GCM without AAD (legacy v1.0.5)
 /// 3. **pre-v1.0.5**: plaintext bincode of Group
-pub fn open_group(blob: &[u8], key: &[u8; 32], group_id: &str) -> Result<Group, DatabaseError> {
+///
+/// The plaintext fallback is only permitted when `allow_plaintext` is true —
+/// reserved for the explicit legacy migration path. Runtime callers must pass
+/// `false` so injected plaintext records fail closed (see `open_entry`).
+pub fn open_group(
+    blob: &[u8],
+    key: &[u8; 32],
+    group_id: &str,
+    allow_plaintext: bool,
+) -> Result<Group, DatabaseError> {
+    super::check_encoded_blob_size(blob)?;
     // Try v2 (AAD) first.
     if let Ok(enc) = bincode::deserialize::<EncryptedData>(blob) {
         let aad = group_aad(group_id);
@@ -55,6 +65,11 @@ pub fn open_group(blob: &[u8], key: &[u8; 32], group_id: &str) -> Result<Group, 
                 .map_err(|e| DatabaseError::SerializationError(e.to_string()));
         }
     }
-    // Fallback: old plaintext format (pre-v1.0.5).
+    // Fallback: old plaintext format (pre-v1.0.5), migration path only.
+    if !allow_plaintext {
+        return Err(DatabaseError::DeserializationError(
+            "group record is not in an encrypted format".to_string(),
+        ));
+    }
     bincode::deserialize(blob).map_err(|e| DatabaseError::SerializationError(e.to_string()))
 }

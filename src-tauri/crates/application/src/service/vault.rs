@@ -66,16 +66,47 @@ pub fn get_enc_key(state: &Arc<AppState>) -> Result<[u8; 32], VaultError> {
     state.session.get_enc_key()
 }
 
-fn ensure_db_dir() -> Result<std::path::PathBuf, VaultError> {
-    paths::ensure_db_dir().map_err(|e| VaultError::InternalError(e.to_string()))
+/// Open the on-disk database and report whether a verification row exists (B2).
+///
+/// Returns `Ok(false)` when the file does not exist. A file that exists but
+/// cannot be opened/read is an error: callers must not treat it as "no vault"
+/// and proceed to overwrite it.
+fn disk_has_verification(db_path: &std::path::Path) -> Result<bool, VaultError> {
+    if !db_path.exists() {
+        return Ok(false);
+    }
+    let db = database::init_database(db_path)?;
+    database::load_verification_data(&db)
+        .map(|data| data.is_some())
+        .map_err(VaultError::from)
 }
 
 pub fn is_initialized(state: &Arc<AppState>) -> bool {
-    state
+    if state
         .verification_data
         .lock()
         .expect("verification lock poisoned")
         .is_some()
+    {
+        return true;
+    }
+    // A database handle already open in state was opened by setup_vault from
+    // the actual vault file — its (missing) verification row is authoritative.
+    {
+        let db_guard = state.database.lock().expect("db lock poisoned");
+        if db_guard.is_some() {
+            return false;
+        }
+    }
+    // Disk fallback (B2): a vault left on disk by a previous run counts as
+    // initialized during the boot window before setup_vault() has loaded it.
+    match disk_has_verification(&paths::get_db_path()) {
+        Ok(has_verification) => has_verification,
+        Err(e) => {
+            tracing::warn!("vault disk state check failed: {}", e);
+            false
+        }
+    }
 }
 
 pub fn is_unlocked(state: &Arc<AppState>) -> bool {
@@ -83,6 +114,16 @@ pub fn is_unlocked(state: &Arc<AppState>) -> bool {
 }
 
 pub fn init_vault(state: &Arc<AppState>, password: Zeroizing<String>) -> Result<(), VaultError> {
+    init_vault_at(&paths::get_db_path(), state, password)
+}
+
+/// Create a new vault at `db_path`. Split from [`init_vault`] so tests can
+/// target a temporary path instead of the real user vault location.
+fn init_vault_at(
+    db_path: &std::path::Path,
+    state: &Arc<AppState>,
+    password: Zeroizing<String>,
+) -> Result<(), VaultError> {
     pwdvault_domain::validation::master_password(password.as_str())?;
     if state
         .verification_data
@@ -94,8 +135,19 @@ pub fn init_vault(state: &Arc<AppState>, password: Zeroizing<String>) -> Result<
         return Err(VaultError::VaultAlreadyExists);
     }
 
-    let db_path = ensure_db_dir()?;
-    let db = Arc::new(database::init_database(&db_path)?);
+    if let Some(parent) = db_path.parent() {
+        paths::secure_dir(parent).map_err(|e| VaultError::InternalError(e.to_string()))?;
+    }
+
+    // Disk-level duplicate guard (B2): the in-memory check alone cannot see a
+    // vault left on disk by a previous run. Never overwrite an existing
+    // verification row; an unreadable existing file also fails closed.
+    if disk_has_verification(db_path)? {
+        // `password` is Zeroizing<String>; it is wiped on drop at return.
+        return Err(VaultError::VaultAlreadyExists);
+    }
+
+    let db = Arc::new(database::init_database(db_path)?);
     *state.database.lock().expect("db lock poisoned") = Some(db.clone());
 
     let salt = crypto::kdf::generate_salt();
@@ -187,53 +239,71 @@ pub fn unlock_vault(
             "Database format is newer than this application".to_string(),
         ));
     }
-    let integrity_required =
-        pwdvault_infrastructure::vault_header::is_integrity_required(header.as_ref());
-
     // Step 5-6: Verify integrity and migrate if needed.
-    if integrity_required {
+    match header.as_ref() {
         // Modern database with integrity_required=true.
         // §5.1.4: Missing or unknown digest → REJECT (no auto-migration).
-        if !database::integrity::has_digest(&db)? {
-            tracing::error!("integrity_required but digest missing — possible tampering");
-            return Err(VaultError::InvalidBackup(
-                "Database integrity check failed".to_string(),
-            ));
+        Some(value) if value.integrity_required => {
+            if !database::integrity::has_digest(&db)? {
+                tracing::error!("integrity_required but digest missing — possible tampering");
+                return Err(VaultError::InvalidBackup(
+                    "Database integrity check failed".to_string(),
+                ));
+            }
+            if database::integrity::needs_digest_rebuild(&db)? {
+                // Unknown digest version → REJECT (not auto-rebuild)
+                tracing::error!("integrity_required but digest version unknown — possible downgrade");
+                return Err(VaultError::InvalidBackup(
+                    "Database integrity check failed".to_string(),
+                ));
+            }
+            if !database::integrity::verify_integrity(&db, mac_key.as_ref())? {
+                // Digest mismatch → tampering detected → REJECT
+                return Err(VaultError::InvalidBackup(
+                    "Database integrity check failed".to_string(),
+                ));
+            }
         }
-        if database::integrity::needs_digest_rebuild(&db)? {
-            // Unknown digest version → REJECT (not auto-rebuild)
-            tracing::error!("integrity_required but digest version unknown — possible downgrade");
-            return Err(VaultError::InvalidBackup(
-                "Database integrity check failed".to_string(),
-            ));
+        // Header present but integrity not yet enforced: one-time legacy
+        // migration. If a digest is already stored it must match BEFORE the
+        // migration runs — otherwise a downgrade header (e.g. spliced in from
+        // an old backup) could launder tampered records by silently rebuilding
+        // the digest baseline (B1 fail-closed).
+        Some(_) => {
+            if database::integrity::has_digest(&db)?
+                && !database::integrity::verify_integrity(&db, mac_key.as_ref())?
+            {
+                tracing::error!("legacy migration blocked: stored digest does not match contents");
+                return Err(VaultError::InvalidBackup(
+                    "Database integrity check failed".to_string(),
+                ));
+            }
+            tracing::info!("migrating database from legacy format");
+            let steps = database::migrations::plan(
+                0,
+                pwdvault_infrastructure::vault_header::VAULT_FORMAT_VERSION,
+            )?;
+            if steps != vec![database::migrations::MigrationStep::LegacyToV1] {
+                return Err(VaultError::InvalidBackup(
+                    "Unsupported database migration path".to_string(),
+                ));
+            }
+            let (mut master_key, _) = crypto::kdf::derive_key_with_params(
+                password.as_str(),
+                &verification_data.salt,
+                &verification_data.params,
+            )?;
+            let migrate_result =
+                migrate_database(&db, &master_key, enc_key.as_ref(), mac_key.as_ref());
+            master_key.zeroize();
+            migrate_result?; // Error = stay Locked
         }
-        if !database::integrity::verify_integrity(&db, mac_key.as_ref())? {
-            // Digest mismatch → tampering detected → REJECT
-            return Err(VaultError::InvalidBackup(
-                "Database integrity check failed".to_string(),
-            ));
-        }
-    } else {
-        // Legacy database (no header, or header with integrity_required=false).
-        // Migration is triggered by the explicit absence of integrity protection.
-        tracing::info!("migrating database from legacy format");
-        let steps = database::migrations::plan(
-            0,
-            pwdvault_infrastructure::vault_header::VAULT_FORMAT_VERSION,
-        )?;
-        if steps != vec![database::migrations::MigrationStep::LegacyToV1] {
-            return Err(VaultError::InvalidBackup(
-                "Unsupported database migration path".to_string(),
-            ));
-        }
-        let (mut master_key, _) = crypto::kdf::derive_key_with_params(
-            password.as_str(),
-            &verification_data.salt,
-            &verification_data.params,
-        )?;
-        let migrate_result = migrate_database(&db, &master_key, enc_key.as_ref(), mac_key.as_ref());
-        master_key.zeroize();
-        migrate_result?; // Error = stay Locked
+        // No header at all: fail closed (B1). Treating a missing header as
+        // "legacy, migrate silently" would let anyone with file write access
+        // delete one row and rebuild the integrity baseline over injected
+        // records. Pre-1.0.5 vaults must be migrated explicitly with
+        // PwdVault 1.1.4.
+        None => return Err(VaultError::LegacyVaultRequiresMigration),
     }
 
     // Step 7: Load and validate settings
@@ -270,6 +340,11 @@ pub fn lock_vault(state: &Arc<AppState>) {
 /// 5. **Digest baseline**: establishes the v4 integrity digest.
 ///
 /// All writes (steps 2-5) happen in a single VaultStore transaction (§5.1.2).
+///
+/// Unlock no longer triggers this automatically (B1 fail-closed): it is kept
+/// for tests and for a future explicit migration tool only, hence the
+/// `dead_code` allowance in non-test builds.
+#[cfg_attr(not(test), allow(dead_code))]
 fn migrate_database(
     db: &Arc<redb::Database>,
     master_key: &[u8; 32],
@@ -297,7 +372,9 @@ fn migrate_database(
     let entry_count = entry_ids.len();
     let mut sealed_entries: Vec<(String, Vec<u8>)> = Vec::with_capacity(entry_count);
     for id in &entry_ids {
-        if let Some(mut entry) = database::load_entry(db, enc_key, id)? {
+        // Migration is the only path allowed to read pre-v1.0.5 plaintext
+        // records (allow_plaintext = true).
+        if let Some(mut entry) = database::load_entry(db, enc_key, id, true)? {
             // Re-encrypt encrypted_password: master_key → enc_key
             if !entry.encrypted_password.is_empty() {
                 let old_enc: EncryptedData = bincode::deserialize(&entry.encrypted_password)
@@ -337,7 +414,9 @@ fn migrate_database(
     let group_count = group_ids.len();
     let mut sealed_groups: Vec<(String, Vec<u8>)> = Vec::with_capacity(group_count);
     for id in &group_ids {
-        if let Some(group) = database::load_group(db, enc_key, id)? {
+        // Migration is the only path allowed to read pre-v1.0.5 plaintext
+        // records (allow_plaintext = true).
+        if let Some(group) = database::load_group(db, enc_key, id, true)? {
             let blob = database::group_codec::seal_group(&group, enc_key)?;
             sealed_groups.push((group.id.clone(), blob));
         }
@@ -574,13 +653,34 @@ mod tests {
     }
 
     #[test]
-    fn legacy_fixture_migrates_once_and_unlocks_again_without_remigration() {
+    fn legacy_fixture_unlock_fails_closed_and_explicit_migration_succeeds() {
         let (_dir, db_path, _) = crate::fixtures::create_pre_v1_0_5(3);
         let db = Arc::new(redb::Database::open(db_path).unwrap());
         let verification = database::load_verification_data(&db).unwrap().unwrap();
         let state = Arc::new(AppState::default());
         *state.database.lock().unwrap() = Some(Arc::clone(&db));
-        *state.verification_data.lock().unwrap() = Some(verification);
+        *state.verification_data.lock().unwrap() = Some(verification.clone());
+
+        // B1: a headerless vault must NOT be silently migrated on unlock.
+        let result = unlock_vault(
+            &state,
+            Zeroizing::new(crate::fixtures::FIXTURE_PASSWORD.to_string()),
+        );
+        assert!(matches!(
+            result,
+            Err(VaultError::LegacyVaultRequiresMigration)
+        ));
+        assert!(!state.is_unlocked());
+
+        // Explicit migration (the 1.1.4 tool path) still works and unlocks.
+        let (master_key, _) = crypto::kdf::derive_key_with_params(
+            crate::fixtures::FIXTURE_PASSWORD,
+            &verification.salt,
+            &verification.params,
+        )
+        .unwrap();
+        let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &verification.salt);
+        migrate_database(&db, &master_key, &enc_key, &mac_key).unwrap();
 
         assert!(unlock_vault(
             &state,
@@ -624,15 +724,193 @@ mod tests {
         txn.commit().unwrap();
 
         let state = Arc::new(AppState::default());
-        *state.database.lock().unwrap() = Some(db);
-        *state.verification_data.lock().unwrap() = Some(verification);
+        *state.database.lock().unwrap() = Some(db.clone());
+        *state.verification_data.lock().unwrap() = Some(verification.clone());
         assert!(unlock_vault(
             &state,
             Zeroizing::new(crate::fixtures::FIXTURE_PASSWORD.to_string())
         )
         .is_err());
+
+        let (master_key, _) = crypto::kdf::derive_key_with_params(
+            crate::fixtures::FIXTURE_PASSWORD,
+            &verification.salt,
+            &verification.params,
+        )
+        .unwrap();
+        let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &verification.salt);
+        assert!(migrate_database(&db, &master_key, &enc_key, &mac_key).is_err());
+
         assert!(!state.is_unlocked());
         assert!(state.session.get_enc_key().is_err());
         assert!(state.session.get_mac_key().is_err());
+    }
+
+    /// B1 test 1: deleting the header row must fail the unlock with
+    /// `LegacyVaultRequiresMigration`, not silently migrate.
+    #[test]
+    fn deleted_header_is_rejected_with_migration_error() {
+        let vault = create_modern_vault(1);
+        let db = get_db(&vault.state).unwrap();
+        delete_header_row(&db);
+
+        let result = unlock_vault(&vault.state, Zeroizing::new(TEST_PASSWORD.to_string()));
+        assert!(matches!(
+            result,
+            Err(VaultError::LegacyVaultRequiresMigration)
+        ));
+        assert!(!vault.state.is_unlocked());
+        assert!(vault.state.session.get_enc_key().is_err());
+        assert!(vault.state.session.get_mac_key().is_err());
+    }
+
+    /// Remove `VAULT_TABLE["header"]` without touching anything else.
+    fn delete_header_row(db: &redb::Database) {
+        let txn = db.begin_write().unwrap();
+        {
+            let mut table = txn.open_table(database::VAULT_TABLE).unwrap();
+            table
+                .remove(pwdvault_infrastructure::vault_header::HEADER_KEY)
+                .unwrap();
+        }
+        txn.commit().unwrap();
+    }
+
+    /// B1 test 2: after the rejected headerless unlock the stored digest is
+    /// untouched (no silent baseline rebuild).
+    #[test]
+    fn deleted_header_rejection_does_not_rewrite_digest() {
+        let vault = create_modern_vault(1);
+        let db = get_db(&vault.state).unwrap();
+
+        fn stored_digest(db: &redb::Database) -> Option<Vec<u8>> {
+            let txn = db.begin_read().unwrap();
+            let table = txn
+                .open_table(database::integrity::META_TABLE)
+                .expect("meta table");
+            table
+                .get(database::integrity::DB_DIGEST_KEY)
+                .unwrap()
+                .map(|v| v.value().to_vec())
+        }
+
+        let digest_before = stored_digest(&db).expect("fixture must have a digest");
+        delete_header_row(&db);
+
+        assert!(unlock_vault(&vault.state, Zeroizing::new(TEST_PASSWORD.to_string())).is_err());
+        assert_eq!(stored_digest(&db).as_deref(), Some(digest_before.as_slice()));
+    }
+
+    /// B1 test 4: a spliced header with integrity_required=false (downgrade)
+    /// plus tampered records must be rejected BEFORE migration rebuilds the
+    /// digest baseline.
+    #[test]
+    fn downgraded_header_with_stale_digest_is_rejected() {
+        let vault = create_modern_vault(1);
+        let db = get_db(&vault.state).unwrap();
+
+        let params = AdaptiveParams {
+            m_cost: 16384,
+            t_cost: 1,
+            p_cost: 1,
+        };
+        let (master_key, _) =
+            crypto::kdf::derive_key_with_params(TEST_PASSWORD, &TEST_SALT, &params).unwrap();
+        let (enc_key, _) = crypto::kdf::derive_subkeys(&master_key, &TEST_SALT);
+
+        // Tamper an entry, then splice in a "legacy" header so unlock would
+        // take the migration path. Plain txn: the stale digest must survive.
+        let txn = db.begin_write().unwrap();
+        {
+            let mut table = txn.open_table(database::ENTRIES_TABLE).unwrap();
+            table
+                .insert(vault.entry_ids[0].as_str(), &[0xEE, 0xFF][..])
+                .unwrap();
+            let mut header = pwdvault_infrastructure::vault_header::VaultHeader::new_initial();
+            header.integrity_required = false;
+            pwdvault_infrastructure::vault_header::save_header_in_txn(
+                &txn,
+                &header,
+                &enc_key,
+            )
+            .unwrap();
+        }
+        txn.commit().unwrap();
+
+        let result = unlock_vault(&vault.state, Zeroizing::new(TEST_PASSWORD.to_string()));
+        assert!(matches!(result, Err(VaultError::InvalidBackup(_))));
+        assert!(!vault.state.is_unlocked());
+    }
+
+    /// B1 test 5: runtime readers reject pre-v1.0.5 plaintext records
+    /// regardless of header state; only the migration channel accepts them.
+    #[test]
+    fn runtime_paths_reject_plaintext_records() {
+        let (_dir, db_path, _) = crate::fixtures::create_pre_v1_0_5(2);
+        let db = Arc::new(redb::Database::open(db_path).unwrap());
+        let verification = database::load_verification_data(&db).unwrap().unwrap();
+        let (master_key, _) = crypto::kdf::derive_key_with_params(
+            crate::fixtures::FIXTURE_PASSWORD,
+            &verification.salt,
+            &verification.params,
+        )
+        .unwrap();
+        let (enc_key, _) = crypto::kdf::derive_subkeys(&master_key, &verification.salt);
+
+        let ids = database::list_entries(&db).unwrap();
+        assert_eq!(ids.len(), 2);
+
+        // Runtime channel (allow_plaintext = false) must fail closed.
+        assert!(database::load_entry(&db, &enc_key, &ids[0], false).is_err());
+        assert!(database::list_all_entries_bulk(&db, &enc_key, None).is_err());
+        assert!(database::list_all_entries_bulk(&db, &enc_key, Some("group-0")).is_err());
+
+        // Migration channel still reads the plaintext records.
+        assert!(database::load_entry(&db, &enc_key, &ids[0], true)
+            .unwrap()
+            .is_some());
+    }
+
+    /// B2 test: an existing on-disk verification row makes `init_vault` fail
+    /// with the existing `VaultAlreadyExists` error and leaves the row intact.
+    #[test]
+    fn init_vault_refuses_to_overwrite_existing_verification_row() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("existing.db");
+
+        // Build a vault file that has a verification row on disk but is NOT
+        // loaded into any AppState (simulates a previous app run).
+        let existing_db = database::init_database(&db_path).unwrap();
+        let params = AdaptiveParams {
+            m_cost: 16384,
+            t_cost: 1,
+            p_cost: 1,
+        };
+        let (master_key, _) =
+            crypto::kdf::derive_key_with_params(TEST_PASSWORD, &TEST_SALT, &params).unwrap();
+        let verification = create_verification_header(&master_key, TEST_SALT, params).unwrap();
+        database::save_verification_data(&existing_db, &verification).unwrap();
+        drop(existing_db);
+
+        let row_before = {
+            let db = redb::Database::open(&db_path).unwrap();
+            database::load_verification_data(&db).unwrap().unwrap()
+        };
+
+        let state = Arc::new(AppState::default());
+        // Sanity: the disk check (B2) sees the vault on the temp path.
+        assert!(disk_has_verification(&db_path).unwrap());
+
+        let result = init_vault_at(&db_path, &state, Zeroizing::new(TEST_PASSWORD.to_string()));
+        assert!(matches!(result, Err(VaultError::VaultAlreadyExists)));
+        assert!(state.session.get_enc_key().is_err());
+
+        let row_after = {
+            let db = redb::Database::open(&db_path).unwrap();
+            database::load_verification_data(&db).unwrap().unwrap()
+        };
+        let before = bincode::serialize(&row_before).unwrap();
+        let after = bincode::serialize(&row_after).unwrap();
+        assert_eq!(before, after, "verification row bytes must not change");
     }
 }

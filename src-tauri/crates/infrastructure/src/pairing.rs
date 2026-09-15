@@ -8,6 +8,7 @@ use rand::{rngs::OsRng, Rng, RngCore};
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
+use subtle::ConstantTimeEq;
 
 #[derive(Debug)]
 struct PairSession {
@@ -50,6 +51,16 @@ pub fn create_session(caller: &str) -> PairChallenge {
     challenge
 }
 
+/// Constant-time string comparison for pairing secrets (D6). Length mismatch
+/// short-circuits first — lengths are not secret (6-digit code, 32-char hex
+/// nonce) — while equal-length contents are compared without early exit.
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.as_bytes().ct_eq(b.as_bytes()).into()
+}
+
 /// Verify and consume a caller-bound challenge.
 ///
 /// A different caller or nonce cannot consume/decrement the legitimate
@@ -64,10 +75,10 @@ pub fn verify(caller: &str, nonce: &str, code: &str) -> bool {
         sessions.remove(caller);
         return false;
     }
-    if session.nonce != nonce {
+    if !constant_time_eq(&session.nonce, nonce) {
         return false;
     }
-    if session.code != code {
+    if !constant_time_eq(&session.code, code) {
         session.attempts_remaining = session.attempts_remaining.saturating_sub(1);
         if session.attempts_remaining == 0 {
             sessions.remove(caller);

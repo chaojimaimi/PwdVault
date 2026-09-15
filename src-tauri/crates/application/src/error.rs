@@ -6,9 +6,7 @@
 //! for the frontend/extension.
 
 use pwdvault_domain::DomainError;
-use pwdvault_infrastructure::crypto::{
-    EncryptionError, KdfError, KeyStoreError, VerificationError,
-};
+use pwdvault_infrastructure::crypto::{EncryptionError, KdfError, VerificationError};
 use pwdvault_infrastructure::database::DatabaseError;
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +14,7 @@ use serde::{Deserialize, Serialize};
 pub enum VaultError {
     VaultLocked,
     VaultAlreadyExists,
+    LegacyVaultRequiresMigration,
     InvalidPassword,
     EntryNotFound,
     EncryptionFailed(String),
@@ -42,15 +41,6 @@ impl From<EncryptionError> for VaultError {
     }
 }
 
-impl From<KeyStoreError> for VaultError {
-    fn from(e: KeyStoreError) -> Self {
-        match e {
-            KeyStoreError::VaultLocked => VaultError::VaultLocked,
-            KeyStoreError::AlreadyUnlocked => VaultError::VaultAlreadyExists,
-        }
-    }
-}
-
 impl From<KdfError> for VaultError {
     fn from(e: KdfError) -> Self {
         VaultError::InternalError(e.to_string())
@@ -74,6 +64,10 @@ impl std::fmt::Display for VaultError {
         match self {
             VaultError::VaultLocked => write!(f, "Vault is locked"),
             VaultError::VaultAlreadyExists => write!(f, "Vault already exists"),
+            VaultError::LegacyVaultRequiresMigration => write!(
+                f,
+                "Vault database is missing its integrity header and must be migrated"
+            ),
             VaultError::InvalidPassword => write!(f, "Invalid password"),
             VaultError::EntryNotFound => write!(f, "Entry not found"),
             VaultError::EncryptionFailed(e) => write!(f, "Encryption failed: {}", e),
@@ -101,6 +95,11 @@ impl VaultError {
         match self {
             VaultError::VaultLocked => "Vault is locked".to_string(),
             VaultError::VaultAlreadyExists => "Vault already exists".to_string(),
+            VaultError::LegacyVaultRequiresMigration => "Vault database is missing its integrity header. If this vault \
+                was created by an older version of PwdVault (pre-1.0.5), \
+                please migrate it using PwdVault 1.1.4 first, or restore from \
+                a backup."
+                .to_string(),
             VaultError::InvalidPassword => "Invalid password".to_string(),
             VaultError::EntryNotFound => "Entry not found".to_string(),
             VaultError::RateLimited { retry_after_secs } => {

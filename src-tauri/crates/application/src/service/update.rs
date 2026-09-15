@@ -12,6 +12,11 @@ use crate::{AppState, UpdateInfo, VaultError};
 const UPDATE_URL: &str = "https://api.github.com/repos/chaojimaimi/PwdVault/releases/latest";
 const TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Response body cap for the update check (D5). The releases payload is a few
+/// KiB; refusing to buffer unbounded attacker- or proxy-supplied bytes keeps
+/// the update check from allocating arbitrary memory.
+const MAX_UPDATE_BODY_SIZE: u64 = 1024 * 1024;
+
 /// Fetch the latest release from GitHub and compare versions.
 ///
 /// The caller is expected to run this on a `spawn_blocking` worker. Returns
@@ -41,8 +46,14 @@ pub fn check_for_updates(state: &std::sync::Arc<AppState>) -> Result<UpdateInfo,
         return Ok(no_update(current));
     }
 
+    // Cap the response body: an oversized payload fails the read and the
+    // update check degrades to a silent no-op, which is acceptable here.
+    // (ureq 3's Body has no io::Read impl; `with_config().limit()` is the
+    // API-sanctioned way to bound the read.)
     let body = response
         .body_mut()
+        .with_config()
+        .limit(MAX_UPDATE_BODY_SIZE)
         .read_to_string()
         .map_err(|_| VaultError::InternalError("Failed to read response".to_string()))?;
 

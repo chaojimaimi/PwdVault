@@ -25,7 +25,7 @@ use std::sync::Arc;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    Manager,
+    Emitter, Manager,
 };
 
 use pwdvault_domain::constants;
@@ -174,9 +174,18 @@ pub fn run() {
                 if let Err(e) = native_messaging::start_server(
                     constants::NATIVE_MESSAGING_PORT,
                     state_for_server,
-                    Some(app_handle),
+                    Some(app_handle.clone()),
                 ) {
                     tracing::error!("Failed to start native messaging server: {}", e);
+                    // B3: a bind failure must not stay silent. If another
+                    // process squats the port, it can intercept extension
+                    // traffic — surface the failure in the UI so the user can
+                    // free the port and restart. The error string contains no
+                    // sensitive details (bind errors only name the OS cause).
+                    let _ = app_handle.emit(
+                        "native-server-error",
+                        format!("Browser extension server failed to start: {e}"),
+                    );
                 }
             });
 
@@ -208,7 +217,15 @@ pub fn run() {
             start_auto_lock_thread(state.clone());
 
             let tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                // TrayIconBuilder::icon takes a non-optional Image; the icon
+                // is compiled into the binary, so a missing embedded icon is
+                // a build defect and must fail loudly instead of panicking on
+                // a bare unwrap (D3).
+                .icon(
+                    app.default_window_icon()
+                        .expect("embedded window icon missing")
+                        .clone(),
+                )
                 .menu(&menu)
                 .tooltip("PwdVault")
                 .on_menu_event(|app, event| match event.id.as_ref() {
