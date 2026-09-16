@@ -278,6 +278,16 @@ impl<'a> SessionLease<'a> {
         }
     }
 
+    /// The session generation snapshot taken at lease acquisition.
+    ///
+    /// Callers that copy key material out of a lease (the D8 flows) compare
+    /// this against a fresh lease's generation later on: a mismatch proves
+    /// the session was re-published in the meantime (lock → re-unlock or a
+    /// key-rotating re-seal), so the copied keys are stale.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     /// Mark successful activity without re-entering the session RwLock.
     pub fn touch_activity(&self) {
         if let SessionInner::Unlocked { last_activity, .. } = &*self.guard {

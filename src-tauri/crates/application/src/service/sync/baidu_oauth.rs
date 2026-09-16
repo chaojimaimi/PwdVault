@@ -1,19 +1,22 @@
 //! P3.4 Baidu Netdisk OAuth2 authorization-code flow (D6 — Tauri-only).
 //!
 //! Authorization-code flow WITHOUT PKCE (Baidu does not support it — plan
-//! decision). `baidu_start_auth` assembles the authorize URL and parks a
-//! detached listener on the fixed loopback port ([`BAIDU_OAUTH_PORT`], kept
-//! distinct from the extension bridge port 17429); the browser redirect
-//! lands in a process-level slot that `baidu_complete_auth` exchanges for
-//! tokens stored in the NON-INTERACTIVE credential store (`sync-baidu-token`
+//! decision). `baidu_start_auth` assembles the authorize URL — carrying a
+//! CSPRNG `state` token (P2-2 CSRF guard) — and parks a detached listener
+//! on the fixed loopback port ([`BAIDU_OAUTH_PORT`], kept distinct from the
+//! extension bridge port 17429); the browser redirect lands in a
+//! process-level slot that `baidu_complete_auth` exchanges for tokens
+//! stored in the NON-INTERACTIVE credential store (`sync-baidu-token`
 //! account, never behind Touch ID — a background sync must not prompt).
-//! AppKey/SecretKey are compile-time placeholders ([`BAIDU_APP_KEY`] /
-//! [`BAIDU_SECRET_KEY`], docs/BAIDU-SETUP.md).
+//! The code is accepted only when the redirect echoed the exact parked
+//! state. AppKey/SecretKey are compile-time placeholders
+//! ([`BAIDU_APP_KEY`] / [`BAIDU_SECRET_KEY`], docs/BAIDU-SETUP.md).
 
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use rand::RngCore;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::backend::BackendError;
@@ -51,13 +54,34 @@ pub struct BaiduAuthStart {
     pub auth_url: String,
 }
 
-/// Outcome of the loopback callback wait.
-pub(crate) type CallbackOutcome = Result<String, String>;
+/// Outcome of the loopback callback wait: what the browser redirect
+/// delivered — the authorization code plus the echoed `state` (absent when
+/// Baidu left it off, which the P2-2 validation below rejects).
+pub(crate) type CallbackOutcome = Result<CallbackGrant, String>;
 
-/// The single pending-callback slot: `baidu_start_auth` parks the browser
-/// redirect result here (the detached listener thread outlives the command
-/// call), `baidu_complete_auth` consumes it. `pub(crate)` for the tests.
-pub(crate) static PENDING_CALLBACK: Mutex<Option<CallbackOutcome>> = Mutex::new(None);
+/// The code + echoed `state` carried by one browser redirect.
+#[derive(Debug, Clone)]
+pub(crate) struct CallbackGrant {
+    pub(crate) code: String,
+    pub(crate) state: Option<String>,
+}
+
+/// One parked authorization: the CSPRNG `state` token embedded in the
+/// authorize URL (P2-2 CSRF guard) and, once the redirect lands, the
+/// listener's outcome. `baidu_complete_auth` consumes the slot and accepts
+/// the code ONLY when the callback echoed the exact expected state.
+#[derive(Debug)]
+pub(crate) struct PendingAuth {
+    pub(crate) expected_state: String,
+    pub(crate) outcome: Option<CallbackOutcome>,
+}
+
+/// The single pending-authorization slot: `baidu_start_auth` parks the
+/// expected state here (the detached listener thread outlives the command
+/// call) and the browser redirect outcome lands beside it;
+/// `baidu_complete_auth` consumes and validates both. `pub(crate)` for the
+/// tests.
+pub(crate) static PENDING_CALLBACK: Mutex<Option<PendingAuth>> = Mutex::new(None);
 
 /// Whether this build carries compiled-in Baidu credentials (P3.8: the
 /// shipped placeholders are empty → `NotConfigured`, and the frontend shows
@@ -73,15 +97,31 @@ fn auth_failed(message: impl Into<String>) -> VaultError {
     }
 }
 
+/// CSPRNG OAuth `state` token (P2-2 CSRF guard): 16 random bytes from the
+/// OS CSPRNG, hex-encoded. Rides in the authorize URL and must come back
+/// verbatim in the redirect before the code is accepted.
+fn new_oauth_state() -> String {
+    let mut bytes = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 /// Assemble the authorize URL (P3.4): authorization code, our registered
-/// loopback redirect (exact match including port), netdisk scope, page
-/// display. No PKCE — Baidu's OAuth does not support it (plan decision).
-pub(crate) fn build_auth_url(app_key: &str, redirect_uri: &str, oauth_base: &str) -> String {
+/// loopback redirect (exact match including port), the CSRF `state` token
+/// (P2-2), netdisk scope, page display. No PKCE — Baidu's OAuth does not
+/// support it (plan decision).
+pub(crate) fn build_auth_url(
+    app_key: &str,
+    redirect_uri: &str,
+    oauth_base: &str,
+    state: &str,
+) -> String {
     format!(
         "{oauth_base}/oauth/2.0/authorize?\
-         response_type=code&client_id={}&redirect_uri={}&scope=basic,netdisk&display=page",
+         response_type=code&client_id={}&redirect_uri={}&state={}&scope=basic,netdisk&display=page",
         super::baidu::encode_value(app_key),
         super::baidu::encode_value(redirect_uri),
+        super::baidu::encode_value(state),
     )
 }
 
@@ -104,12 +144,24 @@ pub fn baidu_start_auth(_state: &Arc<AppState>) -> Result<BaiduAuthStart, VaultE
     let server = tiny_http::Server::from_listener(listener, None)
         .map_err(|e| auth_failed(format!("cannot start the OAuth callback server: {e}")))?;
     // One pending authorization at a time: a new start supersedes an old
-    // (possibly stale) callback result.
-    *PENDING_CALLBACK.lock().expect("pending callback lock poisoned") = None;
-    let auth_url = build_auth_url(BAIDU_APP_KEY, BAIDU_REDIRECT_URI, OAUTH_API_BASE);
+    // (possibly stale) callback result. The CSPRNG state token is parked
+    // with the slot — the redirect must echo it verbatim (P2-2).
+    let state = new_oauth_state();
+    *PENDING_CALLBACK.lock().expect("pending callback lock poisoned") = Some(PendingAuth {
+        expected_state: state.clone(),
+        outcome: None,
+    });
+    let auth_url = build_auth_url(BAIDU_APP_KEY, BAIDU_REDIRECT_URI, OAUTH_API_BASE, &state);
     std::thread::spawn(move || {
         let outcome = wait_for_callback(&server, OAUTH_CALLBACK_TIMEOUT);
-        *PENDING_CALLBACK.lock().expect("pending callback lock poisoned") = Some(outcome);
+        // Fill the parked authorization IN PLACE — the expected_state that
+        // start_auth parked must survive for the completion validation. (A
+        // cleared slot means the flow was already consumed or restarted;
+        // the stale result is dropped.)
+        let mut pending = PENDING_CALLBACK.lock().expect("pending callback lock poisoned");
+        if let Some(pending) = pending.as_mut() {
+            pending.outcome = Some(outcome);
+        }
     });
     Ok(BaiduAuthStart { auth_url })
 }
@@ -142,16 +194,36 @@ pub(crate) fn complete_auth_with(
 ) -> Result<(), BackendError> {
     let code = match code.filter(|value| !value.trim().is_empty()) {
         Some(code) => code.to_string(),
-        None => match PENDING_CALLBACK.lock().expect("pending callback lock poisoned").take()
-        {
-            Some(Ok(code)) => code,
-            Some(Err(reason)) => return Err(BackendError::Auth(reason)),
-            None => {
-                return Err(BackendError::Auth(
-                    "no pending Baidu authorization — start the flow first".to_string(),
-                ))
+        None => {
+            // Consume the parked authorization: the expected state (from
+            // start_auth) and the browser redirect must both be present,
+            // and the redirect must echo the exact state before the code is
+            // accepted (P2-2 CSRF guard — a mismatch clears the pending
+            // flow and fails).
+            let pending = PENDING_CALLBACK
+                .lock()
+                .expect("pending callback lock poisoned")
+                .take();
+            match pending {
+                None | Some(PendingAuth { outcome: None, .. }) => {
+                    return Err(BackendError::Auth(
+                        "no pending Baidu authorization — start the flow first".to_string(),
+                    ))
+                }
+                Some(PendingAuth { expected_state, outcome: Some(outcome) }) => match outcome {
+                    Ok(grant) => {
+                        if grant.state.as_deref() != Some(expected_state.as_str()) {
+                            return Err(BackendError::Auth(
+                                "Baidu callback state mismatch — restart the authorization"
+                                    .to_string(),
+                            ));
+                        }
+                        grant.code
+                    }
+                    Err(reason) => return Err(BackendError::Auth(reason)),
+                },
             }
-        },
+        }
     };
     // The redirect_uri must repeat the authorize-request value verbatim
     // (standard OAuth + Baidu requirement).
@@ -258,16 +330,18 @@ pub(crate) fn wait_for_callback(server: &tiny_http::Server, timeout: Duration) -
     }
 }
 
-/// Parse `?code=`/`?error=` from the callback URL and build the HTML answer
-/// for the browser (the user just sees "return to PwdVault").
+/// Parse `?code=`/`?state=`/`?error=` from the callback URL and build the
+/// HTML answer for the browser (the user just sees "return to PwdVault").
 pub(crate) fn callback_page_for(url: &str) -> (CallbackOutcome, String) {
     let query = url.split_once('?').map(|(_, query)| query).unwrap_or("");
     let mut code = None;
+    let mut state = None;
     let mut error = None;
     for pair in query.split('&') {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
         match key {
             "code" => code = Some(percent_decode(value)),
+            "state" => state = Some(percent_decode(value)),
             "error" => error = Some(percent_decode(value)),
             _ => {}
         }
@@ -281,7 +355,7 @@ pub(crate) fn callback_page_for(url: &str) -> (CallbackOutcome, String) {
         )
     } else if let Some(code) = code.filter(|code| !code.is_empty()) {
         (
-            Ok(code),
+            Ok(CallbackGrant { code, state }),
             "<html><body><h3>PwdVault</h3><p>Authorization received. Return to PwdVault \
              to finish connecting Baidu Netdisk.</p></body></html>"
                 .to_string(),

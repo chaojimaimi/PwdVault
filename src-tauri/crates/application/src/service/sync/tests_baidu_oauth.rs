@@ -14,28 +14,45 @@ use zeroize::Zeroizing;
 use super::backend::BackendError;
 use super::baidu_oauth::{
     baidu_complete_auth, baidu_configured, baidu_start_auth, build_auth_url, callback_page_for,
-    complete_auth_with, wait_for_callback, PENDING_CALLBACK,
+    complete_auth_with, wait_for_callback, CallbackGrant, CallbackOutcome, PendingAuth,
+    PENDING_CALLBACK,
 };
 use super::engine::{sync_connect, SyncBackendKind, SyncConfig};
 use super::tests_baidu::{error_code, stub_with_files};
 use crate::AppState;
 use pwdvault_infrastructure::keychain::{MemorySecretStore, SecretStore, SYNC_BAIDU_TOKEN_ACCOUNT};
 
+/// Park a pending authorization in the process-global slot (test setup).
+fn parked(expected_state: &str, outcome: CallbackOutcome) -> Option<PendingAuth> {
+    Some(PendingAuth {
+        expected_state: expected_state.to_string(),
+        outcome: Some(outcome),
+    })
+}
+
 #[test]
 fn auth_url_carries_registered_parameters() {
-    let url = build_auth_url("my-app-key", "http://127.0.0.1:17777/", "https://openapi.baidu.com");
+    let url = build_auth_url(
+        "my-app-key",
+        "http://127.0.0.1:17777/",
+        "https://openapi.baidu.com",
+        "0123456789abcdef0123456789abcdef",
+    );
     assert!(url.starts_with("https://openapi.baidu.com/oauth/2.0/authorize?"));
     assert!(url.contains("response_type=code"));
     assert!(url.contains("client_id=my-app-key"));
     // Exact-match loopback redirect (percent-encoded), port included.
     assert!(url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A17777%2F"));
+    // P2-2: the CSPRNG state token rides in the authorize URL.
+    assert!(url.contains("state=0123456789abcdef0123456789abcdef"));
     assert!(url.contains("scope=basic,netdisk"));
     assert!(url.contains("display=page"));
     // Baidu OAuth has no PKCE (plan decision) — none may be offered.
     assert!(!url.contains("code_challenge"));
 }
 
-/// The loopback listener receives the browser redirect and extracts the code.
+/// The loopback listener receives the browser redirect and extracts the
+/// code together with the echoed state (P2-2).
 #[test]
 fn callback_listener_receives_the_code() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -49,7 +66,9 @@ fn callback_listener_receives_the_code() {
         .unwrap();
     drop(stream);
 
-    assert_eq!(waiter.join().unwrap().unwrap(), "abc123");
+    let grant = waiter.join().unwrap().unwrap();
+    assert_eq!(grant.code, "abc123");
+    assert_eq!(grant.state.as_deref(), Some("x"));
 }
 
 /// Baidu error redirects and timeouts surface as failures.
@@ -100,9 +119,10 @@ fn complete_auth_exchanges_and_stores_tokens() {
     assert!(fresh.get(SYNC_BAIDU_TOKEN_ACCOUNT).is_err());
 }
 
-/// The pending-callback slot: `None` consumes the parked callback result —
-/// success, failure, or nothing-pending. (Only this test touches the
-/// process-global slot, so parallel test execution cannot race it.)
+/// The pending-authorization slot: `None` consumes the parked result —
+/// success (state echoed), failure, state mismatch/missing, or
+/// nothing-pending. (Only this test touches the process-global slot, so
+/// parallel test execution cannot race it.)
 #[test]
 fn complete_auth_consumes_the_pending_callback() {
     let (base, _state, _server) = stub_with_files(vec![]);
@@ -114,15 +134,29 @@ fn complete_auth_consumes_the_pending_callback() {
         Err(BackendError::Auth(_))
     ));
 
+    // Parked but the redirect has not landed yet → Auth.
+    *PENDING_CALLBACK.lock().unwrap() = Some(PendingAuth {
+        expected_state: "s1".to_string(),
+        outcome: None,
+    });
+    assert!(matches!(
+        complete_auth_with(&store, "test-app-key", "test-secret-key", &base, None),
+        Err(BackendError::Auth(_))
+    ));
+
     // Pending failure → the reason becomes the Auth message.
-    *PENDING_CALLBACK.lock().unwrap() = Some(Err("authorization timed out".to_string()));
+    *PENDING_CALLBACK.lock().unwrap() =
+        parked("s1", Err("authorization timed out".to_string()));
     assert!(matches!(
         complete_auth_with(&store, "test-app-key", "test-secret-key", &base, None),
         Err(BackendError::Auth(reason)) if reason.contains("timed out")
     ));
 
-    // Pending success → exchanged and stored (slot consumed).
-    *PENDING_CALLBACK.lock().unwrap() = Some(Ok("good-code".to_string()));
+    // P2-2: pending success with the state echoed → exchanged and stored.
+    *PENDING_CALLBACK.lock().unwrap() = parked(
+        "s1",
+        Ok(CallbackGrant { code: "good-code".to_string(), state: Some("s1".to_string()) }),
+    );
     complete_auth_with(&store, "test-app-key", "test-secret-key", &base, None).unwrap();
     let stored: serde_json::Value =
         serde_json::from_slice(&store.get(SYNC_BAIDU_TOKEN_ACCOUNT).unwrap()).unwrap();
@@ -131,8 +165,37 @@ fn complete_auth_consumes_the_pending_callback() {
         PENDING_CALLBACK.lock().unwrap().is_none(),
         "pending slot must be consumed"
     );
+
+    // P2-2: a DIFFERENT state (forged/CSRF redirect) → rejected, slot
+    // consumed, nothing stored.
+    let fresh: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::new());
+    *PENDING_CALLBACK.lock().unwrap() = parked(
+        "s1",
+        Ok(CallbackGrant { code: "evil-code".to_string(), state: Some("s2".to_string()) }),
+    );
+    assert!(matches!(
+        complete_auth_with(&fresh, "test-app-key", "test-secret-key", &base, None),
+        Err(BackendError::Auth(reason)) if reason.contains("state mismatch")
+    ));
+    assert!(fresh.get(SYNC_BAIDU_TOKEN_ACCOUNT).is_err());
+    assert!(PENDING_CALLBACK.lock().unwrap().is_none());
+
+    // P2-2: a redirect with the state MISSING → rejected as well.
+    *PENDING_CALLBACK.lock().unwrap() = parked(
+        "s1",
+        Ok(CallbackGrant { code: "good-code".to_string(), state: None }),
+    );
+    assert!(matches!(
+        complete_auth_with(&fresh, "test-app-key", "test-secret-key", &base, None),
+        Err(BackendError::Auth(reason)) if reason.contains("state mismatch")
+    ));
+    assert!(fresh.get(SYNC_BAIDU_TOKEN_ACCOUNT).is_err());
+
     // An explicit code takes precedence over any pending result.
-    *PENDING_CALLBACK.lock().unwrap() = Some(Ok("good-code".to_string()));
+    *PENDING_CALLBACK.lock().unwrap() = parked(
+        "s1",
+        Ok(CallbackGrant { code: "good-code".to_string(), state: Some("s1".to_string()) }),
+    );
     complete_auth_with(&store, "test-app-key", "test-secret-key", &base, Some("good-code"))
         .unwrap();
 }

@@ -3,12 +3,13 @@
 //! exclusive window under concurrent writes, and the reseal inheritance of
 //! the `sync_cek` row through change_password / recover_vault.
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use tempfile::TempDir;
 use zeroize::Zeroizing;
 
-use super::backend::{CloudBackend, MockCloudBackend};
+use super::backend::{BackendError, CloudBackend, MockCloudBackend, Precondition, RemoteStat};
 use super::engine::{
     sync_connect_with_backend, sync_disconnect, sync_now, sync_now_with_backend, sync_status,
     SyncConfig, SyncBackendKind,
@@ -463,6 +464,189 @@ fn concurrent_writes_during_sync_do_not_corrupt_vault() {
     assert_eq!(rows.len(), 61);
     let titles: Vec<String> = rows.into_iter().map(|row| row.title).collect();
     assert!(titles.iter().any(|title| title == "from-b"));
+}
+
+// ---------------------------------------------------------------------------
+// P1-1: stale-key guard on the post-window bookkeeping save
+// ---------------------------------------------------------------------------
+
+/// Test double wrapping the mock: the Nth `upload` blocks until the test
+/// opens the gate. This creates the deterministic P1-1 interleave point —
+/// after the D8 window's republish, before `save_sync_rows` runs.
+struct GatedBackend {
+    inner: MockCloudBackend,
+    gate_at: usize,
+    uploads_seen: AtomicUsize,
+    arrived: (Mutex<bool>, Condvar),
+    open: (Mutex<bool>, Condvar),
+}
+
+impl GatedBackend {
+    fn new(inner: MockCloudBackend, gate_at: usize) -> Self {
+        Self {
+            inner,
+            gate_at,
+            uploads_seen: AtomicUsize::new(0),
+            arrived: (Mutex::new(false), Condvar::new()),
+            open: (Mutex::new(false), Condvar::new()),
+        }
+    }
+
+    /// Block until the gated upload has been reached.
+    fn wait_until_arrived(&self) {
+        let (lock, signal) = &self.arrived;
+        let mut arrived = lock.lock().unwrap();
+        while !*arrived {
+            arrived = signal.wait(arrived).unwrap();
+        }
+    }
+
+    fn open(&self) {
+        let (lock, signal) = &self.open;
+        *lock.lock().unwrap() = true;
+        signal.notify_all();
+    }
+}
+
+impl CloudBackend for GatedBackend {
+    fn stat(&self, path: &str) -> Result<Option<RemoteStat>, BackendError> {
+        self.inner.stat(path)
+    }
+
+    fn download(&self, path: &str) -> Result<Vec<u8>, BackendError> {
+        self.inner.download(path)
+    }
+
+    fn upload(
+        &self,
+        path: &str,
+        body: &[u8],
+        precondition: Precondition,
+    ) -> Result<(), BackendError> {
+        let index = self.uploads_seen.fetch_add(1, Ordering::SeqCst);
+        if index == self.gate_at {
+            {
+                let (lock, signal) = &self.arrived;
+                *lock.lock().unwrap() = true;
+                signal.notify_all();
+            }
+            let (lock, signal) = &self.open;
+            let mut opened = lock.lock().unwrap();
+            while !*opened {
+                opened = signal.wait(opened).unwrap();
+            }
+        }
+        self.inner.upload(path, body, precondition)
+    }
+
+    fn upload_unique(&self, path: &str, body: &[u8]) -> Result<(), BackendError> {
+        self.inner.upload_unique(path, body)
+    }
+
+    fn delete(&self, path: &str) -> Result<(), BackendError> {
+        self.inner.delete(path)
+    }
+}
+
+/// P1-1 regression: a change_password completing AFTER the sync's D8 window
+/// (while the sync is parked in its network push phase) must not let the
+/// bookkeeping save refresh the integrity digest / sync_cek with the stale
+/// copied keys — that would leave the vault unopenable with the NEW
+/// password. The engine skips the save instead (bookkeeping loss only).
+#[test]
+fn change_password_after_sync_window_does_not_let_stale_keys_write() {
+    let (device_a, _dir_a) = test_state();
+    let cloud = MockCloudBackend::new();
+
+    // A bootstraps the empty cloud (rev 1, no entries).
+    sync_connect_with_backend(
+        &device_a,
+        &cloud,
+        test_config(),
+        Zeroizing::new(CONTAINER_PASSWORD.to_string()),
+        None,
+    )
+    .unwrap();
+
+    // Device B joins, edits, pushes rev 2 — A's next cycle has a real pull
+    // and a real push.
+    let (device_b, _dir_b) = test_state();
+    {
+        let handle = cloud.handle();
+        sync_connect_with_backend(
+            &device_b,
+            &handle,
+            test_config(),
+            Zeroizing::new(CONTAINER_PASSWORD.to_string()),
+            None,
+        )
+        .unwrap();
+        create_entry_titled(&device_b, "from-b");
+        sync_now_with_backend(&device_b, &handle).unwrap();
+    }
+
+    // A local-only edit guarantees the cycle has a PUSH (merge result
+    // differs from the remote) — without it a pure pull would skip the
+    // upload phase entirely and never reach the gate.
+    let _alpha = create_entry_titled(&device_a, "local-only-a");
+
+    // Snapshot the on-disk sync_state row: the guarded save must NOT touch
+    // it (still the connect-era row after the run).
+    let state_row_before = vault_store::load_blob(&get_db(&device_a), "sync_state")
+        .unwrap()
+        .expect("sync_state row exists after connect");
+
+    // Gate A's container upload (the cycle's first upload) — exactly between
+    // the D8 window's republish and save_sync_rows.
+    let gated = Arc::new(GatedBackend::new(cloud.handle(), 0));
+
+    let syncer = {
+        let state = Arc::clone(&device_a);
+        let gated = Arc::clone(&gated);
+        thread::spawn(move || sync_now_with_backend(&state, gated.as_ref()))
+    };
+
+    // Wait for the sync to park inside the gated upload: the window has
+    // closed and republished the COPIED (old) keys by this point.
+    gated.wait_until_arrived();
+
+    // Concurrent key rotation while the sync is parked in its push phase.
+    crate::change_password(
+        &device_a,
+        Zeroizing::new(TEST_PASSWORD.to_string()),
+        Zeroizing::new(NEW_PASSWORD.to_string()),
+        None,
+    )
+    .unwrap();
+
+    gated.open();
+    // The cycle still succeeds — the save was skipped, not failed.
+    syncer.join().unwrap().unwrap();
+
+    // The bookkeeping row was NOT rewritten with the stale keys.
+    let state_row_after = vault_store::load_blob(&get_db(&device_a), "sync_state")
+        .unwrap()
+        .expect("sync_state row survives");
+    assert_eq!(state_row_after, state_row_before);
+
+    // The NEW password unlocks and the digest verifies under the NEW keys.
+    // Without the guard, the save would have refreshed the digest with the
+    // stale mac and bricked the vault for the new password.
+    device_a.session.exclusive_lock_and_clear();
+    assert!(crate::unlock_vault(&device_a, Zeroizing::new(NEW_PASSWORD.to_string())).unwrap());
+    let db = get_db(&device_a);
+    assert!(database::integrity::verify_integrity(
+        &db,
+        &device_a.session.get_mac_key().unwrap()
+    )
+    .unwrap());
+
+    // The merge itself still landed (the window completed before the
+    // rotation) and survived the reseal under the new keys.
+    let titles: Vec<String> =
+        live_entries(&device_a).into_iter().map(|(_, title)| title).collect();
+    assert!(titles.contains(&"from-b".to_string()));
+    assert!(titles.contains(&"local-only-a".to_string()));
 }
 
 // ---------------------------------------------------------------------------

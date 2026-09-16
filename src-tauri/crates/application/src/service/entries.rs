@@ -91,6 +91,12 @@ pub fn get_entry_secret(
     let db = get_db(state)?;
     let key = lease.enc_key()?;
     let entry = load_entry(&db, key, &id, false)?.ok_or(VaultError::EntryNotFound)?;
+    // Soft delete (P2.2): a tombstoned entry must not give up its secrets —
+    // same filter as get_entry_meta (this is the extension's secret-fetch
+    // path; the row survives for merge/reseal, but reads must 404).
+    if entry.deleted_at.is_some() {
+        return Err(VaultError::EntryNotFound);
+    }
 
     // Decrypt password. Try bincode format first (v1.0.5+ and v1.0.4 both use
     // bincode::serialize(EncryptedData)), then fall back to raw bytes
@@ -405,6 +411,13 @@ mod tests {
             Err(VaultError::EntryNotFound)
         ));
 
+        // get_entry_secret 404s too — the tombstone must not give up its
+        // decrypted secrets (P2-1: the NM secret-fetch path).
+        assert!(matches!(
+            get_entry_secret(&state, gone.id.clone()),
+            Err(VaultError::EntryNotFound)
+        ));
+
         // update on a deleted entry 404s (no resurrection).
         assert!(matches!(
             update_entry(&state, gone.id.clone(), patch(None)),
@@ -425,6 +438,25 @@ mod tests {
 
         // Re-removing an already-deleted entry still reports success.
         assert!(remove_entry(&state, gone.id.clone()).unwrap());
+    }
+
+    /// P2-1: the extension's secret-fetch path refuses a soft-deleted entry
+    /// (404 like the meta path) — the tombstone row stays on disk for
+    /// merge/reseal but never hands out decrypted secrets.
+    #[test]
+    fn get_entry_secret_hidden_after_soft_delete() {
+        let (state, _dir) = unlocked_state();
+        let entry = create_test_entry(&state, "Secret after delete");
+
+        // Sanity: the secret is readable while the entry is live.
+        let secret = get_entry_secret(&state, entry.id.clone()).unwrap();
+        assert_eq!(*secret.password, "secret");
+
+        assert!(remove_entry(&state, entry.id.clone()).unwrap());
+        assert!(matches!(
+            get_entry_secret(&state, entry.id.clone()),
+            Err(VaultError::EntryNotFound)
+        ));
     }
 
     /// P3.6 item 1: update_entry's totp set / leave-untouched / clear paths.

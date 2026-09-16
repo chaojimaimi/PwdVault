@@ -8,8 +8,12 @@
 //!   and the mock test double (P3.2),
 //! - [`baidu`]: the Baidu Netdisk adapter (P3.4),
 //! - [`baidu_oauth`]: the Baidu OAuth2 pairing flow (P3.4),
-//! - [`engine`]: the sync engine + config/state rows + Tauri-facing
-//!   `sync_connect`/`sync_now`/`sync_disconnect`/`sync_status` (P3.3).
+//! - [`engine`]: the sync engine orchestration + Tauri-facing
+//!   `sync_connect`/`sync_now`/`sync_disconnect`/`sync_status` (P3.3). The
+//!   former single-file engine was split (M-3) into [`state_io`] (rows,
+//!   config/state + local read/write-back I/O, session-key copies) and
+//!   [`publish`] (container pull/push, manifest, history); `engine`
+//!   re-exports their public names so pre-split import paths are stable.
 
 pub mod baidu;
 pub mod baidu_oauth;
@@ -17,6 +21,8 @@ pub mod backend;
 pub mod container;
 pub mod engine;
 pub mod merge;
+pub mod publish;
+pub mod state_io;
 
 #[cfg(test)]
 mod tests_webdav;
