@@ -26,6 +26,12 @@ export interface UpdateEntryRequest {
   update_notes: boolean;
   tags: string[];
   group_id?: string | null;
+  /**
+   * TOTP secret tri-state (same update semantics as the notes patch):
+   * omit = leave unchanged, "" = clear, value = set. The value may be a
+   * plain base32 secret or a full otpauth:// URI (the backend parses both).
+   */
+  totp_secret?: string;
 }
 
 export type ResourceStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -74,6 +80,44 @@ export type AppScreen = 'setup' | 'unlock' | 'vault' | 'entry' | 'generator' | '
 export interface BiometricStatus {
   available: boolean;
   enabled: boolean;
+}
+
+// Phase 2 TOTP: mirrors pwdvault_domain::TotpCodeResponse (serde field
+// names — the backend serializes snake_case, no camelCase rewrite).
+export interface TotpCodeResponse {
+  code: string;
+  /** Seconds until the displayed code rotates. */
+  seconds_remaining: number;
+}
+
+// Phase 3 cloud sync: mirrors pwdvault_application::SyncConfig /
+// SyncStatusResponse / BaiduAuthStart (snake_case serde names). `backend`
+// matches SyncBackendKind's lowercase serde representation.
+export type SyncBackendKind = 'webdav' | 'baidu';
+
+export interface SyncConfig {
+  enabled: boolean;
+  backend: SyncBackendKind;
+  /** WebDAV server root, e.g. https://dav.jianguoyun.com/dav */
+  server_url: string;
+  /** Directory on the remote holding the container files. */
+  remote_dir: string;
+  /** WebDAV user name (non-sensitive). */
+  username: string;
+}
+
+export interface SyncStatusResponse {
+  enabled: boolean;
+  backend?: string | null;
+  last_sync_at?: number | null;
+  /** "ok" after a successful cycle; otherwise a short error code. */
+  last_result?: string | null;
+  remote_rev?: number | null;
+}
+
+export interface BaiduAuthStart {
+  /** Authorization URL for the system browser. */
+  auth_url: string;
 }
 
 export interface VaultState {

@@ -9,6 +9,7 @@ import { UPDATE_CHECK_AVAILABLE } from "../api/vault";
 import { revokeExtensionAccess } from "../api/vault";
 import { AccessibleDialog } from "../components/AccessibleDialog";
 import { SecuritySettingsSection } from "../components/SecuritySettingsSection";
+import { SyncSettingsSection } from "../components/SyncSettingsSection";
 
 const AUTO_LOCK_OPTIONS = [
 	{ label: "1 minute", value: 60 },
@@ -315,6 +316,10 @@ export function SettingsScreen() {
 				    Owns its state and busy-guard, independent of the settings
 				    load status above. */}
 				<SecuritySettingsSection />
+
+				{/* Phase 3: cloud sync (WebDAV / Baidu Netdisk). Same
+				    self-contained pattern as the security section above. */}
+				<SyncSettingsSection />
 			</div>
 
 			<div className="generator-actions">

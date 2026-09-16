@@ -5,6 +5,7 @@ import { copyWithTimeout } from "../utils/clipboard";
 import { showToast } from "../utils/toast";
 import { BackHeader } from "../components/BackHeader";
 import { StrengthMeter } from "../components/StrengthMeter";
+import { TotpCode } from "../components/TotpCode";
 import {
 	EyeIcon,
 	EyeOffIcon,
@@ -47,6 +48,13 @@ export function EntryScreen() {
 	const [passwordChanged, setPasswordChanged] = useState(false);
 	const [notesLoaded, setNotesLoaded] = useState(false);
 	const [notesChanged, setNotesChanged] = useState(false);
+	// TOTP tri-state (same update semantics as update_notes): untouched (no
+	// totp_secret in the patch), cleared ("" in the field), or set. Only
+	// shown while editing — create_entry has no TOTP field in the backend
+	// contract (CreateEntryRequest), so new entries add TOTP via a second edit.
+	const [totpSecret, setTotpSecret] = useState("");
+	const [totpChanged, setTotpChanged] = useState(false);
+	const isOtpauthUri = totpSecret.trim().startsWith("otpauth://");
 	const [secretLoading, setSecretLoading] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
 	const [isLoading, setIsLoading] = useState(false);
@@ -79,6 +87,8 @@ export function EntryScreen() {
 			setPasswordChanged(false);
 			setNotesLoaded(false);
 			setNotesChanged(false);
+			setTotpSecret("");
+			setTotpChanged(false);
 		} else {
 			setFormData({
 				title: "",
@@ -93,6 +103,8 @@ export function EntryScreen() {
 			setPasswordChanged(false);
 			setNotesLoaded(true);
 			setNotesChanged(false);
+			setTotpSecret("");
+			setTotpChanged(false);
 		}
 	}, [state.selectedEntry]);
 
@@ -117,7 +129,7 @@ export function EntryScreen() {
 			(state.selectedEntry.group_id || null) !== (formData.group_id || null)
 		);
 	}, [formData, state.selectedEntry]);
-	const isDirty = metadataDirty || passwordChanged || notesChanged;
+	const isDirty = metadataDirty || passwordChanged || notesChanged || totpChanged;
 
 	useEffect(() => {
 		const warn = (event: BeforeUnloadEvent) => {
@@ -134,6 +146,7 @@ export function EntryScreen() {
 		return () => {
 			setFormData((prev) => ({ ...prev, password: "", notes: "" }));
 			setOriginalSecret(null);
+			setTotpSecret("");
 		};
 	}, []);
 
@@ -202,6 +215,8 @@ export function EntryScreen() {
 			update_notes: notesChanged,
 			tags: formData.tags,
 			group_id: formData.group_id,
+			// TOTP tri-state: omit when untouched, "" clears, value sets.
+			...(totpChanged ? { totp_secret: totpSecret.trim() } : {}),
 		});
 		setChangesList(changes);
 		setShowConfirmation(true);
@@ -297,6 +312,13 @@ export function EntryScreen() {
 				oldValue: originalMeta.group_id || "",
 				newValue: current.group_id || "",
 				valueType: "text",
+			});
+		}
+		if (totpChanged) {
+			changes.push({
+				fieldId: "totp_secret",
+				label: "TOTP Secret",
+				valueType: "password",
 			});
 		}
 		return changes;
@@ -518,6 +540,41 @@ export function EntryScreen() {
 					</div>
 					<StrengthMeter password={formData.password} />
 				</div>
+
+				{/* TOTP (Phase 2): edit mode only — the backend create request
+				    carries no TOTP field, so new entries add it via a second edit.
+				    The live code view renders once the saved entry has a secret
+				    (TotpCode hides itself while the backend reports none). */}
+				{isEditing && state.selectedEntry && (
+					<div className="form-group">
+						<TotpCode entryId={state.selectedEntry.id} />
+						<label htmlFor="entry-totp">TOTP Secret</label>
+						<input
+							id="entry-totp"
+							type="text"
+							className="form-input"
+							value={totpSecret}
+							onChange={(e) => {
+								setTotpSecret(e.target.value);
+								setTotpChanged(true);
+							}}
+							placeholder="Unchanged"
+							autoComplete="off"
+							spellCheck={false}
+						/>
+						{isOtpauthUri ? (
+							<p className="totp-hint totp-hint-active" role="status">
+								otpauth:// URI detected — it will be saved as-is and the code
+								parameters parsed automatically.
+							</p>
+						) : (
+							<p className="totp-hint">
+								Paste a base32 secret or a full otpauth:// URI. Clearing this
+								field and saving removes the TOTP secret.
+							</p>
+						)}
+					</div>
+				)}
 
 				<div className="form-group">
 					{isEditing && !notesLoaded ? (

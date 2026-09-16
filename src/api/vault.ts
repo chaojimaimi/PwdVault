@@ -1,4 +1,4 @@
-import type { CreateEntryRequest, UpdateEntryRequest, EntrySecretResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, UpdateInfo, Group, BiometricStatus } from '../types';
+import type { CreateEntryRequest, UpdateEntryRequest, EntrySecretResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, UpdateInfo, Group, BiometricStatus, SyncConfig, SyncStatusResponse, TotpCodeResponse, BaiduAuthStart } from '../types';
 
 // Private-repository builds have no suitable unauthenticated release feed.
 // A release pipeline may explicitly enable this only after publishing a public,
@@ -190,4 +190,57 @@ export async function disableRecovery(currentPassword: string): Promise<void> {
 /** Backend publishes the new session keys on success — no unlock call needed. */
 export async function recoverVault(recoveryKey: string, newPassword: string): Promise<void> {
   return invoke('recover_vault', { recoveryKey, newPassword });
+}
+
+// TOTP (Phase 2) — Tauri-IPC only (D6, touch_activity precedent). The
+// browser-extension bridge never sees TOTP codes.
+
+export async function totpCode(id: string): Promise<TotpCodeResponse> {
+  return invoke('totp_code', { id });
+}
+
+// Cloud sync (Phase 3) — Tauri-IPC only (D6). Password arguments use
+// camelCase keys; Tauri v2 maps them onto the snake_case parameters of the
+// Rust commands (change_password precedent above). The nested `config`
+// object keeps the backend's serde field names (snake_case) because the
+// camelCase rewrite only applies to top-level command arguments.
+
+export async function syncStatus(): Promise<SyncStatusResponse> {
+  return invoke('sync_status');
+}
+
+/**
+ * Bootstrap cloud sync. `containerPassword` derives the sync container key
+ * (independent from the master password); `webdavPassword` is required for
+ * the WebDAV backend and ignored for Baidu.
+ */
+export async function syncConnect(
+  config: SyncConfig,
+  containerPassword: string,
+  webdavPassword?: string | null,
+): Promise<SyncStatusResponse> {
+  return invoke('sync_connect', {
+    config,
+    containerPassword,
+    webdavPassword: webdavPassword ?? null,
+  });
+}
+
+/** Removes local sync credentials/config; cloud files are kept. */
+export async function syncDisconnect(): Promise<void> {
+  return invoke('sync_disconnect');
+}
+
+export async function syncNow(): Promise<SyncStatusResponse> {
+  return invoke('sync_now');
+}
+
+/** Returns the Baidu OAuth authorize URL and arms the loopback callback. */
+export async function baiduStartAuth(): Promise<BaiduAuthStart> {
+  return invoke('baidu_start_auth');
+}
+
+/** `null`/empty consumes the code captured by the pending callback. */
+export async function baiduCompleteAuth(code: string | null): Promise<void> {
+  return invoke('baidu_complete_auth', { code });
 }

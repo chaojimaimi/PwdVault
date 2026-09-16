@@ -145,6 +145,41 @@
   text-align: center;
 }
 
+/* --- TOTP (Phase 2) --- */
+
+.totp-display {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.totp-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-h2);
+  letter-spacing: 0.15em;
+  color: var(--color-primary);
+  user-select: all;
+}
+
+.totp-timer {
+  font-size: var(--text-label);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.totp-hint {
+  font-size: var(--text-micro);
+  color: var(--color-text-secondary);
+  margin-top: var(--space-xs);
+  opacity: 0.7;
+}
+
+.totp-hint-active {
+  color: var(--color-primary);
+  opacity: 1;
+}
+
 .option-group {
   margin-bottom: var(--space-md);
 }
