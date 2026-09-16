@@ -352,6 +352,50 @@ pub async fn recover_vault(
     .map_err(|e| VaultError::InternalError(format!("recover vault task join error: {}", e)))?
 }
 
+// ---------------------------------------------------------------------------
+// Cloud sync (Phase 3) — Tauri-only (D6, touch_activity precedent). The
+// browser-extension bridge never sees sync operations. sync_connect /
+// sync_now perform network I/O and KDF work: spawn_blocking keeps the IPC
+// thread responsive (§5.6.2).
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn sync_status(
+    state: State<'_, AppHandle>,
+) -> Result<pwdvault_application::SyncStatusResponse, VaultError> {
+    app::sync_status(state.inner())
+}
+
+#[tauri::command]
+pub async fn sync_connect(
+    config: pwdvault_application::SyncConfig,
+    container_password: Zeroizing<String>,
+    webdav_password: Option<Zeroizing<String>>,
+    state: State<'_, AppHandle>,
+) -> Result<pwdvault_application::SyncStatusResponse, VaultError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        app::sync_connect(&state, config, container_password, webdav_password)
+    })
+    .await
+    .map_err(|e| VaultError::InternalError(format!("sync connect task join error: {}", e)))?
+}
+
+#[tauri::command]
+pub async fn sync_now(
+    state: State<'_, AppHandle>,
+) -> Result<pwdvault_application::SyncStatusResponse, VaultError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || app::sync_now(&state))
+        .await
+        .map_err(|e| VaultError::InternalError(format!("sync now task join error: {}", e)))?
+}
+
+#[tauri::command]
+pub fn sync_disconnect(state: State<'_, AppHandle>) -> Result<(), VaultError> {
+    app::sync_disconnect(state.inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

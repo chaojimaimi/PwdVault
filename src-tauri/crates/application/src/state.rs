@@ -14,7 +14,7 @@ use redb::Database;
 
 use pwdvault_domain::constants::AUTO_LOCK_SECS;
 use pwdvault_infrastructure::crypto::VerificationData;
-use pwdvault_infrastructure::keychain::{SecretStore, platform_default};
+use pwdvault_infrastructure::keychain::{SecretStore, platform_default, platform_sync_default};
 
 use crate::error::VaultError;
 use crate::session::{SessionLease, VaultSession};
@@ -51,6 +51,12 @@ pub struct AppState {
     /// replace this field with a `MemorySecretStore` — commands need no
     /// platform special-casing.
     pub secret_store: Arc<dyn SecretStore>,
+    /// Phase 3 (P3.2): NON-INTERACTIVE credential store for cloud-sync
+    /// credentials (WebDAV password, Baidu token). Deliberately a separate
+    /// instance from [`AppState::secret_store`]: the bio store's items sit
+    /// behind a Touch ID access control, and a background sync must never
+    /// pop a fingerprint prompt.
+    pub sync_secret_store: Arc<dyn SecretStore>,
 }
 
 impl AppState {
@@ -114,6 +120,7 @@ impl Default for AppState {
             pair_last_reset: Mutex::new(None),
             update_check_cancel: AtomicBool::new(false),
             secret_store: platform_default(),
+            sync_secret_store: platform_sync_default(),
         }
     }
 }

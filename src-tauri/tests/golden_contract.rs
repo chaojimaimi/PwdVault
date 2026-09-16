@@ -89,6 +89,12 @@ fn tauri_ipc_commands() -> HashSet<&'static str> {
         "enable_recovery",
         "disable_recovery",
         "recover_vault",
+        // Phase 3 cloud sync — desktop-only (D6): sync drives the session
+        // keys and the user's cloud credentials, never exposed via NM.
+        "sync_status",
+        "sync_connect",
+        "sync_disconnect",
+        "sync_now",
     ]
     .into_iter()
     .collect()
@@ -181,6 +187,10 @@ fn adapter_only_commands_are_documented() {
             &"is_vault_unlocked",
             &"recover_vault",
             &"recovery_status",
+            &"sync_connect",
+            &"sync_disconnect",
+            &"sync_now",
+            &"sync_status",
             &"totp_code",
             &"touch_activity",
             &"unlock_biometric",

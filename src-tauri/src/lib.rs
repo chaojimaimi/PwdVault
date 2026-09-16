@@ -16,7 +16,8 @@ pub use pwdvault_application::service;
 pub use pwdvault_application::{AppState, VaultError};
 pub use pwdvault_application::{
     BackupPayload, CreateEntryRequest, EntrySecretResponse, EntrySummary, ExportEntry,
-    ImportResult, UpdateEntryRequest, UpdateInfo, VaultBackup,
+    ImportResult, SyncBackendKind, SyncConfig, SyncState, SyncStatusResponse,
+    UpdateEntryRequest, UpdateInfo, VaultBackup,
 };
 pub use pwdvault_domain::{Group, PasswordEntry, Settings};
 
@@ -320,6 +321,11 @@ pub fn run() {
             commands::enable_recovery,
             commands::disable_recovery,
             commands::recover_vault,
+            // Phase 3 cloud sync — Tauri IPC only (D6).
+            commands::sync_status,
+            commands::sync_connect,
+            commands::sync_disconnect,
+            commands::sync_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

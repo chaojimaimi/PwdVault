@@ -49,7 +49,7 @@ pub use credentials::{
 pub use password::{change_password, recover_vault};
 pub use shared::{
     complete_unlock, derive_master_for_unlock, verify_master_and_integrity, BIO_WRAP_BLOB_KEY,
-    RECOVERY_WRAP_BLOB_KEY,
+    RECOVERY_WRAP_BLOB_KEY, SYNC_CEK_BLOB_KEY,
 };
 
 #[cfg(test)]

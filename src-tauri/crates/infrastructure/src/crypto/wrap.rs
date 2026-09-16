@@ -28,10 +28,17 @@ pub const WRAP_AAD_BIO: &[u8] = b"pwdvault-bio-wrap-v1";
 pub const WRAP_AAD_RECOVERY: &[u8] = b"pwdvault-recovery-wrap-v1";
 
 /// AAD binding for the sync container CEK wrap blob (D2). Deliberately
-/// distinct from the future local `sync_cek` row binding (`WRAP_AAD_SYNC`,
-/// sync engine batch) and from bio/recovery, so a container blob can never be
-/// replayed as a local row or another wrap purpose.
+/// distinct from the local `sync_cek` row binding (`WRAP_AAD_SYNC`) and from
+/// bio/recovery, so a container blob can never be replayed as a local row or
+/// another wrap purpose.
 pub const WRAP_AAD_CONTAINER: &[u8] = b"pwdvault-sync-container-cek-v1";
+
+/// AAD binding for the local `sync_cek` VAULT_TABLE row (D2): the sync
+/// engine's container key is wrapped under the device's enc subkey so
+/// `sync_now` can unwrap it inside an unlocked session without the container
+/// password. Distinct from WRAP_AAD_CONTAINER (the in-container
+/// kdf→cek wrap) and from bio/recovery — blobs never replay across purposes.
+pub const WRAP_AAD_SYNC: &[u8] = b"pwdvault-sync-cek-v1";
 
 #[derive(Error, Debug)]
 pub enum WrapError {
@@ -150,6 +157,26 @@ mod tests {
         assert_eq!(*unwrap_secret(&WRAP, &blob, WRAP_AAD_CONTAINER).unwrap(), MASTER);
         assert!(matches!(
             unwrap_secret(&WRAP, &blob, WRAP_AAD_BIO),
+            Err(WrapError::InvalidBlob)
+        ));
+    }
+
+    /// The local sync_cek row AAD round-trips and is isolated from the
+    /// container/bio/recovery bindings (D2: no cross-purpose replay).
+    #[test]
+    fn sync_aad_roundtrip_and_cross_use_isolation() {
+        let blob = wrap_secret(&WRAP, &MASTER, WRAP_AAD_SYNC).unwrap();
+        assert_eq!(*unwrap_secret(&WRAP, &blob, WRAP_AAD_SYNC).unwrap(), MASTER);
+        for other in [WRAP_AAD_CONTAINER, WRAP_AAD_BIO, WRAP_AAD_RECOVERY] {
+            assert!(matches!(
+                unwrap_secret(&WRAP, &blob, other),
+                Err(WrapError::InvalidBlob)
+            ));
+        }
+        // And a container blob cannot be opened under the sync binding.
+        let container_blob = wrap_secret(&WRAP, &MASTER, WRAP_AAD_CONTAINER).unwrap();
+        assert!(matches!(
+            unwrap_secret(&WRAP, &container_blob, WRAP_AAD_SYNC),
             Err(WrapError::InvalidBlob)
         ));
     }

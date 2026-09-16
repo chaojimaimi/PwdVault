@@ -32,7 +32,7 @@ use zeroize::{Zeroize, Zeroizing};
 use pwdvault_infrastructure::crypto::{
     decrypt_with_aad, derive_key, derive_key_with_params, encrypt_with_aad, generate_salt,
     generate_wrap_key, unwrap_secret, wrap_secret, AdaptiveParams, EncryptedData, SALT_SIZE,
-    WRAP_AAD_CONTAINER,
+    KEY_SIZE, WRAP_AAD_CONTAINER,
 };
 
 use super::{SyncEntry, SyncGroup, SyncSnapshot};
@@ -89,6 +89,16 @@ pub fn create_container(
     container_password: Zeroizing<String>,
     snapshot: &SyncSnapshot,
 ) -> Result<Vec<u8>, ContainerError> {
+    create_container_with_cek(container_password, snapshot).map(|(bytes, _cek)| bytes)
+}
+
+/// Like [`create_container`], but also returns the generated cek — the sync
+/// engine needs it to store the key wrapped under the session enc subkey
+/// (D2 `sync_cek` row) and to publish later revisions without the password.
+pub fn create_container_with_cek(
+    container_password: Zeroizing<String>,
+    snapshot: &SyncSnapshot,
+) -> Result<(Vec<u8>, Zeroizing<[u8; KEY_SIZE]>), ContainerError> {
     // derive_key benchmarks the adaptive params (~500 ms) — creation is a
     // rare, user-driven event; opening later reuses the stored params.
     let salt = generate_salt();
@@ -105,16 +115,17 @@ pub fn open_container(
     container_password: Zeroizing<String>,
     bytes: &[u8],
 ) -> Result<SyncSnapshot, ContainerError> {
-    // Version gate FIRST, envelope only: an unknown version is a distinct,
-    // user-facing "upgrade needed" condition and must be decided before any
-    // key material is touched (also keeps it password-independent).
-    let peek: ContainerPeek =
-        serde_json::from_slice(bytes).map_err(|_| ContainerError::InvalidContainer)?;
-    if peek.version != CONTAINER_FORMAT_VERSION {
-        return Err(ContainerError::UnsupportedVersion);
-    }
-    let container: SyncContainerV1 =
-        serde_json::from_slice(bytes).map_err(|_| ContainerError::InvalidContainer)?;
+    unlock_container(container_password, bytes).map(|(snapshot, _cek)| snapshot)
+}
+
+/// Like [`open_container`], but also returns the unwrapped cek (sync engine
+/// bootstrap — D2). The cek is `Zeroizing`; it never leaves memory in
+/// plaintext outside this tuple.
+pub fn unlock_container(
+    container_password: Zeroizing<String>,
+    bytes: &[u8],
+) -> Result<(SyncSnapshot, Zeroizing<[u8; KEY_SIZE]>), ContainerError> {
+    let container = parse_envelope(bytes)?;
 
     let (mut kdf_key, _) = derive_key_with_params(
         container_password.as_str(),
@@ -130,15 +141,91 @@ pub fn open_container(
     kdf_key.zeroize();
     let cek = unwrapped.map_err(|_| ContainerError::InvalidContainer)?;
 
-    // Everything below fails identically: wrong password (already caught via
-    // the cek wrap), tampered snapshot, or a corrupted inner structure.
+    let snapshot = decrypt_snapshot(&container, &cek)?;
+    Ok((snapshot, cek))
+}
+
+/// Version-gate + parse the envelope (shared by every entry point).
+fn parse_envelope(bytes: &[u8]) -> Result<SyncContainerV1, ContainerError> {
+    // Version gate FIRST, envelope only: an unknown version is a distinct,
+    // user-facing "upgrade needed" condition and must be decided before any
+    // key material is touched (also keeps it password-independent).
+    let peek: ContainerPeek =
+        serde_json::from_slice(bytes).map_err(|_| ContainerError::InvalidContainer)?;
+    if peek.version != CONTAINER_FORMAT_VERSION {
+        return Err(ContainerError::UnsupportedVersion);
+    }
+    serde_json::from_slice(bytes).map_err(|_| ContainerError::InvalidContainer)
+}
+
+/// Decrypt + parse the snapshot field with a known cek.
+fn decrypt_snapshot(
+    container: &SyncContainerV1,
+    cek: &[u8; KEY_SIZE],
+) -> Result<SyncSnapshot, ContainerError> {
+    // Everything below fails identically: wrong cek, tampered snapshot, or a
+    // corrupted inner structure.
     let mut snapshot_json =
-        decrypt_with_aad(&cek, &container.snapshot, SNAPSHOT_AAD)
+        decrypt_with_aad(cek, &container.snapshot, SNAPSHOT_AAD)
             .map_err(|_| ContainerError::InvalidContainer)?;
     let parsed = serde_json::from_slice::<SyncSnapshot>(&snapshot_json)
         .map_err(|_| ContainerError::InvalidContainer);
     snapshot_json.zeroize();
     parsed
+}
+
+/// Decrypt the snapshot with a known cek, NO container password (the
+/// `sync_now` path — the engine holds the cek unwrapped from the `sync_cek`
+/// row and must stay password-free, D2).
+pub fn decrypt_snapshot_with_cek(
+    container_bytes: &[u8],
+    cek: &[u8; KEY_SIZE],
+) -> Result<SyncSnapshot, ContainerError> {
+    let container = parse_envelope(container_bytes)?;
+    decrypt_snapshot(&container, cek)
+}
+
+/// Re-encrypt the snapshot under the given cek, preserving the rest of the
+/// envelope (version + kdf record + wrapped_cek). The sync engine publishes
+/// a new revision this way: same container password/KDF, same cek, only the
+/// snapshot ciphertext rotates.
+pub fn update_container_snapshot(
+    container_bytes: &[u8],
+    cek: &[u8; KEY_SIZE],
+    snapshot: &SyncSnapshot,
+) -> Result<Vec<u8>, ContainerError> {
+    let (kdf, wrapped_cek) = read_envelope(container_bytes)?;
+    reseal_snapshot(kdf, wrapped_cek, cek, snapshot)
+}
+
+/// The envelope pieces the engine stores in its `sync_state` row so a
+/// later revision can be published without re-downloading the container
+/// (`sync_now`'s "remote rev unchanged" fast path).
+pub fn read_envelope(container_bytes: &[u8]) -> Result<(ContainerKdf, EncryptedData), ContainerError> {
+    let container = parse_envelope(container_bytes)?;
+    Ok((container.kdf, container.wrapped_cek))
+}
+
+/// Build container bytes from stored envelope pieces plus a freshly
+/// encrypted snapshot (the inverse view of [`read_envelope`]).
+pub fn reseal_snapshot(
+    kdf: ContainerKdf,
+    wrapped_cek: EncryptedData,
+    cek: &[u8; KEY_SIZE],
+    snapshot: &SyncSnapshot,
+) -> Result<Vec<u8>, ContainerError> {
+    let mut snapshot_json =
+        serde_json::to_vec(snapshot).map_err(|_| ContainerError::InvalidContainer)?;
+    let encrypted = encrypt_with_aad(cek, &snapshot_json, SNAPSHOT_AAD)
+        .map_err(|_| ContainerError::InvalidContainer)?;
+    snapshot_json.zeroize();
+    let updated = SyncContainerV1 {
+        version: CONTAINER_FORMAT_VERSION,
+        kdf,
+        wrapped_cek,
+        snapshot: encrypted,
+    };
+    serde_json::to_vec(&updated).map_err(|_| ContainerError::InvalidContainer)
 }
 
 /// D3 tiebreak fingerprint: SHA-256 over the bincode serialization of a
@@ -159,12 +246,14 @@ pub(super) fn group_fingerprint(group: &SyncGroup) -> [u8; 32] {
 }
 
 /// Seal with an already-derived KDF key record. The cek is generated here and
-/// never leaves memory in plaintext (wrap output only).
+/// never leaves memory in plaintext (wrap output only) — it is returned to
+/// the caller alongside the sealed bytes (bootstrap needs it for the
+/// `sync_cek` row; `create_container` drops it).
 fn seal_container(
     kdf: ContainerKdf,
     kdf_key: &[u8; 32],
     snapshot: &SyncSnapshot,
-) -> Result<Vec<u8>, ContainerError> {
+) -> Result<(Vec<u8>, Zeroizing<[u8; KEY_SIZE]>), ContainerError> {
     let cek = Zeroizing::new(generate_wrap_key());
     let mut snapshot_json =
         serde_json::to_vec(snapshot).map_err(|_| ContainerError::InvalidContainer)?;
@@ -180,7 +269,8 @@ fn seal_container(
             .map_err(|_| ContainerError::InvalidContainer)?,
         snapshot: encrypted_snapshot,
     };
-    serde_json::to_vec(&container).map_err(|_| ContainerError::InvalidContainer)
+    let bytes = serde_json::to_vec(&container).map_err(|_| ContainerError::InvalidContainer)?;
+    Ok((bytes, cek))
 }
 
 #[cfg(test)]
@@ -205,6 +295,13 @@ mod tests {
     /// tests off the ~500 ms adaptive benchmark (the full production path is
     /// exercised once by the roundtrip test below).
     fn seal_with_weak_params(snapshot: &SyncSnapshot) -> Vec<u8> {
+        seal_with_weak_params_and_cek(snapshot).0
+    }
+
+    /// Same fixture, but hands back the cek for the engine-facing helpers.
+    fn seal_with_weak_params_and_cek(
+        snapshot: &SyncSnapshot,
+    ) -> (Vec<u8>, Zeroizing<[u8; KEY_SIZE]>) {
         let salt = [0x5A; SALT_SIZE];
         let params = AdaptiveParams {
             m_cost: 16384,
@@ -397,5 +494,54 @@ mod tests {
         let mut c = a.clone();
         c.title = "Different".to_string();
         assert_ne!(entry_fingerprint(&a), entry_fingerprint(&c));
+    }
+
+    /// P3.3 engine support: `unlock_container` hands back the cek, which then
+    /// re-seals a NEW snapshot revision without the password — and the
+    /// cek-only path decrypts both the original and the updated container.
+    #[test]
+    fn cek_aware_helpers_reseal_and_decrypt_without_password() {
+        let original = sample_snapshot();
+        let (bytes, cek) = seal_with_weak_params_and_cek(&original);
+
+        // unlock_container == open_container + cek.
+        let (opened, unlocked_cek) = unlock_container(password(), &bytes).unwrap();
+        assert_eq!(opened, original);
+        assert_eq!(*unlocked_cek, *cek);
+
+        // Password-free decrypt of the original container.
+        assert_eq!(decrypt_snapshot_with_cek(&bytes, &cek).unwrap(), original);
+
+        // Publish revision +1 under the same cek, keeping the KDF record.
+        let mut next = original.clone();
+        next.rev += 1;
+        next.device_id = "device-b".to_string();
+        let updated = update_container_snapshot(&bytes, &cek, &next).unwrap();
+
+        // Envelope (version/kdf/wrapped_cek) preserved, snapshot replaced.
+        let before: SyncContainerV1 = serde_json::from_slice(&bytes).unwrap();
+        let after: SyncContainerV1 = serde_json::from_slice(&updated).unwrap();
+        assert_eq!(after.version, before.version);
+        assert_eq!(
+            after.wrapped_cek.to_bytes(),
+            before.wrapped_cek.to_bytes()
+        );
+        assert_ne!(after.snapshot.to_bytes(), before.snapshot.to_bytes());
+        // Old password still opens the updated container (same kdf).
+        assert_eq!(open_container(password(), &updated).unwrap(), next);
+        // And the cek-only path decrypts it too.
+        assert_eq!(decrypt_snapshot_with_cek(&updated, &cek).unwrap(), next);
+
+        // A wrong cek fails closed.
+        let wrong = Zeroizing::new([0u8; KEY_SIZE]);
+        assert!(matches!(
+            decrypt_snapshot_with_cek(&updated, &wrong),
+            Err(ContainerError::InvalidContainer)
+        ));
+        // Malformed bytes never panic the cek-only path.
+        assert!(matches!(
+            decrypt_snapshot_with_cek(b"junk", &cek),
+            Err(ContainerError::InvalidContainer)
+        ));
     }
 }

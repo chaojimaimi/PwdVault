@@ -1,16 +1,23 @@
-//! Multi-device sync domain model and pure helpers (P3.1 / D2 / D3).
-//!
-//! Batch-2 scope: this module is new-only — the sync engine (P3.3, batch 3)
-//! wires it into commands, cloud backends and the local write path. Nothing
-//! in the running app references it yet.
+//! Multi-device sync (P3.1-P3.3 / D1-D4).
 //!
 //! Layout:
 //! - this file: sync domain types + local↔sync conversion helpers,
 //! - [`container`]: the self-contained encrypted snapshot container (D2),
-//! - [`merge`]: the 2-way LWW merge engine (D3).
+//! - [`merge`]: the 2-way LWW merge engine (D3),
+//! - [`backend`]: the [`backend::CloudBackend`] trait, WebDAV implementation
+//!   and the mock test double (P3.2),
+//! - [`engine`]: the sync engine + config/state rows + Tauri-facing
+//!   `sync_connect`/`sync_now`/`sync_disconnect`/`sync_status` (P3.3).
 
+pub mod backend;
 pub mod container;
+pub mod engine;
 pub mod merge;
+
+#[cfg(test)]
+mod tests_webdav;
+#[cfg(test)]
+mod tests_engine;
 
 use std::collections::HashMap;
 

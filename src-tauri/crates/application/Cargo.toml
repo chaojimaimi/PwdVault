@@ -38,8 +38,9 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 rand = "0.8"
 
-# Update check
-ureq = { version = "3", features = ["json"] }
+# Update check + WebDAV sync backend (P3.2). 3.4+ is required for
+# allow_non_standard_methods (PROPFIND/MKCOL — ureq#1015, fixed in 3.4.2).
+ureq = { version = "3.4", features = ["json"] }
 semver = "1"
 
 # Structured logging (service modules emit tracing events)
@@ -47,3 +48,5 @@ tracing = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
+# P3.6 item 5: hand-written WebDAV stub server for the backend tests.
+tiny_http = "0.12"

@@ -23,6 +23,10 @@ pub use security::{
     recovery_status, unlock_biometric, verify_master_and_integrity,
 };
 pub use settings::{get_settings, update_settings};
+pub use sync::engine::{
+    sync_connect, sync_disconnect, sync_now, sync_status, SyncBackendKind, SyncConfig,
+    SyncState, SyncStatusResponse,
+};
 pub use totp::totp_code;
 pub use update::{cancel_update_check, check_for_updates};
 pub use utils::generate_password;

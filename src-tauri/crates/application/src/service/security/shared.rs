@@ -9,7 +9,7 @@ use zeroize::Zeroizing;
 use crate::{AppState, VaultError};
 use pwdvault_infrastructure::crypto::{
     self, create_verification_header, recovery_wrap_key, unwrap_secret, wrap_secret, SecretKey,
-    VerificationData, WRAP_AAD_BIO, WRAP_AAD_RECOVERY,
+    VerificationData, WRAP_AAD_BIO, WRAP_AAD_RECOVERY, WRAP_AAD_SYNC,
 };
 use pwdvault_infrastructure::database::{
     self, load_settings,
@@ -24,6 +24,11 @@ pub const BIO_WRAP_BLOB_KEY: &str = "bio_wrap";
 
 /// VAULT_TABLE row holding the recovery wrap blob (D4).
 pub const RECOVERY_WRAP_BLOB_KEY: &str = "recovery_wrap";
+
+/// VAULT_TABLE row holding the sync container key (cek), wrapped under the
+/// session enc subkey (D2, P3.3). Rotated inside `reseal_vault` so the
+/// change-password and recovery flows inherit the re-wrap automatically.
+pub const SYNC_CEK_BLOB_KEY: &str = "sync_cek";
 
 /// Escape-hatch guidance shown when the credential store no longer holds the
 /// wrap key for an enabled bio blob (e.g. keychain reset). No secret material.
@@ -280,6 +285,13 @@ fn reencrypt_entry_inner(
 /// (same version/integrity flags, re-sealed with `new_enc`) and applies
 /// `rewraps` in a single `VaultStore::write` transaction so the digest is
 /// refreshed atomically with the content.
+///
+/// D2 inheritance: a stored `sync_cek` row (the sync container key, wrapped
+/// under the session enc subkey) is re-wrapped here as well — `load_blob →
+/// unwrap(old_enc, WRAP_AAD_SYNC) → wrap(new_enc) → save_blob_in_txn` — so
+/// change_password and recover_vault rotate it for free. An unwrap failure
+/// aborts the whole re-seal BEFORE the transaction opens (fail-closed, same
+/// strategy as the inner entry fields).
 pub(super) fn reseal_vault(
     db: &Arc<redb::Database>,
     old_enc: &SecretKey,
@@ -304,6 +316,18 @@ pub(super) fn reseal_vault(
         if let Some(group) = database::load_group(db, old_enc.as_ref(), id, false)? {
             groups.push(group);
         }
+    }
+
+    // Sync cek re-wrap (D2). Runs before the transaction: a corrupt row
+    // aborts here and leaves the disk untouched instead of stranding the
+    // sync engine with an undecryptable key.
+    let mut rewraps = rewraps;
+    if let Some(blob) = vault_store::load_blob(db, SYNC_CEK_BLOB_KEY)? {
+        let cek = unwrap_secret(old_enc.as_ref(), &blob, WRAP_AAD_SYNC)?;
+        rewraps.push(BlobRewrite::Write {
+            key: SYNC_CEK_BLOB_KEY,
+            blob: wrap_secret(new_enc.as_ref(), &cek, WRAP_AAD_SYNC)?,
+        });
     }
 
     // Header: keep version/integrity flags, re-seal under the new key.
