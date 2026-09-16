@@ -35,6 +35,8 @@ use crate::service::security::SYNC_CEK_BLOB_KEY;
 use crate::service::sync::backend::{
     BackendError, CloudBackend, Precondition, RemoteStat, WebDavBackend,
 };
+use crate::service::sync::baidu::BaiduBackend;
+use crate::service::sync::baidu_oauth::baidu_configured;
 use crate::service::sync::container::{
     create_container_with_cek, decrypt_snapshot_with_cek, read_envelope, reseal_snapshot,
     unlock_container, ContainerError, ContainerKdf,
@@ -53,7 +55,9 @@ use pwdvault_infrastructure::database::{
     vault_store::{self, VaultStore},
     Group,
 };
-use pwdvault_infrastructure::keychain::{SecretStoreError, SYNC_WEBDAV_PASSWORD_ACCOUNT};
+use pwdvault_infrastructure::keychain::{
+    SecretStoreError, SYNC_BAIDU_TOKEN_ACCOUNT, SYNC_WEBDAV_PASSWORD_ACCOUNT,
+};
 
 // ---------------------------------------------------------------------------
 // Rows, cloud file names, tunables
@@ -74,8 +78,7 @@ pub const HISTORY_KEEP: usize = 10;
 /// Upload attempts before a Conflict is surfaced (D4: re-pull, re-merge).
 pub const MAX_UPLOAD_ATTEMPTS: usize = 3;
 
-/// Which cloud storage the vault syncs through (D6). `Baidu` is reserved for
-/// the adapter batch (P3.4) — selecting it fails with NotConfigured for now.
+/// Which cloud storage the vault syncs through (D6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SyncBackendKind {
@@ -168,8 +171,9 @@ fn invalid_sync(code: &'static str, message: impl Into<String>) -> VaultError {
     }
 }
 
-/// Map backend failures onto the user-facing error taxonomy.
-fn backend_error(err: BackendError) -> VaultError {
+/// Map backend failures onto the user-facing error taxonomy. Shared with
+/// the Baidu OAuth commands (P3.4) so `NotConfigured` keeps a single code.
+pub(crate) fn backend_error(err: BackendError) -> VaultError {
     match err {
         BackendError::Conflict => invalid_sync(
             "SYNC_CONFLICT",
@@ -242,21 +246,26 @@ fn content_hash(entries: &[SyncEntry], groups: &[SyncGroup]) -> String {
 }
 
 /// Validate user-supplied configuration before anything touches the network.
+/// The URL/username checks are WebDAV-specific — the Baidu backend gets its
+/// endpoints from the build (OAuth pairing, P3.4), so only the remote
+/// layout is user input there.
 fn validate_config(config: &SyncConfig) -> Result<(), VaultError> {
-    let url = config.server_url.trim();
-    let scheme_ok = url.starts_with("https://") || url.starts_with("http://");
-    if !scheme_ok
-        || url.len() <= 8
-        || url.len() > 2048
-        || url.chars().any(|c| c.is_whitespace() || c.is_control())
-    {
-        return Err(invalid_sync(
-            "SYNC_INVALID_CONFIG",
-            "Server URL must be an http(s) URL without whitespace",
-        ));
-    }
-    if config.username.len() > 512 {
-        return Err(invalid_sync("SYNC_INVALID_CONFIG", "Username is too long"));
+    if matches!(config.backend, SyncBackendKind::Webdav) {
+        let url = config.server_url.trim();
+        let scheme_ok = url.starts_with("https://") || url.starts_with("http://");
+        if !scheme_ok
+            || url.len() <= 8
+            || url.len() > 2048
+            || url.chars().any(|c| c.is_whitespace() || c.is_control())
+        {
+            return Err(invalid_sync(
+                "SYNC_INVALID_CONFIG",
+                "Server URL must be an http(s) URL without whitespace",
+            ));
+        }
+        if config.username.len() > 512 {
+            return Err(invalid_sync("SYNC_INVALID_CONFIG", "Username is too long"));
+        }
     }
     let dir = config.remote_dir.trim().trim_matches('/');
     if dir.len() > 512
@@ -294,8 +303,7 @@ fn remote_paths(config: &SyncConfig) -> RemotePaths {
     }
 }
 
-/// Build the backend for the configured kind. `Baidu` is a reserved variant
-/// until the adapter batch (P3.4) — it reports NotConfigured (plan P3.8).
+/// Build the backend for the configured kind (P3.2 WebDAV, P3.4 Baidu).
 fn open_backend(
     state: &Arc<AppState>,
     config: &SyncConfig,
@@ -314,7 +322,18 @@ fn open_backend(
                     .map_err(backend_error)?,
             ))
         }
-        SyncBackendKind::Baidu => Err(backend_error(BackendError::NotConfigured)),
+        SyncBackendKind::Baidu => {
+            // P3.8: without compiled-in AppKey/SecretKey the adapter stays
+            // NotConfigured — the frontend shows the BAIDU-SETUP guidance.
+            if !baidu_configured() {
+                return Err(backend_error(BackendError::NotConfigured));
+            }
+            Ok(Arc::new(BaiduBackend::new(
+                pwdvault_domain::constants::BAIDU_APP_KEY,
+                pwdvault_domain::constants::BAIDU_SECRET_KEY,
+                state.sync_secret_store.clone(),
+            )))
+        }
     }
 }
 
@@ -1126,8 +1145,10 @@ pub fn sync_disconnect(state: &Arc<AppState>) -> Result<(), VaultError> {
     })?;
     lease.touch_activity();
 
-    // Best effort: drop the stored WebDAV password with the connection.
+    // Best effort: drop the stored backend credentials with the connection
+    // (WebDAV password P3.2, Baidu token P3.4). The cloud files stay.
     let _ = state.sync_secret_store.delete(SYNC_WEBDAV_PASSWORD_ACCOUNT);
+    let _ = state.sync_secret_store.delete(SYNC_BAIDU_TOKEN_ACCOUNT);
     Ok(())
 }
 

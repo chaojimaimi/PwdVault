@@ -16,7 +16,7 @@ use super::engine::{
 use crate::service::security::SYNC_CEK_BLOB_KEY;
 use crate::{create_entry, AppState, VaultError};
 use pwdvault_infrastructure::crypto::{
-    kdf::AdaptiveParams, unwrap_secret, wrap_secret, WRAP_AAD_SYNC,
+    kdf::AdaptiveParams, unwrap_secret, WRAP_AAD_SYNC,
 };
 use pwdvault_infrastructure::database::{self, vault_store::{self, VaultStore}};
 use pwdvault_infrastructure::keychain::{MemorySecretStore, SecretStore};

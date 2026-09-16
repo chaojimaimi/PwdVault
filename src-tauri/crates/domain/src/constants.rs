@@ -62,3 +62,28 @@ pub const MAX_PAIR_REQUESTS_PER_MIN: u32 = 10;
 
 /// TCP port the embedded HTTP server listens on.
 pub const NATIVE_MESSAGING_PORT: u16 = 17429;
+
+// ---------------------------------------------------------------------------
+// Baidu Netdisk sync (P3.4)
+// ---------------------------------------------------------------------------
+
+/// Baidu Netdisk OAuth AppKey — a COMPILE-TIME placeholder (plan P3.4/P3.8).
+/// Ship the empty string; to enable the Baidu backend, fill in the AppKey
+/// (and [`BAIDU_SECRET_KEY`]) from the open-platform application and rebuild
+/// — see docs/BAIDU-SETUP.md. Empty → the adapter answers `NotConfigured`
+/// and the frontend shows setup guidance.
+pub const BAIDU_APP_KEY: &str = "";
+
+/// Baidu Netdisk OAuth SecretKey — companion to [`BAIDU_APP_KEY`]. The plan
+/// explicitly accepts embedding it (the binary offers no confidentiality on
+/// the user's own machine; the container itself stays E2E encrypted).
+pub const BAIDU_SECRET_KEY: &str = "";
+
+/// Fixed loopback port of the OAuth callback listener. Deliberately distinct
+/// from [`NATIVE_MESSAGING_PORT`] (17429); the open platform requires the
+/// redirect_uri to match EXACTLY, port included — see docs/BAIDU-SETUP.md.
+pub const BAIDU_OAUTH_PORT: u16 = 17777;
+
+/// Redirect URI registered on the open platform (must equal the one sent in
+/// the authorize/token requests byte-for-byte).
+pub const BAIDU_REDIRECT_URI: &str = "http://127.0.0.1:17777/";

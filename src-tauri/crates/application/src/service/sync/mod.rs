@@ -1,4 +1,4 @@
-//! Multi-device sync (P3.1-P3.3 / D1-D4).
+//! Multi-device sync (P3.1-P3.4 / D1-D4).
 //!
 //! Layout:
 //! - this file: sync domain types + local↔sync conversion helpers,
@@ -6,9 +6,13 @@
 //! - [`merge`]: the 2-way LWW merge engine (D3),
 //! - [`backend`]: the [`backend::CloudBackend`] trait, WebDAV implementation
 //!   and the mock test double (P3.2),
+//! - [`baidu`]: the Baidu Netdisk adapter (P3.4),
+//! - [`baidu_oauth`]: the Baidu OAuth2 pairing flow (P3.4),
 //! - [`engine`]: the sync engine + config/state rows + Tauri-facing
 //!   `sync_connect`/`sync_now`/`sync_disconnect`/`sync_status` (P3.3).
 
+pub mod baidu;
+pub mod baidu_oauth;
 pub mod backend;
 pub mod container;
 pub mod engine;
@@ -18,6 +22,10 @@ pub mod merge;
 mod tests_webdav;
 #[cfg(test)]
 mod tests_engine;
+#[cfg(test)]
+mod tests_baidu;
+#[cfg(test)]
+mod tests_baidu_oauth;
 
 use std::collections::HashMap;
 

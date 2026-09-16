@@ -23,6 +23,7 @@ pub use security::{
     recovery_status, unlock_biometric, verify_master_and_integrity,
 };
 pub use settings::{get_settings, update_settings};
+pub use sync::baidu_oauth::{baidu_complete_auth, baidu_start_auth, BaiduAuthStart};
 pub use sync::engine::{
     sync_connect, sync_disconnect, sync_now, sync_status, SyncBackendKind, SyncConfig,
     SyncState, SyncStatusResponse,

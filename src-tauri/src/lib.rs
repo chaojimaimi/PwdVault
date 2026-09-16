@@ -326,6 +326,10 @@ pub fn run() {
             commands::sync_connect,
             commands::sync_disconnect,
             commands::sync_now,
+            // P3.4 (D6): Baidu Netdisk OAuth pairing — the extension never
+            // handles cloud credentials.
+            commands::baidu_start_auth,
+            commands::baidu_complete_auth,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

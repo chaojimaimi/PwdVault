@@ -4,7 +4,7 @@
 //!
 //! The cloud is DUMB STORAGE (D1): it sees only opaque ciphertext blobs. The
 //! trait is deliberately tiny — stat/download/upload/upload_unique/delete —
-//! so every provider (WebDAV now, Baidu in a later batch) can implement it.
+//! so every provider (WebDAV, Baidu Netdisk) can implement it.
 //! Conflict safety comes from `Precondition`:
 //! - [`Precondition::IfMatch`] → `If-Match: <etag>` (WebDAV): the server
 //!   rejects the PUT with 412 when the file changed underneath us (D4);
@@ -27,7 +27,7 @@ use zeroize::Zeroizing;
 
 /// Cap for downloaded container/manifest bytes — refuses to buffer
 /// unbounded server-supplied payloads (same defense as the update check).
-const MAX_DOWNLOAD_BYTES: u64 = 64 * 1024 * 1024;
+pub(crate) const MAX_DOWNLOAD_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Network timeout for one backend request. Sync payloads are small
 /// ciphertext blobs; this bounds a hung server without stretching the D8
@@ -46,8 +46,8 @@ pub enum BackendError {
     /// Any transport/HTTP failure. The string is safe for logs (no secrets).
     #[error("Network error: {0}")]
     Network(String),
-    /// The backend kind is known but not usable in this build (Baidu needs
-    /// compiled-in AppKey credentials, P3.4 — reserved).
+    /// The backend kind is known but not usable in this build (Baidu without
+    /// compiled-in AppKey credentials, P3.4/P3.8).
     #[error("Backend is not configured")]
     NotConfigured,
 }
@@ -263,8 +263,10 @@ pub struct WebDavBackend {
 ///
 /// Guards against path traversal (`..`), absolute-path escapes and header
 /// injection (control characters) — the path components come from user
-/// config (`remote_dir`) plus engine-generated file names.
-fn encode_remote_path(path: &str) -> Result<String, BackendError> {
+/// config (`remote_dir`) plus engine-generated file names. Shared with the
+/// Baidu adapter (P3.4), which reuses the validated+percent-encoded form as
+/// its `path` API parameter value.
+pub(crate) fn encode_remote_path(path: &str) -> Result<String, BackendError> {
     let mut encoded = Vec::new();
     for segment in path.split('/') {
         if segment.is_empty() || segment == "." || segment == ".." {

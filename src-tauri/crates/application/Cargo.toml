@@ -43,10 +43,17 @@ rand = "0.8"
 ureq = { version = "3.4", features = ["json"] }
 semver = "1"
 
+# Baidu Netdisk adapter (P3.4): slice MD5s for the precreate block_list and
+# the post-upload content verification. Same RustCrypto 0.10 line as
+# sha1/sha2 already in the workspace.
+md-5 = "0.10"
+
+# OAuth loopback callback server for baidu_start_auth (P3.4) — the same
+# tiny_http the desktop adapter already runs for the native messaging API.
+tiny_http = "0.12"
+
 # Structured logging (service modules emit tracing events)
 tracing = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
-# P3.6 item 5: hand-written WebDAV stub server for the backend tests.
-tiny_http = "0.12"

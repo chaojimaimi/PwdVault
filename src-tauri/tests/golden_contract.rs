@@ -95,6 +95,10 @@ fn tauri_ipc_commands() -> HashSet<&'static str> {
         "sync_connect",
         "sync_disconnect",
         "sync_now",
+        // P3.4 (D6): Baidu Netdisk OAuth pairing — cloud-credential flow,
+        // desktop-only like the rest of sync.
+        "baidu_start_auth",
+        "baidu_complete_auth",
     ]
     .into_iter()
     .collect()
@@ -176,6 +180,8 @@ fn adapter_only_commands_are_documented() {
     assert_eq!(
         ipc_only,
         vec![
+            &"baidu_complete_auth",
+            &"baidu_start_auth",
             &"biometric_status",
             &"change_password",
             &"disable_biometric",

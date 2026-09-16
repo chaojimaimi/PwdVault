@@ -396,6 +396,33 @@ pub fn sync_disconnect(state: State<'_, AppHandle>) -> Result<(), VaultError> {
     app::sync_disconnect(state.inner())
 }
 
+/// P3.4 (D6): Tauri-only — start the Baidu Netdisk OAuth pairing: returns
+/// the authorize URL and parks a listener on the fixed loopback callback
+/// port. spawn_blocking: binding the port can block (§5.6.2).
+#[tauri::command]
+pub async fn baidu_start_auth(
+    state: State<'_, AppHandle>,
+) -> Result<pwdvault_application::BaiduAuthStart, VaultError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || app::baidu_start_auth(&state))
+        .await
+        .map_err(|e| VaultError::InternalError(format!("baidu auth start join error: {}", e)))?
+}
+
+/// P3.4 (D6): Tauri-only — exchange the authorization code (explicit, or
+/// the one captured from the pending `baidu_start_auth` callback when
+/// `None`/empty) for tokens stored in the non-interactive credential store.
+#[tauri::command]
+pub async fn baidu_complete_auth(
+    code: Option<String>,
+    state: State<'_, AppHandle>,
+) -> Result<(), VaultError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || app::baidu_complete_auth(&state, code))
+        .await
+        .map_err(|e| VaultError::InternalError(format!("baidu auth complete join error: {}", e)))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
