@@ -5,6 +5,7 @@ pub mod entries;
 pub mod groups;
 pub mod security;
 pub mod settings;
+pub mod sync;
 pub mod totp;
 pub mod update;
 pub mod utils;

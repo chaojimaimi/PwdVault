@@ -27,6 +27,12 @@ pub const WRAP_AAD_BIO: &[u8] = b"pwdvault-bio-wrap-v1";
 /// AAD binding for the recovery wrap blob.
 pub const WRAP_AAD_RECOVERY: &[u8] = b"pwdvault-recovery-wrap-v1";
 
+/// AAD binding for the sync container CEK wrap blob (D2). Deliberately
+/// distinct from the future local `sync_cek` row binding (`WRAP_AAD_SYNC`,
+/// sync engine batch) and from bio/recovery, so a container blob can never be
+/// replayed as a local row or another wrap purpose.
+pub const WRAP_AAD_CONTAINER: &[u8] = b"pwdvault-sync-container-cek-v1";
+
 #[derive(Error, Debug)]
 pub enum WrapError {
     /// The blob failed authentication or parsing. Deliberately a single
@@ -134,6 +140,18 @@ mod tests {
             let unwrapped = unwrap_secret(&WRAP, &blob, aad).unwrap();
             assert_eq!(*unwrapped, MASTER);
         }
+    }
+
+    /// The container CEK AAD round-trips and is isolated from the other wrap
+    /// purposes (no cross-use of blobs, same guarantee as bio/recovery).
+    #[test]
+    fn container_aad_roundtrip_and_cross_use_isolation() {
+        let blob = wrap_secret(&WRAP, &MASTER, WRAP_AAD_CONTAINER).unwrap();
+        assert_eq!(*unwrap_secret(&WRAP, &blob, WRAP_AAD_CONTAINER).unwrap(), MASTER);
+        assert!(matches!(
+            unwrap_secret(&WRAP, &blob, WRAP_AAD_BIO),
+            Err(WrapError::InvalidBlob)
+        ));
     }
 
     #[test]

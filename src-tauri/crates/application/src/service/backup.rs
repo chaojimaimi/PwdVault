@@ -570,7 +570,7 @@ mod tests {
         let enc_key = state.session.get_enc_key().unwrap();
         let mac_key = state.session.get_mac_key().unwrap();
 
-        let mut live_group = database::Group::new("Live".into());
+        let live_group = database::Group::new("Live".into());
         let mut dead_group = database::Group::new("Dead".into());
         dead_group.deleted_at = Some(1_700_000_000);
 

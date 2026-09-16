@@ -22,7 +22,7 @@ pub use verification::{
 };
 pub use wrap::{
     generate_recovery_key, generate_wrap_key, recovery_wrap_key, unwrap_secret, wrap_secret,
-    WrapError, WRAP_AAD_BIO, WRAP_AAD_RECOVERY,
+    WrapError, WRAP_AAD_BIO, WRAP_AAD_CONTAINER, WRAP_AAD_RECOVERY,
 };
 
 use zeroize::Zeroizing;

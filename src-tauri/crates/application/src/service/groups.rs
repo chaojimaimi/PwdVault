@@ -203,7 +203,7 @@ mod tests {
     fn remove_group_soft_deletes_without_cascading() {
         let (state, _dir) = unlocked_state();
         let group = create_group(&state, "Work".to_string()).unwrap();
-        let entry = entry_in_group(&state, &group.id);
+        let _entry = entry_in_group(&state, &group.id);
 
         assert!(remove_group(&state, group.id.clone()).unwrap());
 
