@@ -4,9 +4,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [1.1.6] - 2026-09-16
 
 ### Added
+
 - Change master password: the whole vault is re-encrypted in a single
   transaction under a freshly benchmarked KDF parameter set, serialized
   against concurrent writes through an exclusive session drain, and a
@@ -24,34 +25,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - New Security section in Settings and a recovery entry point on the lock
   screen; all nine security commands are desktop-only and are never exposed
   to the browser extension bridge.
-
-### Security
-
-- Import policy: backups whose KDF parameters fall below the OWASP floor
-  (19 MiB / 2 iterations) are now rejected at import. Vault unlock is
-  unaffected — vaults created with legacy parameters keep unlocking; newly
-  generated exports/parameters always meet the floor. Note: backups exported
-  by old versions on very slow machines (t=1) can no longer be re-imported —
-  unlock the vault and re-export to produce a compliant backup.
-- Narrow the WebView filesystem scope: import/export can only read/write the
-  user's home directory tree, external volumes, and temp folders, and can
-  never touch the vault's own data directory (macOS Library path and Windows
-  LOCALAPPDATA), limiting blast radius if the WebView is compromised.
-
-### Fixed
-
-- The extension server now binds its port with SO_REUSEADDR and retries
-  address-in-use errors (1s/2s/4s), surviving the TIME_WAIT window after an
-  app restart; other bind errors fail fast into the existing warning toast.
-- Pairing errors are no longer misleading: a host-launch failure shows
-  "Cannot reach the PwdVault desktop app…", a server rejection shows the
-  server's message, and only a real protocol mismatch shows the
-  update-your-app guidance.
-- Nested dialogs closing out of order no longer leave the app invisible to
-  screen readers (inert/aria-hidden snapshot is owned by the first dialog
-  and restored only when the last one closes).
-- The extension generator slider label is addressed by id instead of a
-  fragile DOM-order selector.
+- TOTP two-factor code support: store a TOTP secret on any entry (paste a
+  base32 secret or an `otpauth://` URI) and read live 6-digit codes with a
+  countdown in the entry editor (RFC 6238, SHA-1/SHA-256). TOTP secrets are
+  encrypted like passwords and re-encrypted on master password change.
+- Cloud sync across your own devices (WebDAV today; Baidu Netdisk backend
+  included — requires registering your own open-platform AppKey, see
+  `docs/BAIDU-SETUP.md`). Zero-knowledge by design: the cloud only ever sees
+  a self-contained encrypted container; merging happens on-device with
+  last-writer-wins semantics and rolling versioned snapshots (last 10 kept)
+  so nothing is ever silently lost. Connecting a device requires the
+  container password once; subsequent syncs are password-free.
+- Soft delete: removed entries/groups are retained as tombstones so deletions
+  merge correctly across devices. Exports exclude deleted items.
+- Behavior notes: vaults written by 1.1.6 cannot be read by older app
+  versions (extra record fields); sync containers are version-gated so
+  mismatched app versions will not sync with each other.
 
 ### Security
 
@@ -69,6 +58,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   unlock requests including the master password.
 - Cap decoded blob sizes (1 MiB) before bincode deserialization of on-disk
   records, preventing allocation abuse from tampered databases.
+- Import policy: backups whose KDF parameters fall below the OWASP floor
+  (19 MiB / 2 iterations) are now rejected at import. Vault unlock is
+  unaffected — vaults created with legacy parameters keep unlocking; newly
+  generated exports/parameters always meet the floor. Note: backups exported
+  by old versions on very slow machines (t=1) can no longer be re-imported —
+  unlock the vault and re-export to produce a compliant backup.
+- Narrow the WebView filesystem scope: import/export can only read/write the
+  user's home directory tree, external volumes, and temp folders, and can
+  never touch the vault's own data directory (macOS Library path and Windows
+  LOCALAPPDATA), limiting blast radius if the WebView is compromised.
 - Browser extension: the autofill prompt no longer prefetches the plaintext
   password on page load — the secret is fetched only when the user clicks
   Fill; authorization now uses the frame's own URL; register/change-password
@@ -90,9 +89,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   closure.
 - Manual lock uses try/finally so the UI always returns to the unlock screen
   even if the backend call errors.
+- The extension server now binds its port with SO_REUSEADDR and retries
+  address-in-use errors (1s/2s/4s), surviving the TIME_WAIT window after an
+  app restart; other bind errors fail fast into the existing warning toast.
+- Pairing errors are no longer misleading: a host-launch failure shows
+  "Cannot reach the PwdVault desktop app…", a server rejection shows the
+  server's message, and only a real protocol mismatch shows the
+  update-your-app guidance.
 - Floating autofill button positions correctly while scrolling and removes
   itself when the login form disappears.
-- EntryScreen quick generator now honors the default generator settings.
+- Nested dialogs closing out of order no longer leave the app invisible to
+  screen readers (inert/aria-hidden snapshot is owned by the first dialog
+  and restored only when the last one closes).
+- EntryScreen quick generator now honors the default generator settings; the
+  extension generator slider label is addressed by id instead of a fragile
+  DOM-order selector.
 - Remove dead `KeyStore` module, unused strength color metadata, and
   non-constant-time pairing comparisons; harden startup unwrap points
   (`current_dir`, window icon) and add a re-entrancy guard to Restore

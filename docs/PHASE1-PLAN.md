@@ -6,17 +6,20 @@
 ## 0. 安全模型与关键设计决策
 
 ### D1 wrap 的对象是 master_key（非 subkey）
+
 条目用 `enc_key`（HKDF subkey）密封、verification header 用 `master_key` 加密
 （verification.rs:50）。**wrap blob 里存 master_key**：解锁时 unwrap 出 master_key →
 `derive_subkeys(master_key, salt)` 还原 enc/mac → 走与密码 unlock 完全相同的完整性
 检查链。verification header（master_key 加密）天然成为 unwrap 结果正确性的校验器。
 
 ### D2 解锁态 master_key 不可得 → 启用类操作要求输入主密码
+
 `unlock_with_password` 返回 subkeys 后 master_key 即 zeroize（verification.rs:88-90），
 session 只持有 enc/mac。因此 **enable_biometric / enable_recovery 都要求输入当前主
 密码**（表单字段，服务端重新派生 master_key）——这也天然构成操作确认。
 
 ### D3 recovery 采用单层包装，改密码时要求"重绑定"
+
 `recovery_wrap = EncryptedData(SHA-256(recovery_key_bytes), master_key)`。
 恢复密钥是 enable 时随机生成的 32 字节（base64url 43 字符），熵充足，SHA-256 即
 AES key，无需 KDF。改密码后 master_key 变化 → recovery_wrap 必须重写，而重写需要
@@ -25,12 +28,14 @@ recovery_key 明文（只在 enable 时展示过）→ **改密码表单在恢�
 Touch ID 已启用的替代路径见 D5。
 
 ### D4 存储位置与完整性
+
 wrapped blob 存 `VAULT_TABLE`（与 verification/header 同表）新行：
 `"bio_wrap"`、`"recovery_wrap"`。全部经 `VaultStore::write` 事务写入 → HMAC digest
 自动覆盖，磁盘篡改在 unlock 的完整性检查中被拒绝（B1 体系）。blob 本身是
 AES-GCM 密文（自认证），双保险。密文格式沿用 `EncryptedData::to_bytes/from_bytes`。
 
 ### D5 wrap_key 的生命周期与改密码 re-wrap
+
 - **bio**：wrap_key（32B 随机）只存 Keychain。bio 解锁成功后将其缓存进
   `SessionInner::Unlocked` 的 wrap_key 槽位（**新增字段**——republish 自然丢弃、
   锁定自然 zeroize；禁止存为 AppState 独立字段，否则密码派生的新会话会残留
@@ -59,8 +64,8 @@ recover_vault 的重密封统一采用**排他清空串行化**：
    新租约；**严禁持租约调用**，同线程死锁，session.rs:330-333 已明示）；
 3. 排空后**断言 session 仍处 Locked 态**（防 drain 与 republish 之间被并发
    `unlock_vault` 插入——违例即中止并恢复原态，把静默混写变为干净失败）→ 全量读
-  （用旧 enc 拷贝）→ 重密封 → 单 `VaultStore::write(new_mac)` 事务
-  （含 verification 行替换 + header 重密封 + re-wrap blob）；
+   （用旧 enc 拷贝）→ 重密封 → 单 `VaultStore::write(new_mac)` 事务
+   （含 verification 行替换 + header 重密封 + re-wrap blob）；
 4. 成功 → 一次性 `session.unlock(new_keys)` republish + 菜单/副作用；
    失败 → 事务原子回滚（磁盘不变），`session.unlock(old_keys)` 恢复原解锁态
    （改密码场景）或保持锁定（recover_vault 场景，见 P1.4），向用户报错。
@@ -70,6 +75,7 @@ session 换钥窗口（排空→republish，时长随库规模线性增长）内
 需交互式输入主密码，属合法持密者自竞，且已被步骤 3 的断言转为干净失败）。
 
 ### D6 命令面隔离
+
 九个新命令**仅 Tauri IPC**（touch_activity 先例），不进 Native Messaging dispatcher：
 `change_password`、`biometric_status`、`enable_biometric`、`disable_biometric`、
 `unlock_biometric`、`recovery_status`、`enable_recovery`、`disable_recovery`、
@@ -77,6 +83,7 @@ session 换钥窗口（排空→republish，时长随库规模线性增长）内
 golden_contract.rs 的 tauri 列表与 adapter-only 文档化测试同步更新。
 
 ### D7 平台范围
+
 - Touch ID：仅 macOS（`bio.rs` 平台门控；非 macOS `biometric_status.available=false`，
   enable 返回 "not supported"）。Windows Hello 属后续独立项。
 - 恢复密钥：**跨平台**（无 Keychain 依赖）。
@@ -95,6 +102,7 @@ pub fn recovery_wrap_key(recovery_key_paste: &str) -> Result<[u8; 32], WrapError
 // trim → base64url 解码（43 字符）→ 长度必须 32 → SHA-256；格式错误 → RecoveryKeyInvalid
 pub fn generate_recovery_key() -> String; // 32B OsRng → base64url 无填充
 ```
+
 测试：roundtrip；AAD 篡改拒绝；错误 wrap_key 拒绝；recovery key 格式往返 + 畸形输入拒绝。
 
 ## P1.2 VaultStore blob 行（infrastructure/src/database/vault_store.rs 扩展）
@@ -114,10 +122,11 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self, account: &str) -> Result<(), SecretStoreError>;
 }
 ```
+
 - 常量 `SERVICE = "com.pwdvault.desktop"`；account：`"vault-bio-wrap"`。
 - macOS 实现：`SecItemAdd/CopyMatching/Delete` + `SecAccessControl
-  (USER_PRESENCE | BIOMETRY_CURRENTSET)` + `kSecAttrAccessible =
-  WhenUnlockedThisDeviceOnly` + `kSecUseDataProtectionKeychain = true`。
+(USER_PRESENCE | BIOMETRY_CURRENTSET)` + `kSecAttrAccessible =
+WhenUnlockedThisDeviceOnly` + `kSecUseDataProtectionKeychain = true`。
   security-framework 高层 `passwords` 模块不支持 ACL → 用其 `access_control` 模块
   构造 ACL + `SecItem` 字典路径（必要时 security-framework-sys / core-foundation
   手搭字典，隔离在 keychain.rs 内并注释）。实现时以实际 crate API 为准，优先高层。
@@ -127,7 +136,7 @@ pub trait SecretStore: Send + Sync {
 - 错误映射：`errSecItemNotFound → NotFound`；`errSecUserCanceled → UserCancelled`；
   `errSecAuthLocked → LockedOut`；其余 → `Unavailable(String)`。
 - `available()`：`objc2-local-authentication` 的 `LAContext
-  canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)`（同步调用，无 block）。
+canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)`（同步调用，无 block）。
   若该 crate 与依赖树 objc2 版本冲突，退路：`canEvaluatePolicy` 经 msg2 手写（同一结论）。
 - `MemorySecretStore`（测试替身，`std::sync::Mutex<HashMap>`）。
 - 非 macOS：`available() = false`，set/get/delete → `Unavailable("unsupported platform")`。
@@ -135,6 +144,7 @@ pub trait SecretStore: Send + Sync {
 ## P1.4 服务层（application/src/service/security.rs，新文件）
 
 **公共 helpers（从 unlock_vault 提取，vault.rs:194-323 回归测试守护）**：
+
 - `verify_master_and_integrity(state, master_key) -> Result<(enc, mac), VaultError>`：
   unlock 步骤 3-7 的**只校验不发布**版本——derive_subkeys → header 读取/版本检查 →
   integrity 校验 → settings 加载。legacy 迁移分支（:291-295）改为直接透传传入的
@@ -146,18 +156,18 @@ pub trait SecretStore: Send + Sync {
 
 **核心操作（全部遵循 D8 串行化协议）**：
 
-| 函数 | 语义 |
-|---|---|
-| `change_password(state, current, new: Zeroizing<String>, recovery_key: Option<String>)` | ① 校验 new（`validation::master_password`，P2）→ ② verify current（verify_password）→ ③ `AdaptiveParams::adaptive()` 重新基准新参数（X6 钳制后起点 ≥ 导入底线——改密码是治愈历史弱参数的天然时机，新 verification 行不再永续 16MiB/t=1）+ 新 salt 派生 new_master/subkeys → ④ **前置收集全部 re-wrap 输入**（bio：session 缓存或 Keychain Touch ID；recovery：必填参数校验——逐条 unwrap 验证 recovery_key 正确性，此时不碰 DB）→ ⑤ **.bak 文件备份**（migrate 先例 vault.rs:356-368）→ ⑥ D8 排他清空 → ⑦ 全量读+`reseal_vault` 单事务（新 verification 行 + header 重密封 + re-wrap blob + digest）→ ⑧ republish 新钥；⑦失败 → 事务回滚 + `session.unlock(old)` 恢复原态 + 报错（bio blob 未更新时 Keychain NotFound 的逃生文案："可在设置中先关闭 Touch ID 后重试"）。session 中 wrap_key 缓存随 republish 丢弃（SessionInner::Unlocked 重建）|
-| `reseal_vault(db, old_enc, new_enc, new_mac, new_verification, rewrapped_blobs)` | 内部 helper：参照 migrate_database "读全部→重密封→单事务替换"，**不含** legacy 明文通道；header 经 `save_header_in_txn` 以 new_enc 原样重密封（version/integrity 标志保持）；verification 行替换为本方案新增；blob 行写入/删除在事务内 |
-| `biometric_status(state, store)` | `{available, enabled}`（enabled = VAULT_TABLE "bio_wrap" 行存在，锁定态可查）|
-| `enable_biometric(state, password, store)` | **无论锁定/解锁均要求当前主密码**（D2 修正：任何会话都拿不到 master_key）→ 派生 master → `store.available()` 检查 → wrap_key=OsRng 32B → `store.set` → wrap → 存行（VaultStore::write）。**legacy 库（无 header 或 integrity_required=false）拒绝启用**（错误提示先完成迁移），否则 bio 解锁会撞迁移分支 |
-| `disable_biometric(state, store)` | 事务内删 "bio_wrap" 行 + `store.delete`（Keychain 删除失败仅告警）|
-| `unlock_biometric(state, store)` | ① rate limit 检查 → ② **先查 "bio_wrap" 行存在**（无 blob 不空弹 Touch ID）→ ③ `store.get`（Touch ID）→ ④ unwrap master → ⑤ `verify_master_and_integrity` → ⑥ `complete_unlock` → ⑦ **wrap_key 缓存进 SessionInner::Unlocked**。UserCancelled/LockedOut 透传专用错误（不计 rate limit）；unwrap/header 失败计失败次数 |
-| `recovery_status(state)` | 行存在性（锁定态可查）|
-| `enable_recovery(state, password) -> String` | 同 enable_biometric 的 D2 密码要求 + **对称的 legacy 库拒绝**（无 header 或 integrity_required=false → 提示先迁移，否则 recover_vault 的校验 helper 会触发迁移写、违反"失败磁盘不变"承诺）→ 派生 master → `generate_recovery_key()` → wrap → 存行 → 返回明文 key（仅此一次）|
-| `disable_recovery(state, current_password: Zeroizing<String>)` | verify current → 事务内删 "recovery_wrap" 行（防误触，评审采纳）|
-| `recover_vault(state, recovery_key_paste, new_password)` | **三段式（评审 P1：不留"旧钥已解锁"中间态）**：① 校验 new 密码 → `recovery_wrap_key` 派生 → 读 blob → unwrap master → `verify_master_and_integrity`（只校验不发布）→ ② 派生 new_master/subkeys → bio blob 存在时的 Keychain 交互**前置**（锁定态弹 Touch ID 属用户在场，可接受；失败则改走"禁用 bio 并提示重启用"分支）→ .bak 备份 → ③ 排他清空 → reseal 单事务（含 re-wrap）→ **仅此一次** `session.unlock(new)` + 副作用。任一步失败 → 保持锁定、磁盘不变（事务回滚），UI 停留恢复屏。**不执行密码 rate limit**（256-bit 熵，GCM 认证 + header 验证即正确性证明）|
+| 函数                                                                                    | 语义                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `change_password(state, current, new: Zeroizing<String>, recovery_key: Option<String>)` | ① 校验 new（`validation::master_password`，P2）→ ② verify current（verify_password）→ ③ `AdaptiveParams::adaptive()` 重新基准新参数（X6 钳制后起点 ≥ 导入底线——改密码是治愈历史弱参数的天然时机，新 verification 行不再永续 16MiB/t=1）+ 新 salt 派生 new_master/subkeys → ④ **前置收集全部 re-wrap 输入**（bio：session 缓存或 Keychain Touch ID；recovery：必填参数校验——逐条 unwrap 验证 recovery_key 正确性，此时不碰 DB）→ ⑤ **.bak 文件备份**（migrate 先例 vault.rs:356-368）→ ⑥ D8 排他清空 → ⑦ 全量读+`reseal_vault` 单事务（新 verification 行 + header 重密封 + re-wrap blob + digest）→ ⑧ republish 新钥；⑦失败 → 事务回滚 + `session.unlock(old)` 恢复原态 + 报错（bio blob 未更新时 Keychain NotFound 的逃生文案："可在设置中先关闭 Touch ID 后重试"）。session 中 wrap_key 缓存随 republish 丢弃（SessionInner::Unlocked 重建） |
+| `reseal_vault(db, old_enc, new_enc, new_mac, new_verification, rewrapped_blobs)`        | 内部 helper：参照 migrate_database "读全部→重密封→单事务替换"，**不含** legacy 明文通道；header 经 `save_header_in_txn` 以 new_enc 原样重密封（version/integrity 标志保持）；verification 行替换为本方案新增；blob 行写入/删除在事务内                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `biometric_status(state, store)`                                                        | `{available, enabled}`（enabled = VAULT_TABLE "bio_wrap" 行存在，锁定态可查）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `enable_biometric(state, password, store)`                                              | **无论锁定/解锁均要求当前主密码**（D2 修正：任何会话都拿不到 master_key）→ 派生 master → `store.available()` 检查 → wrap_key=OsRng 32B → `store.set` → wrap → 存行（VaultStore::write）。**legacy 库（无 header 或 integrity_required=false）拒绝启用**（错误提示先完成迁移），否则 bio 解锁会撞迁移分支                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `disable_biometric(state, store)`                                                       | 事务内删 "bio_wrap" 行 + `store.delete`（Keychain 删除失败仅告警）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `unlock_biometric(state, store)`                                                        | ① rate limit 检查 → ② **先查 "bio_wrap" 行存在**（无 blob 不空弹 Touch ID）→ ③ `store.get`（Touch ID）→ ④ unwrap master → ⑤ `verify_master_and_integrity` → ⑥ `complete_unlock` → ⑦ **wrap_key 缓存进 SessionInner::Unlocked**。UserCancelled/LockedOut 透传专用错误（不计 rate limit）；unwrap/header 失败计失败次数                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `recovery_status(state)`                                                                | 行存在性（锁定态可查）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `enable_recovery(state, password) -> String`                                            | 同 enable_biometric 的 D2 密码要求 + **对称的 legacy 库拒绝**（无 header 或 integrity_required=false → 提示先迁移，否则 recover_vault 的校验 helper 会触发迁移写、违反"失败磁盘不变"承诺）→ 派生 master → `generate_recovery_key()` → wrap → 存行 → 返回明文 key（仅此一次）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `disable_recovery(state, current_password: Zeroizing<String>)`                          | verify current → 事务内删 "recovery_wrap" 行（防误触，评审采纳）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `recover_vault(state, recovery_key_paste, new_password)`                                | **三段式（评审 P1：不留"旧钥已解锁"中间态）**：① 校验 new 密码 → `recovery_wrap_key` 派生 → 读 blob → unwrap master → `verify_master_and_integrity`（只校验不发布）→ ② 派生 new_master/subkeys → bio blob 存在时的 Keychain 交互**前置**（锁定态弹 Touch ID 属用户在场，可接受；失败则改走"禁用 bio 并提示重启用"分支）→ .bak 备份 → ③ 排他清空 → reseal 单事务（含 re-wrap）→ **仅此一次** `session.unlock(new)` + 副作用。任一步失败 → 保持锁定、磁盘不变（事务回滚），UI 停留恢复屏。**不执行密码 rate limit**（256-bit 熵，GCM 认证 + header 验证即正确性证明）                                                                                                                                                                                                                                                                            |
 
 错误变体（error.rs，Display + public_message 双 match）：
 `BiometricUnavailable`、`BiometricCancelled`、`BiometricLockedOut`、
@@ -195,6 +205,7 @@ unlock_vault 同签名模式）。`AppState` 增加字段
 ## P1.7 测试矩阵
 
 后端（复用 vault.rs 测试的 `create_modern_vault` 模式 + `MemorySecretStore`）：
+
 1. wrap roundtrip / AAD 篡改拒绝 / 错 key 拒绝 / recovery key 格式往返
 2. change_password：旧密码 verify=false、新密码 unlock=true；条目/分组解密内容
    逐一相等；digest 通过；header 可读且 integrity_required 不变；bio/recovery blob
@@ -227,5 +238,6 @@ host 未签名，若有 ACL 授权弹窗属预期）。
 cd src-tauri && source ~/.cargo/env && cargo test && cargo test --workspace && cargo clippy --all-targets -- -D warnings
 pnpm test && pnpm tsc --noEmit
 ```
+
 交付：后端批（P1.1-P1.5, P1.7 后端）一个 commit；前端批（P1.6）一个 commit。
 CHANGELOG 由主代理收尾统一更新。
