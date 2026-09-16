@@ -64,6 +64,9 @@ fn tauri_ipc_commands() -> HashSet<&'static str> {
         "update_entry",
         "remove_entry",
         "get_entry_count",
+        // P2.4 (D6): Tauri-only TOTP code generation — never reachable from
+        // the browser extension.
+        "totp_code",
         "create_group",
         "list_all_groups",
         "remove_group",
@@ -178,6 +181,7 @@ fn adapter_only_commands_are_documented() {
             &"is_vault_unlocked",
             &"recover_vault",
             &"recovery_status",
+            &"totp_code",
             &"touch_activity",
             &"unlock_biometric",
         ],

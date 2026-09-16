@@ -140,6 +140,17 @@ pub fn get_entry_count(state: State<'_, AppHandle>) -> Result<usize, VaultError>
     app::get_entry_count(state.inner())
 }
 
+/// P2.4 (D6): Tauri-only — generate the current TOTP code for an entry. The
+/// browser-extension bridge does not expose TOTP codes (touch_activity
+/// precedent for desktop-only commands).
+#[tauri::command]
+pub fn totp_code(
+    id: String,
+    state: State<'_, AppHandle>,
+) -> Result<pwdvault_domain::TotpCodeResponse, VaultError> {
+    app::totp_code(state.inner(), id)
+}
+
 // ---------------------------------------------------------------------------
 // Group management
 // ---------------------------------------------------------------------------

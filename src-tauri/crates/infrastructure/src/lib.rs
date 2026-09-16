@@ -12,6 +12,7 @@ pub mod keychain;
 pub mod native_host_setup;
 pub mod pairing;
 pub mod paths;
+pub mod totp;
 pub mod vault_header;
 
 // Re-export the crypto VerificationData at the crate root for compatibility

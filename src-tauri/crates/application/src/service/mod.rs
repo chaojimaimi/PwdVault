@@ -5,6 +5,7 @@ pub mod entries;
 pub mod groups;
 pub mod security;
 pub mod settings;
+pub mod totp;
 pub mod update;
 pub mod utils;
 pub mod vault;
@@ -21,6 +22,7 @@ pub use security::{
     recovery_status, unlock_biometric, verify_master_and_integrity,
 };
 pub use settings::{get_settings, update_settings};
+pub use totp::totp_code;
 pub use update::{cancel_update_check, check_for_updates};
 pub use utils::generate_password;
 pub use vault::{

@@ -28,6 +28,6 @@ pub use validation::ValidationPolicy;
 // `pwdvault_application` alone without also naming `pwdvault_domain`.
 pub use pwdvault_domain::{
     BackupPayload, BiometricStatus, CreateEntryRequest, EntrySecretResponse, EntrySummary,
-    ExportEntry, Group, ImportResult, PasswordEntry, Settings, UpdateEntryRequest, UpdateInfo,
-    VaultBackup,
+    ExportEntry, Group, ImportResult, PasswordEntry, Settings, TotpCodeResponse,
+    UpdateEntryRequest, UpdateInfo, VaultBackup,
 };

@@ -217,11 +217,12 @@ pub(crate) enum BlobRewrite {
     Remove { key: &'static str },
 }
 
-/// Re-encrypt an entry's inner `encrypted_password` / `encrypted_notes`
-/// fields from `old_enc` to `new_enc`. The inner fields are encrypted with
-/// the enc subkey, which rotates with the master key — same step as
-/// `migrate_database`'s inner-field pass, here without any legacy plaintext
-/// channel (a field that fails to decrypt aborts the whole re-seal).
+/// Re-encrypt an entry's inner `encrypted_password` / `encrypted_notes` /
+/// `encrypted_totp_secret` fields from `old_enc` to `new_enc`. The inner
+/// fields are encrypted with the enc subkey, which rotates with the master
+/// key — same step as `migrate_database`'s inner-field pass, here without any
+/// legacy plaintext channel (a field that fails to decrypt aborts the whole
+/// re-seal).
 fn reencrypt_entry_inner(
     entry: &mut database::PasswordEntry,
     old_enc: &[u8; 32],
@@ -247,6 +248,21 @@ fn reencrypt_entry_inner(
         let resealed = encrypt(new_enc, &plain)?;
         plain.zeroize();
         entry.encrypted_notes = Some(
+            bincode::serialize(&resealed)
+                .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?,
+        );
+    }
+
+    // P2.4: the TOTP secret blob rotates with the enc subkey too — leaving it
+    // behind would strand it undecryptable after the key change.
+    if let Some(totp_bytes) = entry.encrypted_totp_secret.take() {
+        let sealed: EncryptedData = bincode::deserialize(&totp_bytes)
+            .or_else(|_| EncryptedData::from_bytes(&totp_bytes))
+            .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
+        let mut plain = decrypt(old_enc, &sealed)?;
+        let resealed = encrypt(new_enc, &plain)?;
+        plain.zeroize();
+        entry.encrypted_totp_secret = Some(
             bincode::serialize(&resealed)
                 .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?,
         );

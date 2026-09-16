@@ -298,6 +298,8 @@ pub fn run() {
             commands::update_entry,
             commands::remove_entry,
             commands::get_entry_count,
+            // P2.4 (D6): Tauri-only TOTP code generation.
+            commands::totp_code,
             commands::create_group,
             commands::list_all_groups,
             commands::remove_group,

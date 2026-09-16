@@ -38,6 +38,11 @@ pub struct UpdateEntryRequest {
     pub update_notes: bool,
     pub tags: Vec<String>,
     pub group_id: Option<String>,
+    /// TOTP secret tri-state (same update semantics as the notes patch):
+    /// `None` = leave unchanged, `Some("")` = clear, `Some(x)` = set. The
+    /// value may be a plain base32 secret or a full `otpauth://` URI.
+    #[serde(default)]
+    pub totp_secret: Option<String>,
 }
 
 impl From<CreateEntryRequest> for UpdateEntryRequest {
@@ -51,6 +56,7 @@ impl From<CreateEntryRequest> for UpdateEntryRequest {
             update_notes: true,
             tags: request.tags,
             group_id: request.group_id,
+            totp_secret: None,
         }
     }
 }
@@ -63,6 +69,14 @@ pub struct EntrySecretResponse {
     pub password: Zeroizing<String>,
     pub notes: Option<Zeroizing<String>>,
     pub last_used_at: Option<i64>,
+}
+
+/// Current TOTP code for an entry (`totp_code`, Tauri-only command).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TotpCodeResponse {
+    pub code: String,
+    /// Seconds until the displayed code rotates.
+    pub seconds_remaining: i64,
 }
 
 /// Summary of password entry (without decrypted password).

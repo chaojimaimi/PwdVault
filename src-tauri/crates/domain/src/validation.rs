@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use crate::dto::{BackupPayload, CreateEntryRequest, UpdateEntryRequest};
 use crate::entities::Settings;
 use crate::error::DomainError;
-use crate::{MAX_FIELD_LENGTH, MAX_NOTES_LENGTH, MAX_PASSWORD_LENGTH};
+use crate::{MAX_FIELD_LENGTH, MAX_NOTES_LENGTH, MAX_PASSWORD_LENGTH, MAX_TOTP_SECRET_LENGTH};
 
 pub const MIN_MASTER_PASSWORD_CHARS: usize = 8;
 pub const MAX_INPUT_PASSWORD_BYTES: usize = 1024;
@@ -80,6 +80,16 @@ pub fn entry(request: &CreateEntryRequest) -> Result<(), DomainError> {
 }
 
 pub fn entry_update(request: &UpdateEntryRequest) -> Result<(), DomainError> {
+    // TOTP tri-state: empty string = clear, otherwise length-bound. The value
+    // may be a plain base32 secret or a whole `otpauth://` URI (P2.4).
+    if let Some(totp) = &request.totp_secret {
+        if totp.len() > MAX_TOTP_SECRET_LENGTH {
+            return Err(invalid(
+                "TOTP_SECRET_TOO_LONG",
+                "TOTP secret is too long",
+            ));
+        }
+    }
     entry_fields(
         &request.title,
         request.url.as_deref(),

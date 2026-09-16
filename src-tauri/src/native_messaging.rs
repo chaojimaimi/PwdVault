@@ -750,6 +750,9 @@ fn execute_command(
                 update_notes,
                 tags: req.tags.unwrap_or_default(),
                 group_id: req.group_id,
+                // totp_code is Tauri-only (D6); the extension never patches
+                // TOTP secrets.
+                totp_secret: None,
             };
             service::update_entry(&state, id, request)
                 .map(|summary| serde_json::to_value(summary).expect("entry serializable"))

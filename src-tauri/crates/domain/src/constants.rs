@@ -16,6 +16,11 @@ pub const MAX_PASSWORD_LENGTH: usize = 1024;
 /// Maximum length for the notes field.
 pub const MAX_NOTES_LENGTH: usize = 65536;
 
+/// Maximum length for a TOTP secret as stored/entered — either a plain base32
+/// string (SHA-1 secrets are 32 chars, SHA-256 are 52) or a full `otpauth://`
+/// URI, which runs a few hundred bytes.
+pub const MAX_TOTP_SECRET_LENGTH: usize = 512;
+
 /// Maximum HTTP request body size (10 MB).
 pub const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 

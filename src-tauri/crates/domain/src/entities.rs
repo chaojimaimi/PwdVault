@@ -33,6 +33,15 @@ pub struct PasswordEntry {
     /// Optional group id this entry belongs to
     #[serde(default)]
     pub group_id: Option<String>,
+    /// Soft-delete tombstone (epoch seconds). `None` = live entry. The serde
+    /// default is inert for bincode (positional, see the codec dual-read) but
+    /// keeps old backup JSON importable.
+    #[serde(default)]
+    pub deleted_at: Option<i64>,
+    /// Encrypted TOTP secret blob (ciphertext produced by the infra crypto
+    /// layer). Same serde-default rationale as `deleted_at`.
+    #[serde(default)]
+    pub encrypted_totp_secret: Option<Vec<u8>>,
 }
 
 impl PasswordEntry {
@@ -51,6 +60,8 @@ impl PasswordEntry {
             updated_at: now,
             last_used_at: None,
             group_id: None,
+            deleted_at: None,
+            encrypted_totp_secret: None,
         }
     }
 }
@@ -62,6 +73,11 @@ pub struct Group {
     pub name: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Soft-delete tombstone (epoch seconds). `None` = live group. The serde
+    /// default is inert for bincode (positional, see the codec dual-read) but
+    /// keeps old backup JSON importable.
+    #[serde(default)]
+    pub deleted_at: Option<i64>,
 }
 
 impl Group {
@@ -72,6 +88,7 @@ impl Group {
             name,
             created_at: now,
             updated_at: now,
+            deleted_at: None,
         }
     }
 }

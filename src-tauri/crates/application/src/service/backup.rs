@@ -56,9 +56,20 @@ pub fn export_vault(
     // Load all entries and decrypt passwords/notes.
     // Uses list_all_entries_bulk (single read txn, §5.6.2) instead of the
     // old list_entries + N×load_entry pattern.
-    let entries = database::list_all_entries_bulk(&db, key, None)?;
+    // Soft delete (P2.2): tombstoned rows are excluded — a restore must not
+    // resurrect entries the user deleted (note: restoring an older backup
+    // can still re-add a deleted entry under its old ID; documented).
+    let all_entries = database::list_all_entries_bulk(&db, key, None)?;
+    let live_group_ids: std::collections::HashSet<String> = database::list_all_groups_bulk(&db, key)?
+        .into_iter()
+        .filter(|group| group.deleted_at.is_none())
+        .map(|group| group.id)
+        .collect();
     let mut export_entries = Vec::new();
-    for entry in entries {
+    for entry in all_entries {
+        if entry.deleted_at.is_some() {
+            continue;
+        }
         // Decrypt the inner password field. Use the same resilient path as
         // get_entry_secret: try bincode(EncryptedData) first, then raw bytes,
         // to handle entries written by different historical versions.
@@ -93,6 +104,13 @@ pub fn export_vault(
             None
         };
 
+        // Dangling group references (removed group without a cascade, P2.2)
+        // normalize to "ungrouped" so backup_payload's referential check
+        // stays valid.
+        let group_id = entry
+            .group_id
+            .filter(|gid| live_group_ids.contains(gid));
+
         export_entries.push(ExportEntry {
             id: entry.id,
             title: entry.title,
@@ -101,14 +119,17 @@ pub fn export_vault(
             password: Zeroizing::new(password),
             notes,
             tags: entry.tags,
-            group_id: entry.group_id,
+            group_id,
             created_at: entry.created_at,
             updated_at: entry.updated_at,
         });
     }
 
-    // Load groups via bulk scan (§5.6.2).
-    let groups = database::list_all_groups_bulk(&db, key)?;
+    // Load groups via bulk scan (§5.6.2), excluding tombstones.
+    let groups = database::list_all_groups_bulk(&db, key)?
+        .into_iter()
+        .filter(|group| group.deleted_at.is_none())
+        .collect::<Vec<_>>();
 
     // Load settings
     let settings = load_settings(&db)?;
@@ -537,6 +558,65 @@ mod tests {
         let entries = crate::service::list_all_entries(&state).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].url, None);
+    }
+
+    /// P2.2 + P3.6 item 1: export excludes tombstoned entries and groups,
+    /// and normalizes dangling group references (cascade-free group removal)
+    /// to "ungrouped" so the payload stays referentially valid.
+    #[test]
+    fn export_excludes_tombstones_and_normalizes_dangling_groups() {
+        let (state, _dir) = unlocked_state();
+        let db = crate::service::vault::get_db(&state).unwrap();
+        let enc_key = state.session.get_enc_key().unwrap();
+        let mac_key = state.session.get_mac_key().unwrap();
+
+        let mut live_group = database::Group::new("Live".into());
+        let mut dead_group = database::Group::new("Dead".into());
+        dead_group.deleted_at = Some(1_700_000_000);
+
+        let mut live = PasswordEntry::new("Live entry".into(), None, "user".into());
+        live.encrypted_password =
+            bincode::serialize(&crypto::encrypt(&enc_key, b"pw").unwrap()).unwrap();
+        live.group_id = Some(live_group.id.clone());
+
+        let mut dangling = PasswordEntry::new("Dangling entry".into(), None, "user".into());
+        dangling.encrypted_password =
+            bincode::serialize(&crypto::encrypt(&enc_key, b"pw").unwrap()).unwrap();
+        // References the tombstoned group: cascade clearing is gone (P2.2).
+        dangling.group_id = Some(dead_group.id.clone());
+
+        let mut dead = PasswordEntry::new("Dead entry".into(), None, "user".into());
+        dead.encrypted_password =
+            bincode::serialize(&crypto::encrypt(&enc_key, b"pw").unwrap()).unwrap();
+        dead.deleted_at = Some(1_700_000_100);
+
+        database::vault_store::VaultStore::new(&db)
+            .write(&mac_key, |txn| {
+                database::vault_store::save_group_in_txn(txn, &enc_key, &live_group)?;
+                database::vault_store::save_group_in_txn(txn, &enc_key, &dead_group)?;
+                database::vault_store::save_entry_in_txn(txn, &enc_key, &live)?;
+                database::vault_store::save_entry_in_txn(txn, &enc_key, &dangling)?;
+                database::vault_store::save_entry_in_txn(txn, &enc_key, &dead)?;
+                Ok(())
+            })
+            .unwrap();
+
+        // Export validation would fail without tombstone exclusion + dangling
+        // reference normalization; the round trip proves both. The fixture's
+        // own "Backup entry" adds a third live entry.
+        let backup = export_vault(&state, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
+        let result =
+            import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
+        assert_eq!(result.entries_imported, 3);
+        assert_eq!(result.groups_imported, 1);
+
+        let entries = crate::service::list_all_entries(&state).unwrap();
+        assert!(entries.iter().all(|entry| entry.title != "Dead entry"));
+        let dangling_entry = entries
+            .iter()
+            .find(|entry| entry.title == "Dangling entry")
+            .unwrap();
+        assert_eq!(dangling_entry.group_id, None);
     }
 
     #[test]
