@@ -42,9 +42,9 @@ fn map_la_error(code: isize) -> SecretStoreError {
         LA_ERROR_AUTHENTICATION_FAILED => SecretStoreError::Unavailable(
             "Touch ID did not match — use your master password".to_string(),
         ),
-        other => SecretStoreError::Unavailable(format!(
-            "biometric evaluation failed (LAError {other})"
-        )),
+        other => {
+            SecretStoreError::Unavailable(format!("biometric evaluation failed (LAError {other})"))
+        }
     }
 }
 
@@ -126,10 +126,7 @@ mod tests {
             other => panic!("mismatch must map to Unavailable, got {other:?}"),
         }
         // SystemCancel (-4), AppCancel (-9), NotInteractive (-100), ...
-        assert!(matches!(
-            map_la_error(-4),
-            SecretStoreError::Unavailable(_)
-        ));
+        assert!(matches!(map_la_error(-4), SecretStoreError::Unavailable(_)));
         assert!(matches!(
             map_la_error(-100),
             SecretStoreError::Unavailable(_)

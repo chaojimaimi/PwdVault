@@ -317,22 +317,19 @@ mod tests {
     /// Same shape as the backup.rs fixture: unlocked in-memory AppState.
     fn unlocked_state() -> (Arc<AppState>, TempDir) {
         let dir = TempDir::new().unwrap();
-        let db = Arc::new(
-            database::init_database(dir.path().join("entries.db")).unwrap(),
-        );
+        let db = Arc::new(database::init_database(dir.path().join("entries.db")).unwrap());
         let salt = [0x71; 16];
         let params = AdaptiveParams {
             m_cost: 16384,
             t_cost: 1,
             p_cost: 1,
         };
-        let (master_key, _) =
-            pwdvault_infrastructure::crypto::kdf::derive_key_with_params(
-                TEST_PASSWORD,
-                &salt,
-                &params,
-            )
-            .unwrap();
+        let (master_key, _) = pwdvault_infrastructure::crypto::kdf::derive_key_with_params(
+            TEST_PASSWORD,
+            &salt,
+            &params,
+        )
+        .unwrap();
         let verification =
             pwdvault_infrastructure::crypto::create_verification_header(&master_key, salt, params)
                 .unwrap();
@@ -429,8 +426,7 @@ mod tests {
 
         // Infra stays raw: the tombstone row survives and decrypts.
         let db = get_db(&state).unwrap();
-        let raw =
-        list_all_entries_bulk(&db, &state.session.get_enc_key().unwrap(), None).unwrap();
+        let raw = list_all_entries_bulk(&db, &state.session.get_enc_key().unwrap(), None).unwrap();
         assert_eq!(raw.len(), 2);
         let tombstone = raw.iter().find(|entry| entry.id == gone.id).unwrap();
         assert!(tombstone.deleted_at.is_some());

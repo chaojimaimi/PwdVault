@@ -15,7 +15,6 @@ use std::time::Duration;
 
 use zeroize::Zeroizing;
 
-
 use super::backend::{BackendError, CloudBackend, Precondition, WebDavBackend};
 
 /// What the stub saw for one request (for assertions on the wire format).
@@ -88,7 +87,12 @@ fn handle_request(mut request: tiny_http::Request, state: &StubState) {
             .map(|h| h.value.as_str().to_string())
     };
 
-    let path = url.split('?').next().unwrap_or("").trim_start_matches('/').to_string();
+    let path = url
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .trim_start_matches('/')
+        .to_string();
     state.seen.lock().unwrap().push(SeenRequest {
         method: method.clone(),
         uri: format!("/{path}"),
@@ -117,9 +121,7 @@ fn handle_request(mut request: tiny_http::Request, state: &StubState) {
                         // directory exists.
                         let parent_missing = path
                             .rsplit_once('/')
-                            .map(|(parent, _)| {
-                                !state.dirs.lock().unwrap().contains(parent)
-                            })
+                            .map(|(parent, _)| !state.dirs.lock().unwrap().contains(parent))
                             .unwrap_or(false);
                         if parent_missing {
                             (409, None, b"ancestor missing".to_vec())
@@ -212,9 +214,7 @@ fn handle_request(mut request: tiny_http::Request, state: &StubState) {
 
     let mut response = tiny_http::Response::from_data(response_body).with_status_code(status);
     if let Some(etag) = etag_header {
-        response.add_header(
-            tiny_http::Header::from_bytes(&b"ETag"[..], etag.as_bytes()).unwrap(),
-        );
+        response.add_header(tiny_http::Header::from_bytes(&b"ETag"[..], etag.as_bytes()).unwrap());
     }
     let _ = request.respond(response);
 }
@@ -269,7 +269,10 @@ fn webdav_download_roundtrip() {
     );
     let backend = make_backend(&base_url);
 
-    assert_eq!(backend.download("vault/c.pwsync").unwrap(), b"container-bytes".to_vec());
+    assert_eq!(
+        backend.download("vault/c.pwsync").unwrap(),
+        b"container-bytes".to_vec()
+    );
     assert!(matches!(
         backend.download("vault/missing.pwsync"),
         Err(BackendError::Network(_))
@@ -341,7 +344,11 @@ fn webdav_put_if_match_maps_412_to_conflict() {
     )
     .unwrap();
     assert!(matches!(
-        bad.upload("vault/c.pwsync", b"x", Precondition::IfMatch("\"etag-1\"".to_string())),
+        bad.upload(
+            "vault/c.pwsync",
+            b"x",
+            Precondition::IfMatch("\"etag-1\"".to_string())
+        ),
         Err(BackendError::Auth(_))
     ));
 }
@@ -354,10 +361,18 @@ fn webdav_put_if_absent_create_semantics() {
     let backend = make_backend(&base_url);
 
     backend
-        .upload("vault/pwdvault-sync.pwsync", b"first", Precondition::IfAbsent)
+        .upload(
+            "vault/pwdvault-sync.pwsync",
+            b"first",
+            Precondition::IfAbsent,
+        )
         .unwrap();
     assert!(matches!(
-        backend.upload("vault/pwdvault-sync.pwsync", b"second", Precondition::IfAbsent),
+        backend.upload(
+            "vault/pwdvault-sync.pwsync",
+            b"second",
+            Precondition::IfAbsent
+        ),
         Err(BackendError::Conflict)
     ));
 
@@ -369,11 +384,12 @@ fn webdav_put_if_absent_create_semantics() {
         .filter(|r| r.method == "PUT")
         .map(|r| r.if_none_match.clone())
         .collect();
-    assert!(none_matches.len() >= 2, "expected at least two PUTs, got {none_matches:?}");
     assert!(
-        none_matches
-            .iter()
-            .all(|h| h.as_deref() == Some("*")),
+        none_matches.len() >= 2,
+        "expected at least two PUTs, got {none_matches:?}"
+    );
+    assert!(
+        none_matches.iter().all(|h| h.as_deref() == Some("*")),
         "every PUT must carry If-None-Match: *, got {none_matches:?}"
     );
 }
@@ -385,14 +401,11 @@ fn webdav_put_creates_missing_collection_via_mkcol() {
     let (base_url, seen, files) = spawn_stub();
     let backend = make_backend(&base_url);
 
-    backend.upload_unique("deep/dir/hist.pwsync", b"history").unwrap();
+    backend
+        .upload_unique("deep/dir/hist.pwsync", b"history")
+        .unwrap();
     assert_eq!(
-        files
-            .lock()
-            .unwrap()
-            .get("deep/dir/hist.pwsync")
-            .unwrap()
-            .0,
+        files.lock().unwrap().get("deep/dir/hist.pwsync").unwrap().0,
         b"history".to_vec()
     );
     let mkcols: Vec<String> = seen
@@ -402,13 +415,23 @@ fn webdav_put_creates_missing_collection_via_mkcol() {
         .filter(|r| r.method == "MKCOL")
         .map(|r| r.uri.clone())
         .collect();
-    assert!(mkcols.contains(&"/deep".to_string()), "expected MKCOL for /deep, got {mkcols:?}");
+    assert!(
+        mkcols.contains(&"/deep".to_string()),
+        "expected MKCOL for /deep, got {mkcols:?}"
+    );
     assert!(mkcols.contains(&"/deep/dir".to_string()));
 
     // upload_unique writes unconditionally (unique names cannot conflict).
-    backend.upload_unique("deep/dir/hist2.pwsync", b"h2").unwrap();
+    backend
+        .upload_unique("deep/dir/hist2.pwsync", b"h2")
+        .unwrap();
     assert_eq!(
-        files.lock().unwrap().get("deep/dir/hist2.pwsync").unwrap().0,
+        files
+            .lock()
+            .unwrap()
+            .get("deep/dir/hist2.pwsync")
+            .unwrap()
+            .0,
         b"h2".to_vec()
     );
 

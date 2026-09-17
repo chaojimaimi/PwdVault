@@ -27,8 +27,8 @@ impl FileSecretStore {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
             Err(e) => return Err(format!("cannot read credential file: {e}")),
         };
-        let raw: HashMap<String, String> = serde_json::from_slice(&bytes)
-            .map_err(|e| format!("corrupt credential file: {e}"))?;
+        let raw: HashMap<String, String> =
+            serde_json::from_slice(&bytes).map_err(|e| format!("corrupt credential file: {e}"))?;
         let mut map = HashMap::with_capacity(raw.len());
         for (account, encoded) in raw {
             use base64::Engine;
@@ -149,7 +149,10 @@ mod tests {
             .set(crate::keychain::SYNC_WEBDAV_PASSWORD_ACCOUNT, b"dav-pass")
             .unwrap();
         store
-            .set(crate::keychain::SYNC_BAIDU_TOKEN_ACCOUNT, &[0xde, 0xad, 0xbe, 0xef])
+            .set(
+                crate::keychain::SYNC_BAIDU_TOKEN_ACCOUNT,
+                &[0xde, 0xad, 0xbe, 0xef],
+            )
             .unwrap();
         assert_eq!(
             store
@@ -158,7 +161,9 @@ mod tests {
             b"dav-pass".to_vec()
         );
         assert_eq!(
-            store.get(crate::keychain::SYNC_BAIDU_TOKEN_ACCOUNT).unwrap(),
+            store
+                .get(crate::keychain::SYNC_BAIDU_TOKEN_ACCOUNT)
+                .unwrap(),
             vec![0xde, 0xad, 0xbe, 0xef]
         );
 
@@ -176,7 +181,9 @@ mod tests {
             b"new-pass".to_vec()
         );
         assert_eq!(
-            store.get(crate::keychain::SYNC_BAIDU_TOKEN_ACCOUNT).unwrap(),
+            store
+                .get(crate::keychain::SYNC_BAIDU_TOKEN_ACCOUNT)
+                .unwrap(),
             vec![0xde, 0xad, 0xbe, 0xef]
         );
 

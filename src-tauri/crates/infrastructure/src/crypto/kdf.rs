@@ -126,8 +126,7 @@ impl KdfPolicy {
     /// backup before any key derivation. Returns `true` when the params are
     /// at or above the import floor.
     pub fn meets_import_floor(params: &AdaptiveParams) -> bool {
-        params.m_cost >= Self::IMPORT_MIN_MEMORY_KIB
-            && params.t_cost >= Self::IMPORT_MIN_ITERATIONS
+        params.m_cost >= Self::IMPORT_MIN_MEMORY_KIB && params.t_cost >= Self::IMPORT_MIN_ITERATIONS
     }
 
     pub fn validate(params: &AdaptiveParams) -> Result<(), KdfError> {

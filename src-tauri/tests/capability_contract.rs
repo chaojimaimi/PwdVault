@@ -11,15 +11,9 @@ fn permission_identifiers(capability: &serde_json::Value) -> HashSet<String> {
             entry
                 .as_str()
                 .map(str::to_string)
-                .or_else(|| {
-                    entry["identifier"]
-                        .as_str()
-                        .map(str::to_string)
-                })
+                .or_else(|| entry["identifier"].as_str().map(str::to_string))
                 .unwrap_or_else(|| {
-                    panic!(
-                        "permission entry must be a string or carry an identifier: {entry}"
-                    )
+                    panic!("permission entry must be a string or carry an identifier: {entry}")
                 })
         })
         .collect()
@@ -48,20 +42,12 @@ fn backup_and_restore_file_commands_are_authorized() {
     // export/import, and MUST deny the vault database directories on both
     // supported platforms (macOS: com.pwdvault.app; Windows: %LOCALAPPDATA%
     // /PwdVault — reachable via the `$HOME/**` allow rule).
-    let allow_paths = [
-        "$HOME/**",
-        "/Volumes/**",
-        "$TEMP/**",
-    ];
+    let allow_paths = ["$HOME/**", "/Volumes/**", "$TEMP/**"];
     let deny_paths = [
         "$HOME/Library/Application Support/com.pwdvault.app/**",
         "$LOCALDATA/PwdVault/**",
     ];
-    for identifier in [
-        "fs:allow-write-file",
-        "fs:allow-read-file",
-        "fs:allow-stat",
-    ] {
+    for identifier in ["fs:allow-write-file", "fs:allow-read-file", "fs:allow-stat"] {
         let entry = capability["permissions"]
             .as_array()
             .expect("permissions must be an array")

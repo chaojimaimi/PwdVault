@@ -62,7 +62,9 @@ fn callback_listener_receives_the_code() {
 
     let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
     stream
-        .write_all(b"GET /?code=abc123&state=x HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .write_all(
+            b"GET /?code=abc123&state=x HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        )
         .unwrap();
     drop(stream);
 
@@ -95,8 +97,14 @@ fn complete_auth_exchanges_and_stores_tokens() {
     let (base, _state, _server) = stub_with_files(vec![]);
     let store: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::new());
 
-    complete_auth_with(&store, "test-app-key", "test-secret-key", &base, Some("good-code"))
-        .unwrap();
+    complete_auth_with(
+        &store,
+        "test-app-key",
+        "test-secret-key",
+        &base,
+        Some("good-code"),
+    )
+    .unwrap();
     let stored: serde_json::Value =
         serde_json::from_slice(&store.get(SYNC_BAIDU_TOKEN_ACCOUNT).unwrap()).unwrap();
     assert_eq!(stored["access_token"], "AT-CODE");
@@ -113,7 +121,13 @@ fn complete_auth_exchanges_and_stores_tokens() {
     // Wrong code → Auth, nothing written.
     let fresh: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::new());
     assert!(matches!(
-        complete_auth_with(&fresh, "test-app-key", "test-secret-key", &base, Some("wrong")),
+        complete_auth_with(
+            &fresh,
+            "test-app-key",
+            "test-secret-key",
+            &base,
+            Some("wrong")
+        ),
         Err(BackendError::Auth(_))
     ));
     assert!(fresh.get(SYNC_BAIDU_TOKEN_ACCOUNT).is_err());
@@ -145,8 +159,7 @@ fn complete_auth_consumes_the_pending_callback() {
     ));
 
     // Pending failure → the reason becomes the Auth message.
-    *PENDING_CALLBACK.lock().unwrap() =
-        parked("s1", Err("authorization timed out".to_string()));
+    *PENDING_CALLBACK.lock().unwrap() = parked("s1", Err("authorization timed out".to_string()));
     assert!(matches!(
         complete_auth_with(&store, "test-app-key", "test-secret-key", &base, None),
         Err(BackendError::Auth(reason)) if reason.contains("timed out")
@@ -155,7 +168,10 @@ fn complete_auth_consumes_the_pending_callback() {
     // P2-2: pending success with the state echoed → exchanged and stored.
     *PENDING_CALLBACK.lock().unwrap() = parked(
         "s1",
-        Ok(CallbackGrant { code: "good-code".to_string(), state: Some("s1".to_string()) }),
+        Ok(CallbackGrant {
+            code: "good-code".to_string(),
+            state: Some("s1".to_string()),
+        }),
     );
     complete_auth_with(&store, "test-app-key", "test-secret-key", &base, None).unwrap();
     let stored: serde_json::Value =
@@ -171,7 +187,10 @@ fn complete_auth_consumes_the_pending_callback() {
     let fresh: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::new());
     *PENDING_CALLBACK.lock().unwrap() = parked(
         "s1",
-        Ok(CallbackGrant { code: "evil-code".to_string(), state: Some("s2".to_string()) }),
+        Ok(CallbackGrant {
+            code: "evil-code".to_string(),
+            state: Some("s2".to_string()),
+        }),
     );
     assert!(matches!(
         complete_auth_with(&fresh, "test-app-key", "test-secret-key", &base, None),
@@ -183,7 +202,10 @@ fn complete_auth_consumes_the_pending_callback() {
     // P2-2: a redirect with the state MISSING → rejected as well.
     *PENDING_CALLBACK.lock().unwrap() = parked(
         "s1",
-        Ok(CallbackGrant { code: "good-code".to_string(), state: None }),
+        Ok(CallbackGrant {
+            code: "good-code".to_string(),
+            state: None,
+        }),
     );
     assert!(matches!(
         complete_auth_with(&fresh, "test-app-key", "test-secret-key", &base, None),
@@ -194,10 +216,19 @@ fn complete_auth_consumes_the_pending_callback() {
     // An explicit code takes precedence over any pending result.
     *PENDING_CALLBACK.lock().unwrap() = parked(
         "s1",
-        Ok(CallbackGrant { code: "good-code".to_string(), state: Some("s1".to_string()) }),
+        Ok(CallbackGrant {
+            code: "good-code".to_string(),
+            state: Some("s1".to_string()),
+        }),
     );
-    complete_auth_with(&store, "test-app-key", "test-secret-key", &base, Some("good-code"))
-        .unwrap();
+    complete_auth_with(
+        &store,
+        "test-app-key",
+        "test-secret-key",
+        &base,
+        Some("good-code"),
+    )
+    .unwrap();
 }
 
 /// Unconfigured build (empty placeholder constants, P3.8): the Tauri-facing
@@ -205,7 +236,10 @@ fn complete_auth_consumes_the_pending_callback() {
 /// engine's open path reports the same.
 #[test]
 fn unconfigured_build_reports_not_configured() {
-    assert!(!baidu_configured(), "shipped constants must be empty placeholders");
+    assert!(
+        !baidu_configured(),
+        "shipped constants must be empty placeholders"
+    );
     let state = Arc::new(AppState::default());
 
     let err = baidu_start_auth(&state).unwrap_err();

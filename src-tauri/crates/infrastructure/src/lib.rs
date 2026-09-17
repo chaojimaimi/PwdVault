@@ -11,8 +11,8 @@ pub mod database;
 pub mod keychain;
 pub mod native_host_setup;
 pub mod pairing;
-pub mod secret_file_store;
 pub mod paths;
+pub mod secret_file_store;
 pub mod totp;
 pub mod vault_header;
 

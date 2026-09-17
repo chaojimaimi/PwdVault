@@ -16,8 +16,8 @@ pub use pwdvault_application::service;
 pub use pwdvault_application::{AppState, VaultError};
 pub use pwdvault_application::{
     BackupPayload, CreateEntryRequest, EntrySecretResponse, EntrySummary, ExportEntry,
-    ImportResult, SyncBackendKind, SyncConfig, SyncState, SyncStatusResponse,
-    UpdateEntryRequest, UpdateInfo, VaultBackup,
+    ImportResult, SyncBackendKind, SyncConfig, SyncState, SyncStatusResponse, UpdateEntryRequest,
+    UpdateInfo, VaultBackup,
 };
 pub use pwdvault_domain::{Group, PasswordEntry, Settings};
 

@@ -210,7 +210,9 @@ pub fn parse_otpauth_uri(uri: &str) -> Result<OtpauthParams, TotpError> {
                     TotpError::InvalidParam(format!("period '{}' is not a number", value))
                 })?;
                 if period == 0 {
-                    return Err(TotpError::InvalidParam("period must be positive".to_string()));
+                    return Err(TotpError::InvalidParam(
+                        "period must be positive".to_string(),
+                    ));
                 }
             }
             // issuer/image/lock etc. are informational — ignore them.
@@ -241,14 +243,14 @@ fn hmac_counter(secret: &[u8], counter: u64, algo: TotpAlgorithm) -> Vec<u8> {
     let message = counter.to_be_bytes();
     match algo {
         TotpAlgorithm::Sha1 => {
-            let mut mac = Hmac::<Sha1>::new_from_slice(secret)
-                .expect("HMAC accepts keys of any length");
+            let mut mac =
+                Hmac::<Sha1>::new_from_slice(secret).expect("HMAC accepts keys of any length");
             mac.update(&message);
             mac.finalize().into_bytes().to_vec()
         }
         TotpAlgorithm::Sha256 => {
-            let mut mac = Hmac::<Sha256>::new_from_slice(secret)
-                .expect("HMAC accepts keys of any length");
+            let mut mac =
+                Hmac::<Sha256>::new_from_slice(secret).expect("HMAC accepts keys of any length");
             mac.update(&message);
             mac.finalize().into_bytes().to_vec()
         }
@@ -388,7 +390,9 @@ mod tests {
     #[test]
     fn base32_roundtrip_all_lengths() {
         for len in 0..=21usize {
-            let data: Vec<u8> = (0..len as u8).map(|i| i.wrapping_mul(37).wrapping_add(1)).collect();
+            let data: Vec<u8> = (0..len as u8)
+                .map(|i| i.wrapping_mul(37).wrapping_add(1))
+                .collect();
             let encoded = base32_encode(&data);
             assert_eq!(base32_decode(&encoded).unwrap(), data, "len={}", len);
         }

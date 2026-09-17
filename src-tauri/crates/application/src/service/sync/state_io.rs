@@ -147,9 +147,10 @@ pub(crate) fn backend_error(err: BackendError) -> VaultError {
             "SYNC_AUTH_FAILED",
             format!("Cloud authentication failed: {message}"),
         ),
-        BackendError::Network(message) => {
-            invalid_sync("SYNC_NETWORK_ERROR", format!("Cloud request failed: {message}"))
-        }
+        BackendError::Network(message) => invalid_sync(
+            "SYNC_NETWORK_ERROR",
+            format!("Cloud request failed: {message}"),
+        ),
         BackendError::NotConfigured => invalid_sync(
             "SYNC_BACKEND_NOT_CONFIGURED",
             "This sync backend is not available in this build",
@@ -206,7 +207,9 @@ pub(super) fn content_hash(entries: &[SyncEntry], groups: &[SyncGroup]) -> Strin
     let mut sorted_groups = groups.to_vec();
     sorted_groups.sort_by(|a, b| a.id.cmp(&b.id));
     let payload = serde_json::json!({ "entries": sorted_entries, "groups": sorted_groups });
-    to_hex(&Sha256::digest(serde_json::to_vec(&payload).unwrap_or_default()))
+    to_hex(&Sha256::digest(
+        serde_json::to_vec(&payload).unwrap_or_default(),
+    ))
 }
 
 /// Validate user-supplied configuration before anything touches the network.
@@ -233,7 +236,9 @@ pub(super) fn validate_config(config: &SyncConfig) -> Result<(), VaultError> {
     }
     let dir = config.remote_dir.trim().trim_matches('/');
     if dir.len() > 512
-        || dir.split('/').any(|segment| segment.is_empty() || segment == "..")
+        || dir
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "..")
         || dir.chars().any(|c| c.is_control())
     {
         return Err(invalid_sync(
@@ -279,7 +284,10 @@ pub(super) fn open_backend(
                 .get(SYNC_WEBDAV_PASSWORD_ACCOUNT)
                 .map_err(sync_secret_error)?;
             let password = Zeroizing::new(String::from_utf8(password).map_err(|_| {
-                invalid_sync("SYNC_CREDENTIALS_CORRUPT", "Stored WebDAV password is not valid UTF-8")
+                invalid_sync(
+                    "SYNC_CREDENTIALS_CORRUPT",
+                    "Stored WebDAV password is not valid UTF-8",
+                )
             })?);
             Ok(Arc::new(
                 WebDavBackend::new(config.server_url.trim(), &config.username, password)
@@ -318,8 +326,8 @@ fn decrypt_inner(enc: &[u8; KEY_SIZE], blob: &[u8]) -> Result<String, VaultError
         .or_else(|_| EncryptedData::from_bytes(blob))
         .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
     let mut plain = decrypt(enc, &sealed)?;
-    let text = String::from_utf8(plain.clone())
-        .map_err(|e| VaultError::DecryptionFailed(e.to_string()));
+    let text =
+        String::from_utf8(plain.clone()).map_err(|e| VaultError::DecryptionFailed(e.to_string()));
     plain.zeroize();
     text
 }
@@ -379,10 +387,16 @@ pub(super) fn write_merged_back(
     local: &LocalRows,
     merged: &MergedSnapshot,
 ) -> Result<usize, VaultError> {
-    let local_entries: std::collections::HashMap<&str, &SyncEntry> =
-        local.sync_entries.iter().map(|e| (e.id.as_str(), e)).collect();
-    let local_groups: std::collections::HashMap<&str, &SyncGroup> =
-        local.sync_groups.iter().map(|g| (g.id.as_str(), g)).collect();
+    let local_entries: std::collections::HashMap<&str, &SyncEntry> = local
+        .sync_entries
+        .iter()
+        .map(|e| (e.id.as_str(), e))
+        .collect();
+    let local_groups: std::collections::HashMap<&str, &SyncGroup> = local
+        .sync_groups
+        .iter()
+        .map(|g| (g.id.as_str(), g))
+        .collect();
 
     // Convert changed rows BEFORE opening the transaction, so a crypto
     // failure rolls back cleanly without holding the write lock (the same
@@ -484,7 +498,10 @@ pub(super) fn load_config(db: &Arc<redb::Database>) -> Result<Option<SyncConfig>
     match vault_store::load_blob(db, SYNC_CONFIG_BLOB_KEY)? {
         None => Ok(None),
         Some(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|e| {
-            invalid_sync("SYNC_CONFIG_CORRUPT", format!("sync config is corrupt: {e}"))
+            invalid_sync(
+                "SYNC_CONFIG_CORRUPT",
+                format!("sync config is corrupt: {e}"),
+            )
         }),
     }
 }

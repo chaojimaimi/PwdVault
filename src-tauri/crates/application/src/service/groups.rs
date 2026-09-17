@@ -138,22 +138,19 @@ mod tests {
 
     fn unlocked_state() -> (Arc<AppState>, TempDir) {
         let dir = TempDir::new().unwrap();
-        let db = Arc::new(
-            database::init_database(dir.path().join("groups.db")).unwrap(),
-        );
+        let db = Arc::new(database::init_database(dir.path().join("groups.db")).unwrap());
         let salt = [0x61; 16];
         let params = AdaptiveParams {
             m_cost: 16384,
             t_cost: 1,
             p_cost: 1,
         };
-        let (master_key, _) =
-            pwdvault_infrastructure::crypto::kdf::derive_key_with_params(
-                TEST_PASSWORD,
-                &salt,
-                &params,
-            )
-            .unwrap();
+        let (master_key, _) = pwdvault_infrastructure::crypto::kdf::derive_key_with_params(
+            TEST_PASSWORD,
+            &salt,
+            &params,
+        )
+        .unwrap();
         let verification =
             pwdvault_infrastructure::crypto::create_verification_header(&master_key, salt, params)
                 .unwrap();

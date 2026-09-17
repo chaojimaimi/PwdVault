@@ -96,7 +96,10 @@ fn mode_writers_target_distinct_keychains() {
     // Mode 2 shape (legacy keychain, no ACL): always builds.
     let legacy = item_dictionary(
         vec![
-            (sec_key!(kSecValueData), CFData::from_buffer(b"x").as_CFType()),
+            (
+                sec_key!(kSecValueData),
+                CFData::from_buffer(b"x").as_CFType(),
+            ),
             (
                 sec_key!(kSecAttrAccessible),
                 sec_key!(kSecAttrAccessibleWhenUnlockedThisDeviceOnly),
@@ -126,11 +129,7 @@ fn mode_writers_target_distinct_keychains() {
             );
             let _ = dp;
         }
-        Err(e) => assert_eq!(
-            e.code(),
-            ERR_SEC_PARAM,
-            "unexpected ACL creation error"
-        ),
+        Err(e) => assert_eq!(e.code(), ERR_SEC_PARAM, "unexpected ACL creation error"),
     }
 }
 

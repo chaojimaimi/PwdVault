@@ -85,9 +85,7 @@ pub fn unwrap_secret(
 ) -> Result<Zeroizing<[u8; KEY_SIZE]>, WrapError> {
     let encrypted = EncryptedData::from_bytes(blob)?;
     let plain = cipher::decrypt_with_aad(wrap_key, &encrypted, aad)?;
-    let plain: [u8; KEY_SIZE] = plain
-        .try_into()
-        .map_err(|_| WrapError::InvalidBlob)?;
+    let plain: [u8; KEY_SIZE] = plain.try_into().map_err(|_| WrapError::InvalidBlob)?;
     Ok(Zeroizing::new(plain))
 }
 
@@ -107,9 +105,7 @@ pub fn recovery_wrap_key(recovery_key_paste: &str) -> Result<[u8; KEY_SIZE], Wra
     if raw.len() != KEY_SIZE {
         return Err(WrapError::RecoveryKeyInvalid);
     }
-    let key: [u8; KEY_SIZE] = raw
-        .try_into()
-        .map_err(|_| WrapError::RecoveryKeyInvalid)?;
+    let key: [u8; KEY_SIZE] = raw.try_into().map_err(|_| WrapError::RecoveryKeyInvalid)?;
     let digest: [u8; KEY_SIZE] = Sha256::digest(key).into();
     Ok(digest)
 }
@@ -154,7 +150,10 @@ mod tests {
     #[test]
     fn container_aad_roundtrip_and_cross_use_isolation() {
         let blob = wrap_secret(&WRAP, &MASTER, WRAP_AAD_CONTAINER).unwrap();
-        assert_eq!(*unwrap_secret(&WRAP, &blob, WRAP_AAD_CONTAINER).unwrap(), MASTER);
+        assert_eq!(
+            *unwrap_secret(&WRAP, &blob, WRAP_AAD_CONTAINER).unwrap(),
+            MASTER
+        );
         assert!(matches!(
             unwrap_secret(&WRAP, &blob, WRAP_AAD_BIO),
             Err(WrapError::InvalidBlob)
@@ -235,7 +234,10 @@ mod tests {
         // The derived wrap key must be reproducible from the same paste and
         // usable as an AES key for a full wrap roundtrip.
         let blob = wrap_secret(&derived, &MASTER, WRAP_AAD_RECOVERY).unwrap();
-        assert_eq!(*unwrap_secret(&derived, &blob, WRAP_AAD_RECOVERY).unwrap(), MASTER);
+        assert_eq!(
+            *unwrap_secret(&derived, &blob, WRAP_AAD_RECOVERY).unwrap(),
+            MASTER
+        );
     }
 
     #[test]

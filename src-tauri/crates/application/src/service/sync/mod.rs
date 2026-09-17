@@ -15,9 +15,9 @@
 //!   [`publish`] (container pull/push, manifest, history); `engine`
 //!   re-exports their public names so pre-split import paths are stable.
 
+pub mod backend;
 pub mod baidu;
 pub mod baidu_oauth;
-pub mod backend;
 pub mod container;
 pub mod engine;
 pub mod merge;
@@ -25,15 +25,17 @@ pub mod publish;
 pub mod state_io;
 
 #[cfg(test)]
-mod tests_webdav;
+mod tests_baidu;
 #[cfg(test)]
-mod tests_engine;
+mod tests_baidu_flows;
+#[cfg(test)]
+mod tests_baidu_oauth;
 #[cfg(test)]
 mod tests_connect;
 #[cfg(test)]
-mod tests_baidu;
+mod tests_engine;
 #[cfg(test)]
-mod tests_baidu_oauth;
+mod tests_webdav;
 
 use std::collections::HashMap;
 

@@ -157,7 +157,8 @@ impl VaultSession {
         let inner = self.inner.read().expect("session lock poisoned");
         match &*inner {
             SessionInner::Unlocked {
-                wrap_key: Some(key), ..
+                wrap_key: Some(key),
+                ..
             } => Some(*key.as_ref()),
             _ => None,
         }

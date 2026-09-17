@@ -380,7 +380,10 @@ impl WebDavBackend {
             "PROPFIND",
             url,
             body,
-            &[("Depth", "0".to_string()), ("Content-Type", "application/xml".to_string())],
+            &[
+                ("Depth", "0".to_string()),
+                ("Content-Type", "application/xml".to_string()),
+            ],
         )?;
         match response.status().as_u16() {
             207 => {}
@@ -434,9 +437,7 @@ impl WebDavBackend {
                 // non-auth failure as "probably exists" and let the retried
                 // PUT decide.
                 201 | 405 | 301 => {}
-                401 | 403 => {
-                    return Err(BackendError::Auth("MKCOL rejected credentials".into()))
-                }
+                401 | 403 => return Err(BackendError::Auth("MKCOL rejected credentials".into())),
                 _ => {}
             }
         }
@@ -457,11 +458,13 @@ impl CloudBackend for WebDavBackend {
             // Same ancestor-missing nuance as stat: a 409 GET means the leaf
             // is absent (the engine treats any download error as a transient
             // failure and re-stats, so this stays consistent).
-            404 | 409 => {
-                return Err(BackendError::Network("remote file vanished".to_string()))
-            }
+            404 | 409 => return Err(BackendError::Network("remote file vanished".to_string())),
             401 | 403 => return Err(BackendError::Auth("GET rejected credentials".into())),
-            other => return Err(BackendError::Network(format!("GET failed with HTTP {other}"))),
+            other => {
+                return Err(BackendError::Network(format!(
+                    "GET failed with HTTP {other}"
+                )))
+            }
         }
         response
             .body_mut()
@@ -493,7 +496,9 @@ impl CloudBackend for WebDavBackend {
                     401 | 403 => Err(BackendError::Auth("PUT rejected credentials".into())),
                     // Missing parent collection — create it and retry once.
                     409 => self.retry_after_mkcol(&url, body, &headers),
-                    other => Err(BackendError::Network(format!("PUT failed with HTTP {other}"))),
+                    other => Err(BackendError::Network(format!(
+                        "PUT failed with HTTP {other}"
+                    ))),
                 }
             }
             Err(e) => Err(e),
@@ -510,7 +515,9 @@ impl CloudBackend for WebDavBackend {
                     200..=299 => Ok(()),
                     401 | 403 => Err(BackendError::Auth("PUT rejected credentials".into())),
                     409 => self.retry_after_mkcol(&url, body, &[]),
-                    other => Err(BackendError::Network(format!("PUT failed with HTTP {other}"))),
+                    other => Err(BackendError::Network(format!(
+                        "PUT failed with HTTP {other}"
+                    ))),
                 }
             }
             Err(e) => Err(e),
@@ -524,7 +531,9 @@ impl CloudBackend for WebDavBackend {
             200..=299 => Ok(()),
             404 => Ok(()), // already gone — idempotent
             401 | 403 => Err(BackendError::Auth("DELETE rejected credentials".into())),
-            other => Err(BackendError::Network(format!("DELETE failed with HTTP {other}"))),
+            other => Err(BackendError::Network(format!(
+                "DELETE failed with HTTP {other}"
+            ))),
         }
     }
 }
@@ -548,7 +557,9 @@ impl WebDavBackend {
             200..=299 => Ok(()),
             s if Self::is_precondition_failed(s) => Err(BackendError::Conflict),
             401 | 403 => Err(BackendError::Auth("PUT rejected credentials".into())),
-            other => Err(BackendError::Network(format!("PUT failed with HTTP {other}"))),
+            other => Err(BackendError::Network(format!(
+                "PUT failed with HTTP {other}"
+            ))),
         }
     }
 }
@@ -653,14 +664,22 @@ mod tests {
 
         // IfMatch with the current etag succeeds and bumps the etag.
         cloud
-            .upload("c.pwsync", b"v2", Precondition::IfMatch(stat.etag.clone().unwrap()))
+            .upload(
+                "c.pwsync",
+                b"v2",
+                Precondition::IfMatch(stat.etag.clone().unwrap()),
+            )
             .unwrap();
         let stat2 = cloud.stat("c.pwsync").unwrap().unwrap();
         assert_ne!(stat2.etag, stat.etag);
 
         // Stale etag → Conflict; missing file with IfMatch → Conflict.
         assert!(matches!(
-            cloud.upload("c.pwsync", b"v3", Precondition::IfMatch(stat.etag.clone().unwrap())),
+            cloud.upload(
+                "c.pwsync",
+                b"v3",
+                Precondition::IfMatch(stat.etag.clone().unwrap())
+            ),
             Err(BackendError::Conflict)
         ));
         assert!(matches!(
@@ -672,20 +691,34 @@ mod tests {
             cloud.upload("c.pwsync", b"v3", Precondition::IfAbsent),
             Err(BackendError::Conflict)
         ));
-        cloud.upload("new.pwsync", b"x", Precondition::IfAbsent).unwrap();
+        cloud
+            .upload("new.pwsync", b"x", Precondition::IfAbsent)
+            .unwrap();
 
         // Conflict scheduling: uploads fail twice, then succeed.
         cloud.push_conflicts(2);
         assert!(matches!(
-            cloud.upload("c.pwsync", b"v3", Precondition::IfMatch(stat2.etag.clone().unwrap())),
+            cloud.upload(
+                "c.pwsync",
+                b"v3",
+                Precondition::IfMatch(stat2.etag.clone().unwrap())
+            ),
             Err(BackendError::Conflict)
         ));
         assert!(matches!(
-            cloud.upload("c.pwsync", b"v3", Precondition::IfMatch(stat2.etag.clone().unwrap())),
+            cloud.upload(
+                "c.pwsync",
+                b"v3",
+                Precondition::IfMatch(stat2.etag.clone().unwrap())
+            ),
             Err(BackendError::Conflict)
         ));
         cloud
-            .upload("c.pwsync", b"v3", Precondition::IfMatch(stat2.etag.unwrap()))
+            .upload(
+                "c.pwsync",
+                b"v3",
+                Precondition::IfMatch(stat2.etag.unwrap()),
+            )
             .unwrap();
         assert_eq!(cloud.get_file("c.pwsync").unwrap(), b"v3".to_vec());
 

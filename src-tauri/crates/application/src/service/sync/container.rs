@@ -31,8 +31,8 @@ use zeroize::{Zeroize, Zeroizing};
 
 use pwdvault_infrastructure::crypto::{
     decrypt_with_aad, derive_key, derive_key_with_params, encrypt_with_aad, generate_salt,
-    generate_wrap_key, unwrap_secret, wrap_secret, AdaptiveParams, EncryptedData, SALT_SIZE,
-    KEY_SIZE, WRAP_AAD_CONTAINER,
+    generate_wrap_key, unwrap_secret, wrap_secret, AdaptiveParams, EncryptedData, KEY_SIZE,
+    SALT_SIZE, WRAP_AAD_CONTAINER,
 };
 
 use super::{SyncEntry, SyncGroup, SyncSnapshot};
@@ -165,9 +165,8 @@ fn decrypt_snapshot(
 ) -> Result<SyncSnapshot, ContainerError> {
     // Everything below fails identically: wrong cek, tampered snapshot, or a
     // corrupted inner structure.
-    let mut snapshot_json =
-        decrypt_with_aad(cek, &container.snapshot, SNAPSHOT_AAD)
-            .map_err(|_| ContainerError::InvalidContainer)?;
+    let mut snapshot_json = decrypt_with_aad(cek, &container.snapshot, SNAPSHOT_AAD)
+        .map_err(|_| ContainerError::InvalidContainer)?;
     let parsed = serde_json::from_slice::<SyncSnapshot>(&snapshot_json)
         .map_err(|_| ContainerError::InvalidContainer);
     snapshot_json.zeroize();
@@ -201,7 +200,9 @@ pub fn update_container_snapshot(
 /// The envelope pieces the engine stores in its `sync_state` row so a
 /// later revision can be published without re-downloading the container
 /// (`sync_now`'s "remote rev unchanged" fast path).
-pub fn read_envelope(container_bytes: &[u8]) -> Result<(ContainerKdf, EncryptedData), ContainerError> {
+pub fn read_envelope(
+    container_bytes: &[u8],
+) -> Result<(ContainerKdf, EncryptedData), ContainerError> {
     let container = parse_envelope(container_bytes)?;
     Ok((container.kdf, container.wrapped_cek))
 }
@@ -260,8 +261,8 @@ fn seal_container(
     let encrypted_snapshot = encrypt_with_aad(&cek, &snapshot_json, SNAPSHOT_AAD)
         .map_err(|_| ContainerError::InvalidContainer)?;
     snapshot_json.zeroize();
-    let wrapped_cek =
-        wrap_secret(kdf_key, &cek, WRAP_AAD_CONTAINER).map_err(|_| ContainerError::InvalidContainer)?;
+    let wrapped_cek = wrap_secret(kdf_key, &cek, WRAP_AAD_CONTAINER)
+        .map_err(|_| ContainerError::InvalidContainer)?;
     let container = SyncContainerV1 {
         version: CONTAINER_FORMAT_VERSION,
         kdf,
@@ -473,12 +474,7 @@ mod tests {
             WRAP_AAD_CONTAINER,
         )
         .unwrap();
-        assert!(unwrap_secret(
-            &kdf_key,
-            &container.wrapped_cek.to_bytes(),
-            WRAP_AAD_BIO
-        )
-        .is_err());
+        assert!(unwrap_secret(&kdf_key, &container.wrapped_cek.to_bytes(), WRAP_AAD_BIO).is_err());
 
         let snapshot_json = decrypt_with_aad(&cek, &container.snapshot, SNAPSHOT_AAD).unwrap();
         assert_eq!(snapshot_json, serde_json::to_vec(&snapshot).unwrap());
@@ -522,10 +518,7 @@ mod tests {
         let before: SyncContainerV1 = serde_json::from_slice(&bytes).unwrap();
         let after: SyncContainerV1 = serde_json::from_slice(&updated).unwrap();
         assert_eq!(after.version, before.version);
-        assert_eq!(
-            after.wrapped_cek.to_bytes(),
-            before.wrapped_cek.to_bytes()
-        );
+        assert_eq!(after.wrapped_cek.to_bytes(), before.wrapped_cek.to_bytes());
         assert_ne!(after.snapshot.to_bytes(), before.snapshot.to_bytes());
         // Old password still opens the updated container (same kdf).
         assert_eq!(open_container(password(), &updated).unwrap(), next);

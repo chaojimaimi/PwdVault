@@ -18,29 +18,25 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use zeroize::Zeroizing;
-
-use super::backend::{BackendError, CloudBackend, MockCloudBackend, Precondition};
+use super::backend::{CloudBackend, Precondition};
 use super::baidu::{md5_hex, BaiduBackend};
 use super::engine::{sync_connect_with_backend, SyncBackendKind, SyncConfig};
 use crate::{AppState, VaultError};
-use pwdvault_infrastructure::keychain::{
-    MemorySecretStore, SecretStore, SYNC_BAIDU_TOKEN_ACCOUNT,
-};
+use pwdvault_infrastructure::keychain::{MemorySecretStore, SecretStore, SYNC_BAIDU_TOKEN_ACCOUNT};
 
 /// The exact User-Agent the backend must send (Baidu requires one on dlink).
 const EXPECTED_UA: &str = concat!("pwdvault/", env!("CARGO_PKG_VERSION"));
 /// Slice size of the backend upload (mirrors UPLOAD_SLICE_SIZE — the 2-slice
 /// test below fails if someone silently changes it).
-const SLICE_SIZE: usize = 4 * 1024 * 1024;
-const CONTAINER_PATH: &str = "apps/testdir/pwdvault-sync.pwsync";
-const MANIFEST_BODY: &[u8] = br#"{"rev":5,"device_id":"stub","sha256":"x","ts":1}"#;
+pub(crate) const SLICE_SIZE: usize = 4 * 1024 * 1024;
+pub(crate) const CONTAINER_PATH: &str = "apps/testdir/pwdvault-sync.pwsync";
+pub(crate) const MANIFEST_BODY: &[u8] = br#"{"rev":5,"device_id":"stub","sha256":"x","ts":1}"#;
 
-fn baidu_path(relative: &str) -> String {
+pub(crate) fn baidu_path(relative: &str) -> String {
     format!("/{relative}")
 }
 
-fn manifest_rel_path() -> &'static str {
+pub(crate) fn manifest_rel_path() -> &'static str {
     "apps/testdir/pwdvault-sync.manifest.json"
 }
 
@@ -50,26 +46,26 @@ fn manifest_rel_path() -> &'static str {
 
 /// What the stub saw for one request (wire-shape assertions).
 #[derive(Debug, Clone)]
-struct SeenRequest {
-    url: String,
-    user_agent: Option<String>,
-    content_type: Option<String>,
-    body: Vec<u8>,
+pub(crate) struct SeenRequest {
+    pub(crate) url: String,
+    pub(crate) user_agent: Option<String>,
+    pub(crate) content_type: Option<String>,
+    pub(crate) body: Vec<u8>,
 }
 
 #[derive(Default)]
 pub(crate) struct StubState {
     /// Baidu-absolute path → committed bytes.
-    files: Mutex<HashMap<String, Vec<u8>>>,
+    pub(crate) files: Mutex<HashMap<String, Vec<u8>>>,
     /// Uploaded-but-uncommitted slices keyed by (path, partseq).
     uploading: Mutex<HashMap<(String, usize), Vec<u8>>>,
     /// Token pairs issued by the stub, oldest first: (access, refresh).
     issued: Mutex<Vec<(String, String)>>,
     /// Next filemetas answers `errno: -6` regardless of the token.
-    expire_next_filemetas: AtomicBool,
+    pub(crate) expire_next_filemetas: AtomicBool,
     /// Refresh-token grants are rejected (refresh failure path).
-    fail_refresh: AtomicBool,
-    seen: Mutex<Vec<SeenRequest>>,
+    pub(crate) fail_refresh: AtomicBool,
+    pub(crate) seen: Mutex<Vec<SeenRequest>>,
 }
 
 fn spawn_stub(state: Arc<StubState>) -> (String, mpsc::Sender<()>) {
@@ -124,7 +120,14 @@ fn handle_request(mut request: tiny_http::Request, state: &StubState) {
         filemanager_endpoint(&query, state)
     } else if let Some(target) = path.strip_prefix("/dlink") {
         // The dlink hop exists to enforce the User-Agent requirement (P3.4).
-        if state.seen.lock().unwrap().last().and_then(|r| r.user_agent.clone()) != Some(EXPECTED_UA.to_string()) {
+        if state
+            .seen
+            .lock()
+            .unwrap()
+            .last()
+            .and_then(|r| r.user_agent.clone())
+            != Some(EXPECTED_UA.to_string())
+        {
             (403, b"missing user agent".to_vec())
         } else {
             match state.files.lock().unwrap().get(target) {
@@ -139,7 +142,12 @@ fn handle_request(mut request: tiny_http::Request, state: &StubState) {
 }
 
 fn token_accepted(token: &str, state: &StubState) -> bool {
-    state.issued.lock().unwrap().iter().any(|(access, _)| access == token)
+    state
+        .issued
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(access, _)| access == token)
 }
 
 fn token_rejected() -> (u16, Vec<u8>) {
@@ -150,7 +158,8 @@ fn file_endpoint(query: &HashMap<String, String>, state: &StubState, host: &str)
     let token = query.get("access_token").cloned().unwrap_or_default();
     match query.get("method").map(String::as_str).unwrap_or("") {
         "filemetas" => {
-            if state.expire_next_filemetas.swap(false, Ordering::SeqCst) || !token_accepted(&token, state)
+            if state.expire_next_filemetas.swap(false, Ordering::SeqCst)
+                || !token_accepted(&token, state)
             {
                 return token_rejected();
             }
@@ -198,10 +207,15 @@ fn file_endpoint(query: &HashMap<String, String>, state: &StubState, host: &str)
             let request = seen.last().unwrap();
             let content_type = request.content_type.clone().unwrap_or_default();
             let path = query.get("path").cloned().unwrap_or_default();
-            let partseq: usize = query.get("partseq").and_then(|s| s.parse().ok()).unwrap_or(0);
+            let partseq: usize = query
+                .get("partseq")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
             drop(seen);
-            match extract_multipart_file(&content_type, &state.seen.lock().unwrap().last().unwrap().body)
-            {
+            match extract_multipart_file(
+                &content_type,
+                &state.seen.lock().unwrap().last().unwrap().body,
+            ) {
                 Some(content) => {
                     state
                         .uploading
@@ -234,10 +248,15 @@ fn file_endpoint(query: &HashMap<String, String>, state: &StubState, host: &str)
             state.files.lock().unwrap().insert(path, joined.clone());
             (
                 200,
-                serde_json::json!({"errno": 0, "md5": md5_hex(&joined)}).to_string().into_bytes(),
+                serde_json::json!({"errno": 0, "md5": md5_hex(&joined)})
+                    .to_string()
+                    .into_bytes(),
             )
         }
-        other => (400, format!(r#"{{"errno":-99,"method":"{other}"}}"#).into_bytes()),
+        other => (
+            400,
+            format!(r#"{{"errno":-99,"method":"{other}"}}"#).into_bytes(),
+        ),
     }
 }
 
@@ -344,13 +363,17 @@ fn extract_multipart_file(content_type: &str, body: &[u8]) -> Option<Vec<u8>> {
     let delimiter = format!("--{boundary}");
     let head = find_subslice(body, delimiter.as_bytes())? + delimiter.len();
     let content_start = find_subslice(&body[head..], b"\r\n\r\n")? + head + 4;
-    let content_end =
-        find_subslice(&body[content_start..], format!("\r\n{delimiter}").as_bytes())? + content_start;
+    let content_end = find_subslice(
+        &body[content_start..],
+        format!("\r\n{delimiter}").as_bytes(),
+    )? + content_start;
     Some(body[content_start..content_end].to_vec())
 }
 
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 // ---------------------------------------------------------------------------
@@ -367,7 +390,9 @@ pub(crate) fn token_bytes(access: &str, refresh: &str) -> Vec<u8> {
     .into_bytes()
 }
 
-pub(crate) fn stub_with_files(files: Vec<(&str, &[u8])>) -> (String, Arc<StubState>, mpsc::Sender<()>) {
+pub(crate) fn stub_with_files(
+    files: Vec<(&str, &[u8])>,
+) -> (String, Arc<StubState>, mpsc::Sender<()>) {
     let state = Arc::new(StubState {
         issued: Mutex::new(vec![("AT1".to_string(), "RT1".to_string())]),
         ..StubState::default()
@@ -382,18 +407,13 @@ pub(crate) fn stub_with_files(files: Vec<(&str, &[u8])>) -> (String, Arc<StubSta
     (base, state, server)
 }
 
-fn make_backend(base: &str) -> (BaiduBackend, Arc<MemorySecretStore>) {
+pub(crate) fn make_backend(base: &str) -> (BaiduBackend, Arc<MemorySecretStore>) {
     let store = Arc::new(MemorySecretStore::new());
     store
         .set(SYNC_BAIDU_TOKEN_ACCOUNT, &token_bytes("AT1", "RT1"))
         .unwrap();
-    let backend = BaiduBackend::with_endpoints(
-        base,
-        base,
-        "test-app-key",
-        "test-secret-key",
-        store.clone(),
-    );
+    let backend =
+        BaiduBackend::with_endpoints(base, base, "test-app-key", "test-secret-key", store.clone());
     (backend, store)
 }
 
@@ -408,19 +428,26 @@ pub(crate) fn error_code(err: &VaultError) -> &str {
 /// credential stores, session unlocked directly (same shape as the engine
 /// tests' `test_state`).
 pub(crate) fn primed_state() -> (Arc<AppState>, tempfile::TempDir) {
-    use pwdvault_infrastructure::crypto::kdf::{derive_key_with_params, derive_subkeys, AdaptiveParams};
-    use pwdvault_infrastructure::database::{self, vault_store::{self, VaultStore}};
+    use pwdvault_infrastructure::crypto::kdf::{
+        derive_key_with_params, derive_subkeys, AdaptiveParams,
+    };
+    use pwdvault_infrastructure::database::{
+        self,
+        vault_store::{self, VaultStore},
+    };
 
     let dir = tempfile::TempDir::new().unwrap();
     let db = Arc::new(database::init_database(dir.path().join("baidu-sync.db")).unwrap());
     let salt = [0x2A; 16];
-    let params = AdaptiveParams { m_cost: 16384, t_cost: 1, p_cost: 1 };
-    let (master_key, _) =
-        derive_key_with_params("sync-test-password", &salt, &params).unwrap();
-    let verification = pwdvault_infrastructure::crypto::create_verification_header(
-        &master_key, salt, params,
-    )
-    .unwrap();
+    let params = AdaptiveParams {
+        m_cost: 16384,
+        t_cost: 1,
+        p_cost: 1,
+    };
+    let (master_key, _) = derive_key_with_params("sync-test-password", &salt, &params).unwrap();
+    let verification =
+        pwdvault_infrastructure::crypto::create_verification_header(&master_key, salt, params)
+            .unwrap();
     let (enc_key, mac_key) = derive_subkeys(&master_key, &salt);
 
     VaultStore::new(&db)
@@ -465,7 +492,10 @@ fn stat_reports_manifest_rev_token_and_missing_files() {
     assert_eq!(stat.etag.as_deref(), Some("rev:5"));
     assert_eq!(stat.size, "container-bytes".len() as u64);
 
-    assert!(backend.stat("apps/testdir/absent.pwsync").unwrap().is_none());
+    assert!(backend
+        .stat("apps/testdir/absent.pwsync")
+        .unwrap()
+        .is_none());
 }
 
 /// Without a manifest there is no token (degraded mode — the engine then
@@ -485,21 +515,31 @@ fn download_follows_dlink_with_user_agent() {
     let (base, state, _server) = stub_with_files(vec![(CONTAINER_PATH, b"payload".as_slice())]);
     let (backend, _store) = make_backend(&base);
 
-    assert_eq!(backend.download(CONTAINER_PATH).unwrap(), b"payload".to_vec());
+    assert_eq!(
+        backend.download(CONTAINER_PATH).unwrap(),
+        b"payload".to_vec()
+    );
 
     let seen = state.seen.lock().unwrap();
-    let dlink_hits: Vec<&SeenRequest> =
-        seen.iter().filter(|r| r.url.starts_with("/dlink/")).collect();
+    let dlink_hits: Vec<&SeenRequest> = seen
+        .iter()
+        .filter(|r| r.url.starts_with("/dlink/"))
+        .collect();
     assert_eq!(dlink_hits.len(), 1, "expected exactly one dlink GET");
     assert_eq!(dlink_hits[0].user_agent.as_deref(), Some(EXPECTED_UA));
     // The filemetas request carries the path parameter and dlink=1.
-    let metas: Vec<&SeenRequest> =
-        seen.iter().filter(|r| r.url.contains("method=filemetas")).collect();
+    let metas: Vec<&SeenRequest> = seen
+        .iter()
+        .filter(|r| r.url.contains("method=filemetas"))
+        .collect();
     assert_eq!(metas.len(), 1);
     assert!(metas[0].url.contains("method=filemetas"));
     assert!(metas[0].url.contains("dlink=1"));
     // encode_value percent-encodes the slashes of the Baidu-absolute path.
-    assert!(metas[0].url.contains(&format!("path={}", super::baidu::encode_value(&baidu_path(CONTAINER_PATH)))));
+    assert!(metas[0].url.contains(&format!(
+        "path={}",
+        super::baidu::encode_value(&baidu_path(CONTAINER_PATH))
+    )));
 }
 
 /// Unconditional upload: precreate (path/size/block_list) → superfile
@@ -516,7 +556,12 @@ fn unconditional_upload_slices_then_verifies() {
 
     // Content landed on the (simulated) disk.
     assert_eq!(
-        state.files.lock().unwrap().get(&baidu_path(CONTAINER_PATH)).unwrap(),
+        state
+            .files
+            .lock()
+            .unwrap()
+            .get(&baidu_path(CONTAINER_PATH))
+            .unwrap(),
         &body
     );
 
@@ -540,244 +585,25 @@ fn unconditional_upload_slices_then_verifies() {
         form.get("block_list").unwrap().contains(&md5_hex(&body)),
         "block_list must carry the slice md5"
     );
-    assert!(seen[1].url.contains("uploadid=UP-1"), "superfile must carry the upload id");
+    assert!(
+        seen[1].url.contains("uploadid=UP-1"),
+        "superfile must carry the upload id"
+    );
     assert!(seen[1].url.contains("partseq=0"));
     assert!(
-        seen[1].content_type.as_deref().unwrap_or("").starts_with("multipart/form-data; boundary="),
+        seen[1]
+            .content_type
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("multipart/form-data; boundary="),
         "superfile must be multipart: {:?}",
         seen[1].content_type
     );
     let create_form = parse_query(std::str::from_utf8(&seen[2].body).unwrap());
     assert_eq!(create_form.get("uploadid").unwrap(), "UP-1");
     assert_eq!(create_form.get("isdir").unwrap(), "0");
-    assert!(create_form.get("mtime").is_some(), "create must sync mtime (plan P3.4)");
-}
-
-/// Bodies larger than 4 MiB are split into ordered slices and reassembled.
-#[test]
-fn upload_splits_large_bodies_into_ordered_slices() {
-    let (base, state, _server) = stub_with_files(vec![]);
-    let (backend, _store) = make_backend(&base);
-    let body: Vec<u8> = (0..(SLICE_SIZE + 100)).map(|index| (index % 251) as u8).collect();
-
-    backend
-        .upload(CONTAINER_PATH, &body, Precondition::Unconditional)
-        .unwrap();
-
-    let seen = state.seen.lock().unwrap();
-    let superfiles: Vec<&SeenRequest> = seen
-        .iter()
-        .filter(|r| r.url.contains("method=superfile"))
-        .collect();
-    assert_eq!(superfiles.len(), 2, "4 MiB + 100 bytes must split into 2 slices");
-    assert!(superfiles[0].url.contains("partseq=0"));
-    assert!(superfiles[1].url.contains("partseq=1"));
-    assert_eq!(
-        state.files.lock().unwrap().get(&baidu_path(CONTAINER_PATH)).unwrap(),
-        &body,
-        "slices must reassemble in partseq order"
-    );
-}
-
-/// The simulated If-Match (D4): the current manifest rev passes, a stale
-/// rev (or a foreign token) Conflicts BEFORE any upload step; IfAbsent
-/// fails on existing files and creates missing ones.
-#[test]
-fn conditional_upload_guarded_by_manifest_rev() {
-    let (base, state, _server) = stub_with_files(vec![(manifest_rel_path(), MANIFEST_BODY)]);
-    let (backend, _store) = make_backend(&base);
-
-    backend
-        .upload(CONTAINER_PATH, b"v2", Precondition::IfMatch("rev:5".into()))
-        .unwrap();
-    assert!(matches!(
-        backend.upload(CONTAINER_PATH, b"v3", Precondition::IfMatch("rev:4".into())),
-        Err(BackendError::Conflict)
-    ));
-    let foreign = backend.upload(CONTAINER_PATH, b"v3", Precondition::IfMatch("not-a-rev".into()));
     assert!(
-        matches!(foreign, Err(BackendError::Conflict)),
-        "foreign tokens (e.g. WebDAV ETags) must fail closed"
+        create_form.get("mtime").is_some(),
+        "create must sync mtime (plan P3.4)"
     );
-
-    // The manifest rev comparison ran BEFORE the first upload step.
-    let seen = state.seen.lock().unwrap();
-    let manifest_read = seen
-        .iter()
-        .position(|r| {
-            r.url.contains("method=filemetas")
-                && r.url.contains(&super::baidu::encode_value(&baidu_path(manifest_rel_path())))
-        })
-        .expect("guard must stat the manifest");
-    let first_precreate = seen.iter().position(|r| r.url.contains("method=precreate")).unwrap();
-    assert!(manifest_read < first_precreate, "guard must run before precreate");
-    // The stale-rev attempts never reached precreate (fail-closed guard).
-    assert_eq!(
-        seen.iter().filter(|r| r.url.contains("method=precreate")).count(),
-        1,
-        "conflicting uploads must be rejected before the upload chain"
-    );
-    drop(seen);
-
-    // IfAbsent: existing → Conflict; missing → creates.
-    assert!(matches!(
-        backend.upload(CONTAINER_PATH, b"x", Precondition::IfAbsent),
-        Err(BackendError::Conflict)
-    ));
-    backend
-        .upload("apps/testdir/new.pwsync", b"created", Precondition::IfAbsent)
-        .unwrap();
-    assert_eq!(
-        state
-            .files
-            .lock()
-            .unwrap()
-            .get(&baidu_path("apps/testdir/new.pwsync"))
-            .unwrap(),
-        b"created"
-    );
-}
-
-/// upload_unique writes without any precondition (unique names, D4).
-#[test]
-fn upload_unique_writes_unconditionally() {
-    let (base, state, _server) = stub_with_files(vec![(manifest_rel_path(), MANIFEST_BODY)]);
-    let (backend, _store) = make_backend(&base);
-    backend
-        .upload_unique("apps/testdir/history/pwdvault-sync-r6.pwsync", b"snapshot")
-        .unwrap();
-    assert_eq!(
-        state
-            .files
-            .lock()
-            .unwrap()
-            .get(&baidu_path("apps/testdir/history/pwdvault-sync-r6.pwsync"))
-            .unwrap(),
-        b"snapshot"
-    );
-}
-
-/// Token rejection (errno -6) refreshes ONCE with the current refresh token
-/// and retries with the rotated pair, which is persisted.
-#[test]
-fn expired_token_refreshes_once_and_retries() {
-    let (base, state, _server) = stub_with_files(vec![(CONTAINER_PATH, b"payload".as_slice())]);
-    let (backend, store) = make_backend(&base);
-    state.expire_next_filemetas.store(true, Ordering::SeqCst);
-
-    assert_eq!(backend.download(CONTAINER_PATH).unwrap(), b"payload".to_vec());
-
-    let seen = state.seen.lock().unwrap();
-    let refreshes: Vec<&SeenRequest> = seen
-        .iter()
-        .filter(|r| r.url.contains("grant_type=refresh_token"))
-        .collect();
-    assert_eq!(refreshes.len(), 1, "exactly one refresh");
-    assert!(refreshes[0].url.contains("refresh_token=RT1"), "must use the CURRENT refresh token");
-    assert!(refreshes[0].url.contains("client_id=test-app-key"));
-
-    let metas: Vec<&SeenRequest> =
-        seen.iter().filter(|r| r.url.contains("method=filemetas")).collect();
-    assert_eq!(metas.len(), 2);
-    assert!(metas[0].url.contains("access_token=AT1"), "first try used the stale token");
-    assert!(metas[1].url.contains("access_token=AT2"), "retry must use the rotated token");
-    drop(seen);
-
-    // The rotated pair was persisted to the credential store.
-    let stored: serde_json::Value =
-        serde_json::from_slice(&store.get(SYNC_BAIDU_TOKEN_ACCOUNT).unwrap()).unwrap();
-    assert_eq!(stored["access_token"], "AT2");
-    assert_eq!(stored["refresh_token"], "RT2");
-}
-
-/// A failed refresh maps to BackendError::Auth and is not retried.
-#[test]
-fn failed_refresh_maps_to_auth() {
-    let (base, state, _server) = stub_with_files(vec![(CONTAINER_PATH, b"payload".as_slice())]);
-    let (backend, _store) = make_backend(&base);
-    state.fail_refresh.store(true, Ordering::SeqCst);
-    state.expire_next_filemetas.store(true, Ordering::SeqCst);
-
-    let result = backend.download(CONTAINER_PATH);
-    assert!(matches!(result, Err(BackendError::Auth(_))));
-    let refreshes = state
-        .seen
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|r| r.url.contains("grant_type=refresh_token"))
-        .count();
-    assert_eq!(refreshes, 1, "no retry after a failed refresh");
-}
-
-/// Missing credentials (never linked) map to Auth, not Network.
-#[test]
-fn missing_token_maps_to_auth() {
-    let (base, _state, _server) = stub_with_files(vec![]);
-    let store = Arc::new(MemorySecretStore::new());
-    let backend =
-        BaiduBackend::with_endpoints(&base, &base, "test-app-key", "test-secret-key", store);
-    assert!(matches!(backend.stat(CONTAINER_PATH), Err(BackendError::Auth(_))));
-}
-
-/// delete removes and is idempotent (errno 12 = already gone).
-#[test]
-fn delete_is_idempotent() {
-    let (base, state, _server) = stub_with_files(vec![(CONTAINER_PATH, b"x".as_slice())]);
-    let (backend, _store) = make_backend(&base);
-    backend.delete(CONTAINER_PATH).unwrap();
-    backend.delete(CONTAINER_PATH).unwrap();
-    assert!(!state.files.lock().unwrap().contains_key(&baidu_path(CONTAINER_PATH)));
-    let seen = state.seen.lock().unwrap();
-    let deletes: Vec<&SeenRequest> = seen
-        .iter()
-        .filter(|r| r.url.contains("/rest/2.0/xpan/filemanager"))
-        .collect();
-    assert_eq!(deletes.len(), 2);
-    assert!(
-        deletes[0].url.contains(&format!(
-            "filelist={}",
-            super::baidu::encode_value(&format!(r#"["{}"]"#, baidu_path(CONTAINER_PATH)))
-        )),
-        "filelist must carry the JSON-encoded path"
-    );
-}
-
-/// Baidu config shares the remote-layout validation (traversal rejected)
-/// even though the WebDAV URL check does not apply; a valid dir connects
-/// through the injected backend end to end (backend doubles stay
-/// independent: the engine never needs the real adapter for this path).
-#[test]
-fn baidu_config_validation_and_connect_through_injected_backend() {
-    let (state, _dir) = primed_state();
-    let mut config = SyncConfig {
-        enabled: true,
-        backend: SyncBackendKind::Baidu,
-        server_url: String::new(), // unused for Baidu — must stay valid
-        remote_dir: "../evil".to_string(),
-        username: String::new(),
-    };
-    let cloud = MockCloudBackend::new();
-    let err = sync_connect_with_backend(
-        &state,
-        &cloud,
-        config.clone(),
-        Zeroizing::new("container-passphrase".into()),
-        None,
-    )
-    .unwrap_err();
-    assert_eq!(error_code(&err), "SYNC_INVALID_CONFIG");
-
-    config.remote_dir = "apps/testdir".to_string();
-    let status = sync_connect_with_backend(
-        &state,
-        &cloud,
-        config,
-        Zeroizing::new("container-passphrase".into()),
-        None,
-    )
-    .unwrap();
-    assert_eq!(status.backend.as_deref(), Some("baidu"));
-    assert!(status.enabled);
-    assert_eq!(status.last_result.as_deref(), Some("ok"));
 }

@@ -53,8 +53,9 @@ pub(super) struct PublishContext<'a> {
 
 impl PublishContext<'_> {
     fn build_container(&self, snapshot: &SyncSnapshot) -> Result<Vec<u8>, VaultError> {
-        let wrapped_cek = EncryptedData::from_bytes(&self.envelope.wrapped_cek)
-            .map_err(|_| invalid_sync("SYNC_STATE_CORRUPT", "stored container envelope is corrupt"))?;
+        let wrapped_cek = EncryptedData::from_bytes(&self.envelope.wrapped_cek).map_err(|_| {
+            invalid_sync("SYNC_STATE_CORRUPT", "stored container envelope is corrupt")
+        })?;
         reseal_snapshot(self.envelope.kdf.clone(), wrapped_cek, self.cek, snapshot)
             .map_err(container_error)
     }
@@ -118,7 +119,10 @@ pub(super) fn publish_snapshot(
         let bytes = ctx.build_container(&snapshot)?;
         let precondition = ctx.container_precondition().map_err(backend_error)?;
 
-        match ctx.backend.upload(&ctx.paths.container, &bytes, precondition) {
+        match ctx
+            .backend
+            .upload(&ctx.paths.container, &bytes, precondition)
+        {
             Ok(()) => {
                 update_manifest(ctx, device_id, new_rev, &bytes);
                 rotate_history(ctx, &bytes, new_rev, device_id, history);
@@ -130,13 +134,18 @@ pub(super) fn publish_snapshot(
             }
             Err(BackendError::Conflict) => {
                 // Re-pull, re-merge, retry (D4).
-                let stat = ctx.backend.stat(&ctx.paths.container).map_err(backend_error)?;
+                let stat = ctx
+                    .backend
+                    .stat(&ctx.paths.container)
+                    .map_err(backend_error)?;
                 match stat {
                     Some(remote_stat) => {
-                        let fresh =
-                            ctx.backend.download(&ctx.paths.container).map_err(backend_error)?;
-                        let remote_snapshot = decrypt_snapshot_with_cek(&fresh, ctx.cek)
-                            .map_err(container_error)?;
+                        let fresh = ctx
+                            .backend
+                            .download(&ctx.paths.container)
+                            .map_err(backend_error)?;
+                        let remote_snapshot =
+                            decrypt_snapshot_with_cek(&fresh, ctx.cek).map_err(container_error)?;
                         let our_view = SyncSnapshot {
                             rev: 0,
                             device_id: String::new(),
@@ -176,7 +185,9 @@ pub(super) fn publish_snapshot(
     }
     Err(invalid_sync(
         "SYNC_CONFLICT",
-        format!("The vault kept changing on another device — {MAX_UPLOAD_ATTEMPTS} retries exhausted"),
+        format!(
+            "The vault kept changing on another device — {MAX_UPLOAD_ATTEMPTS} retries exhausted"
+        ),
     ))
 }
 
@@ -197,7 +208,8 @@ pub(super) fn update_manifest(
     match serde_json::to_vec(&manifest) {
         Ok(json) => {
             if let Err(err) =
-                ctx.backend.upload(&ctx.paths.manifest, &json, Precondition::Unconditional)
+                ctx.backend
+                    .upload(&ctx.paths.manifest, &json, Precondition::Unconditional)
             {
                 tracing::warn!("sync manifest update failed (degraded): {err}");
             }
@@ -243,7 +255,11 @@ pub(super) fn fetch_manifest(
     backend: &dyn CloudBackend,
     paths: &RemotePaths,
 ) -> Result<Option<SyncManifest>, VaultError> {
-    if backend.stat(&paths.manifest).map_err(backend_error)?.is_none() {
+    if backend
+        .stat(&paths.manifest)
+        .map_err(backend_error)?
+        .is_none()
+    {
         return Ok(None);
     }
     let bytes = backend.download(&paths.manifest).map_err(backend_error)?;

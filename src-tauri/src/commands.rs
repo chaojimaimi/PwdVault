@@ -320,11 +320,9 @@ pub async fn enable_recovery(
     state: State<'_, AppHandle>,
 ) -> Result<String, VaultError> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        app::enable_recovery(&state, password)
-    })
-    .await
-    .map_err(|e| VaultError::InternalError(format!("enable recovery task join error: {}", e)))?
+    tauri::async_runtime::spawn_blocking(move || app::enable_recovery(&state, password))
+        .await
+        .map_err(|e| VaultError::InternalError(format!("enable recovery task join error: {}", e)))?
 }
 
 #[tauri::command]
@@ -335,7 +333,9 @@ pub async fn disable_recovery(
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || app::disable_recovery(&state, current_password))
         .await
-        .map_err(|e| VaultError::InternalError(format!("disable recovery task join error: {}", e)))?
+        .map_err(|e| {
+            VaultError::InternalError(format!("disable recovery task join error: {}", e))
+        })?
 }
 
 #[tauri::command]
@@ -443,9 +443,8 @@ mod tests {
 
         // Unlock the session (same helper pattern as the native messaging tests).
         let salt = crypto::kdf::generate_salt();
-        let (master_key, _params) =
-            crypto::kdf::derive_key("correct horse battery staple", &salt)
-                .expect("derive master key");
+        let (master_key, _params) = crypto::kdf::derive_key("correct horse battery staple", &salt)
+            .expect("derive master key");
         let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &salt);
         state.session.unlock(enc_key, mac_key);
 

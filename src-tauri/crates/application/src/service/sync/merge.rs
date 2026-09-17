@@ -84,8 +84,8 @@ pub fn merge_groups(local: &[SyncGroup], remote: &[SyncGroup]) -> Vec<SyncGroup>
 pub fn merge_snapshots(local: &SyncSnapshot, remote: &SyncSnapshot) -> MergedSnapshot {
     let entries = merge_entries(&local.entries, &remote.entries);
     let groups = merge_groups(&local.groups, &remote.groups);
-    let changed =
-        !(entries_equivalent(&entries, &remote.entries) && groups_equivalent(&groups, &remote.groups));
+    let changed = !(entries_equivalent(&entries, &remote.entries)
+        && groups_equivalent(&groups, &remote.groups));
     MergedSnapshot {
         entries,
         groups,
@@ -407,13 +407,23 @@ mod tests {
         SyncEntry {
             id: id.to_string(),
             title: format!("title-{}", rng.gen_range(0..500)),
-            url: rng.gen_bool(0.7).then(|| format!("https://{}.example", rng.gen_range(0..500))),
+            url: rng
+                .gen_bool(0.7)
+                .then(|| format!("https://{}.example", rng.gen_range(0..500))),
             username: format!("user-{}", rng.gen_range(0..500)),
-            password: rng.gen_bool(0.9).then(|| format!("pw-{}", rng.gen_range(0..10_000))),
-            notes: rng.gen_bool(0.3).then(|| format!("notes-{}", rng.gen_range(0..1_000))),
-            totp_secret: rng.gen_bool(0.2).then(|| format!("JBSW{}", rng.gen_range(0..1_000))),
+            password: rng
+                .gen_bool(0.9)
+                .then(|| format!("pw-{}", rng.gen_range(0..10_000))),
+            notes: rng
+                .gen_bool(0.3)
+                .then(|| format!("notes-{}", rng.gen_range(0..1_000))),
+            totp_secret: rng
+                .gen_bool(0.2)
+                .then(|| format!("JBSW{}", rng.gen_range(0..1_000))),
             tags,
-            group_id: rng.gen_bool(0.5).then(|| format!("group-{}", rng.gen_range(0..5))),
+            group_id: rng
+                .gen_bool(0.5)
+                .then(|| format!("group-{}", rng.gen_range(0..5))),
             created_at: updated_at - rng.gen_range(0..10_000),
             updated_at,
             deleted_at: None,
@@ -476,10 +486,15 @@ mod tests {
             // Union preservation: every live input entry survives — live with
             // a monotone updated_at, or as the tombstone that outlived it —
             // and no phantom ids appear.
-            for entry in local.iter().chain(&remote).filter(|e| e.deleted_at.is_none()) {
-                let merged = ab.iter().find(|m| m.id == entry.id).unwrap_or_else(|| {
-                    panic!("scenario {scenario}: live entry {} lost", entry.id)
-                });
+            for entry in local
+                .iter()
+                .chain(&remote)
+                .filter(|e| e.deleted_at.is_none())
+            {
+                let merged = ab
+                    .iter()
+                    .find(|m| m.id == entry.id)
+                    .unwrap_or_else(|| panic!("scenario {scenario}: live entry {} lost", entry.id));
                 if merged.deleted_at.is_none() {
                     assert!(
                         merged.updated_at >= entry.updated_at,
@@ -553,7 +568,11 @@ mod tests {
                 ab,
                 "scenario {scenario}: not idempotent"
             );
-            for group in local.iter().chain(&remote).filter(|g| g.deleted_at.is_none()) {
+            for group in local
+                .iter()
+                .chain(&remote)
+                .filter(|g| g.deleted_at.is_none())
+            {
                 assert!(
                     ab.iter().any(|m| m.id == group.id),
                     "scenario {scenario}: live group {} lost",

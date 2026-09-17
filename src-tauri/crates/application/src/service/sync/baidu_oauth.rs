@@ -20,9 +20,7 @@ use rand::RngCore;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::backend::BackendError;
-use super::baidu::{
-    now_secs, OAUTH_API_BASE, REQUEST_TIMEOUT, USER_AGENT,
-};
+use super::baidu::{now_secs, OAUTH_API_BASE, REQUEST_TIMEOUT, USER_AGENT};
 use super::engine::backend_error;
 use crate::{AppState, VaultError};
 use pwdvault_domain::constants::{
@@ -147,7 +145,9 @@ pub fn baidu_start_auth(_state: &Arc<AppState>) -> Result<BaiduAuthStart, VaultE
     // (possibly stale) callback result. The CSPRNG state token is parked
     // with the slot — the redirect must echo it verbatim (P2-2).
     let state = new_oauth_state();
-    *PENDING_CALLBACK.lock().expect("pending callback lock poisoned") = Some(PendingAuth {
+    *PENDING_CALLBACK
+        .lock()
+        .expect("pending callback lock poisoned") = Some(PendingAuth {
         expected_state: state.clone(),
         outcome: None,
     });
@@ -158,7 +158,9 @@ pub fn baidu_start_auth(_state: &Arc<AppState>) -> Result<BaiduAuthStart, VaultE
         // start_auth parked must survive for the completion validation. (A
         // cleared slot means the flow was already consumed or restarted;
         // the stale result is dropped.)
-        let mut pending = PENDING_CALLBACK.lock().expect("pending callback lock poisoned");
+        let mut pending = PENDING_CALLBACK
+            .lock()
+            .expect("pending callback lock poisoned");
         if let Some(pending) = pending.as_mut() {
             pending.outcome = Some(outcome);
         }
@@ -210,7 +212,10 @@ pub(crate) fn complete_auth_with(
                         "no pending Baidu authorization — start the flow first".to_string(),
                     ))
                 }
-                Some(PendingAuth { expected_state, outcome: Some(outcome) }) => match outcome {
+                Some(PendingAuth {
+                    expected_state,
+                    outcome: Some(outcome),
+                }) => match outcome {
                     Ok(grant) => {
                         if grant.state.as_deref() != Some(expected_state.as_str()) {
                             return Err(BackendError::Auth(
@@ -296,7 +301,10 @@ pub(crate) fn token_request(oauth_base: &str, query: &str) -> Result<BaiduTokens
         .and_then(|value| value.as_str())
         .ok_or_else(|| BackendError::Network("token response missing refresh_token".to_string()))?
         .to_string();
-    let expires_in = parsed.get("expires_in").and_then(|value| value.as_i64()).unwrap_or(0);
+    let expires_in = parsed
+        .get("expires_in")
+        .and_then(|value| value.as_i64())
+        .unwrap_or(0);
     Ok(BaiduTokens {
         access_token,
         refresh_token,

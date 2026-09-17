@@ -84,10 +84,7 @@ pub fn entry_update(request: &UpdateEntryRequest) -> Result<(), DomainError> {
     // may be a plain base32 secret or a whole `otpauth://` URI (P2.4).
     if let Some(totp) = &request.totp_secret {
         if totp.len() > MAX_TOTP_SECRET_LENGTH {
-            return Err(invalid(
-                "TOTP_SECRET_TOO_LONG",
-                "TOTP secret is too long",
-            ));
+            return Err(invalid("TOTP_SECRET_TOO_LONG", "TOTP secret is too long"));
         }
     }
     entry_fields(

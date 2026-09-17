@@ -24,12 +24,12 @@
 //! sync module's adapters and tests) working unchanged.
 
 // Pre-split import paths, preserved verbatim.
-pub use super::state_io::{
-    CONTAINER_FILE, HISTORY_DIR, HISTORY_KEEP, MANIFEST_FILE, MAX_UPLOAD_ATTEMPTS,
-    SYNC_CONFIG_BLOB_KEY, SYNC_STATE_BLOB_KEY, StoredEnvelope, SyncBackendKind, SyncConfig,
-    SyncState, SyncStatusResponse,
-};
 pub(crate) use super::state_io::backend_error;
+pub use super::state_io::{
+    StoredEnvelope, SyncBackendKind, SyncConfig, SyncState, SyncStatusResponse, CONTAINER_FILE,
+    HISTORY_DIR, HISTORY_KEEP, MANIFEST_FILE, MAX_UPLOAD_ATTEMPTS, SYNC_CONFIG_BLOB_KEY,
+    SYNC_STATE_BLOB_KEY,
+};
 
 use std::sync::Arc;
 
@@ -44,9 +44,7 @@ use crate::service::vault::get_db;
 use crate::{AppState, VaultError};
 use pwdvault_infrastructure::crypto::{unwrap_secret, KEY_SIZE, WRAP_AAD_SYNC};
 use pwdvault_infrastructure::database::vault_store::{self, VaultStore};
-use pwdvault_infrastructure::keychain::{
-    SYNC_BAIDU_TOKEN_ACCOUNT, SYNC_WEBDAV_PASSWORD_ACCOUNT,
-};
+use pwdvault_infrastructure::keychain::{SYNC_BAIDU_TOKEN_ACCOUNT, SYNC_WEBDAV_PASSWORD_ACCOUNT};
 
 use super::publish::{
     fetch_manifest, publish_snapshot, pull_or_bootstrap, update_manifest, PublishContext,
@@ -271,14 +269,12 @@ pub fn sync_now_with_backend(
         match backend.stat(&paths.container).map_err(backend_error)? {
             Some(stat) => {
                 let bytes = backend.download(&paths.container).map_err(backend_error)?;
-                let (kdf, wrapped_cek) =
-                    read_envelope(&bytes).map_err(container_error)?;
+                let (kdf, wrapped_cek) = read_envelope(&bytes).map_err(container_error)?;
                 sync_state.envelope = Some(StoredEnvelope {
                     kdf,
                     wrapped_cek: wrapped_cek.to_bytes(),
                 });
-                let snapshot =
-                    decrypt_snapshot_with_cek(&bytes, &cek).map_err(container_error)?;
+                let snapshot = decrypt_snapshot_with_cek(&bytes, &cek).map_err(container_error)?;
                 RemoteBasis::Fresh {
                     snapshot,
                     etag: stat.etag,

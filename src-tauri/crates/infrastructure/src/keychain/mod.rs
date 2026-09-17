@@ -272,5 +272,4 @@ mod tests {
             Err(SecretStoreError::Unavailable(_))
         ));
     }
-
 }

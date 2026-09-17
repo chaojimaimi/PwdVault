@@ -14,7 +14,7 @@ use redb::Database;
 
 use pwdvault_domain::constants::AUTO_LOCK_SECS;
 use pwdvault_infrastructure::crypto::VerificationData;
-use pwdvault_infrastructure::keychain::{SecretStore, platform_default, platform_sync_default};
+use pwdvault_infrastructure::keychain::{platform_default, platform_sync_default, SecretStore};
 
 use crate::error::VaultError;
 use crate::session::{SessionLease, VaultSession};

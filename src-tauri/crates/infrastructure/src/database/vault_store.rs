@@ -243,7 +243,10 @@ mod tests {
             .unwrap();
 
         assert!(integrity::verify_integrity(&db, &TEST_MAC_KEY).unwrap());
-        assert_eq!(load_blob(&db, "bio_wrap").unwrap().as_deref(), Some(blob.as_slice()));
+        assert_eq!(
+            load_blob(&db, "bio_wrap").unwrap().as_deref(),
+            Some(blob.as_slice())
+        );
 
         store
             .write(&TEST_MAC_KEY, |txn| {

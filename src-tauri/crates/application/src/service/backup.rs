@@ -60,11 +60,12 @@ pub fn export_vault(
     // resurrect entries the user deleted (note: restoring an older backup
     // can still re-add a deleted entry under its old ID; documented).
     let all_entries = database::list_all_entries_bulk(&db, key, None)?;
-    let live_group_ids: std::collections::HashSet<String> = database::list_all_groups_bulk(&db, key)?
-        .into_iter()
-        .filter(|group| group.deleted_at.is_none())
-        .map(|group| group.id)
-        .collect();
+    let live_group_ids: std::collections::HashSet<String> =
+        database::list_all_groups_bulk(&db, key)?
+            .into_iter()
+            .filter(|group| group.deleted_at.is_none())
+            .map(|group| group.id)
+            .collect();
     let mut export_entries = Vec::new();
     for entry in all_entries {
         if entry.deleted_at.is_some() {
@@ -107,9 +108,7 @@ pub fn export_vault(
         // Dangling group references (removed group without a cascade, P2.2)
         // normalize to "ungrouped" so backup_payload's referential check
         // stays valid.
-        let group_id = entry
-            .group_id
-            .filter(|gid| live_group_ids.contains(gid));
+        let group_id = entry.group_id.filter(|gid| live_group_ids.contains(gid));
 
         export_entries.push(ExportEntry {
             id: entry.id,
@@ -699,8 +698,7 @@ mod tests {
         };
         let payload_json = serde_json::to_vec(&payload).unwrap();
         let salt = [0x42u8; 16];
-        let (key, _) =
-            crypto::kdf::derive_key_with_params(TEST_PASSWORD, &salt, &params).unwrap();
+        let (key, _) = crypto::kdf::derive_key_with_params(TEST_PASSWORD, &salt, &params).unwrap();
         let encrypted = crypto::encrypt(&key, &payload_json).unwrap();
         let b64 = base64::engine::general_purpose::STANDARD;
         VaultBackup {
@@ -746,7 +744,11 @@ mod tests {
             p_cost: 1,
         });
         assert!(matches!(
-            import_vault(&state, weak_memory, Zeroizing::new(TEST_PASSWORD.to_string())),
+            import_vault(
+                &state,
+                weak_memory,
+                Zeroizing::new(TEST_PASSWORD.to_string())
+            ),
             Err(VaultError::WeakKdfParams)
         ));
 
@@ -756,7 +758,11 @@ mod tests {
             p_cost: 1,
         });
         assert!(matches!(
-            import_vault(&state, weak_iterations, Zeroizing::new(TEST_PASSWORD.to_string())),
+            import_vault(
+                &state,
+                weak_iterations,
+                Zeroizing::new(TEST_PASSWORD.to_string())
+            ),
             Err(VaultError::WeakKdfParams)
         ));
     }

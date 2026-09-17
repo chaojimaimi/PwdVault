@@ -71,7 +71,10 @@ pub enum DatabaseError {
     #[error("Entry not found")]
     EntryNotFound,
 
-    #[error("Stored record exceeds the maximum encoded size of {} bytes", MAX_ENCODED_BLOB)]
+    #[error(
+        "Stored record exceeds the maximum encoded size of {} bytes",
+        MAX_ENCODED_BLOB
+    )]
     BlobTooLarge,
 
     #[error("Vault not initialized")]
@@ -491,11 +494,15 @@ mod tests {
         let entry = PasswordEntry::new("Test".to_string(), None, "user".to_string());
 
         save_entry(&db, &TEST_KEY, &entry).unwrap();
-        assert!(load_entry(&db, &TEST_KEY, &entry.id, false).unwrap().is_some());
+        assert!(load_entry(&db, &TEST_KEY, &entry.id, false)
+            .unwrap()
+            .is_some());
 
         let deleted = delete_entry(&db, &entry.id).unwrap();
         assert!(deleted);
-        assert!(load_entry(&db, &TEST_KEY, &entry.id, false).unwrap().is_none());
+        assert!(load_entry(&db, &TEST_KEY, &entry.id, false)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -592,11 +599,15 @@ mod tests {
 
         let group = Group::new("Work".to_string());
         save_group(&db, &TEST_KEY, &group).unwrap();
-        assert!(load_group(&db, &TEST_KEY, &group.id, false).unwrap().is_some());
+        assert!(load_group(&db, &TEST_KEY, &group.id, false)
+            .unwrap()
+            .is_some());
 
         let deleted = delete_group(&db, &group.id).unwrap();
         assert!(deleted);
-        assert!(load_group(&db, &TEST_KEY, &group.id, false).unwrap().is_none());
+        assert!(load_group(&db, &TEST_KEY, &group.id, false)
+            .unwrap()
+            .is_none());
     }
 
     #[test]

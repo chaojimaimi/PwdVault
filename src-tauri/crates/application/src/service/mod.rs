@@ -25,8 +25,8 @@ pub use security::{
 pub use settings::{get_settings, update_settings};
 pub use sync::baidu_oauth::{baidu_complete_auth, baidu_start_auth, BaiduAuthStart};
 pub use sync::engine::{
-    sync_connect, sync_disconnect, sync_now, sync_status, SyncBackendKind, SyncConfig,
-    SyncState, SyncStatusResponse,
+    sync_connect, sync_disconnect, sync_now, sync_status, SyncBackendKind, SyncConfig, SyncState,
+    SyncStatusResponse,
 };
 pub use totp::totp_code;
 pub use update::{cancel_update_check, check_for_updates};

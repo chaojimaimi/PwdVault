@@ -25,8 +25,13 @@ pub enum VaultError {
     /// X6: the backup's embedded KDF parameters are below the import-side
     /// product floor (OWASP baseline). Rejected before any key derivation.
     WeakKdfParams,
-    InvalidInput { code: String, message: String },
-    RateLimited { retry_after_secs: u64 },
+    InvalidInput {
+        code: String,
+        message: String,
+    },
+    RateLimited {
+        retry_after_secs: u64,
+    },
     // --- Phase 1 (change password / Touch ID / recovery key) ---
     /// The platform cannot offer biometric unlock right now (unsupported,
     /// not enrolled, or the stored credentials are out of sync).

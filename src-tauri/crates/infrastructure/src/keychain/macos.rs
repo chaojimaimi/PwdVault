@@ -3,8 +3,8 @@
 //! modes tagged by a leading byte; the sync store (`MacSyncSecretStore`) is
 //! the non-interactive variant for cloud-sync credentials.
 
-use super::{SecretStore, SecretStoreError, SERVICE};
 use super::biometric_gate::gate_with_biometrics;
+use super::{SecretStore, SecretStoreError, SERVICE};
 use core_foundation::base::{CFType, TCFType};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::data::CFData;
@@ -18,8 +18,8 @@ use security_framework_sys::access_control::{
 };
 use security_framework_sys::base::errSecItemNotFound;
 use security_framework_sys::item::{
-    kSecAttrAccessControl, kSecAttrAccount, kSecAttrService, kSecClass,
-    kSecClassGenericPassword, kSecReturnData, kSecUseDataProtectionKeychain, kSecValueData,
+    kSecAttrAccessControl, kSecAttrAccount, kSecAttrService, kSecClass, kSecClassGenericPassword,
+    kSecReturnData, kSecUseDataProtectionKeychain, kSecValueData,
 };
 use security_framework_sys::keychain_item::{SecItemAdd, SecItemCopyMatching, SecItemDelete};
 
@@ -97,7 +97,10 @@ macro_rules! sec_key {
 fn base_pairs(account: &str, use_data_protection: bool) -> Vec<(CFType, CFType)> {
     let mut pairs = vec![
         (sec_key!(kSecClass), sec_key!(kSecClassGenericPassword)),
-        (sec_key!(kSecAttrService), CFString::new(SERVICE).as_CFType()),
+        (
+            sec_key!(kSecAttrService),
+            CFString::new(SERVICE).as_CFType(),
+        ),
         (
             sec_key!(kSecAttrAccount),
             CFString::new(account).as_CFType(),
@@ -225,7 +228,10 @@ fn upsert_in_keychain(
 /// For a `DpAcl` item this call blocks on the system Touch ID prompt.
 fn copy_item_data(account: &str, use_dp: bool) -> Result<Vec<u8>, SfError> {
     let query = item_dictionary(
-        vec![(sec_key!(kSecReturnData), CFBoolean::true_value().as_CFType())],
+        vec![(
+            sec_key!(kSecReturnData),
+            CFBoolean::true_value().as_CFType(),
+        )],
         account,
         use_dp,
     );
@@ -299,8 +305,7 @@ impl SecretStore for MacSecretStore {
         // initializer; canEvaluatePolicy:error: is a plain ObjC message.
         let context: Retained<LAContext> = unsafe { msg_send![LAContext::class(), new] };
         unsafe {
-            context
-                .canEvaluatePolicy_error(LAPolicy::DeviceOwnerAuthenticationWithBiometrics)
+            context.canEvaluatePolicy_error(LAPolicy::DeviceOwnerAuthenticationWithBiometrics)
         }
         .is_ok()
     }
@@ -314,8 +319,7 @@ impl SecretStore for MacSecretStore {
         let dp_item = with_mode_prefix(BioMode::DpAcl, value);
         match add_dp_acl_item(account, &dp_item) {
             Ok(()) => return Ok(()),
-            Err(e)
-                if e.code() == ERR_SEC_MISSING_ENTITLEMENT || e.code() == ERR_SEC_PARAM => {}
+            Err(e) if e.code() == ERR_SEC_MISSING_ENTITLEMENT || e.code() == ERR_SEC_PARAM => {}
             Err(e) => return Err(map_error(e)),
         }
 
@@ -360,8 +364,8 @@ impl SecretStore for MacSecretStore {
         }
         let dp_err = dp.unwrap_err();
         let legacy_err = legacy.unwrap_err();
-        let dp_absent = dp_err.code() == ERR_SEC_ITEM_NOT_FOUND
-            || dp_err.code() == ERR_SEC_MISSING_ENTITLEMENT;
+        let dp_absent =
+            dp_err.code() == ERR_SEC_ITEM_NOT_FOUND || dp_err.code() == ERR_SEC_MISSING_ENTITLEMENT;
         let legacy_absent = legacy_err.code() == ERR_SEC_ITEM_NOT_FOUND;
         if dp_absent && legacy_absent {
             Err(SecretStoreError::NotFound)
@@ -409,8 +413,7 @@ impl SecretStore for MacSyncSecretStore {
                 use_dp,
             );
             // SAFETY: query is a valid SecItemAdd parameter dictionary.
-            let status =
-                unsafe { SecItemAdd(query.as_concrete_TypeRef(), std::ptr::null_mut()) };
+            let status = unsafe { SecItemAdd(query.as_concrete_TypeRef(), std::ptr::null_mut()) };
             if status == 0 {
                 Ok(())
             } else {
@@ -434,8 +437,7 @@ impl SecretStore for MacSyncSecretStore {
             let mut result = std::ptr::null();
             // SAFETY: query is a valid SecItemCopyMatching parameter
             // dictionary; on success `result` is a CFDataRef we own.
-            let status =
-                unsafe { SecItemCopyMatching(query.as_concrete_TypeRef(), &mut result) };
+            let status = unsafe { SecItemCopyMatching(query.as_concrete_TypeRef(), &mut result) };
             if status != 0 {
                 return Err(SfError::from_code(status));
             }
@@ -449,7 +451,6 @@ impl SecretStore for MacSyncSecretStore {
         with_keychain_fallback(true, |use_dp| delete_item(account, use_dp))
     }
 }
-
 
 #[cfg(test)]
 mod tests;

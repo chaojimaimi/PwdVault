@@ -31,9 +31,7 @@ use super::backend::{
 };
 use super::baidu_oauth::{token_request, BaiduTokens};
 use super::engine::MANIFEST_FILE;
-use pwdvault_infrastructure::keychain::{
-    SecretStore, SecretStoreError, SYNC_BAIDU_TOKEN_ACCOUNT,
-};
+use pwdvault_infrastructure::keychain::{SecretStore, SecretStoreError, SYNC_BAIDU_TOKEN_ACCOUNT};
 
 /// Pan API base (production; tests inject the stub via
 /// [`BaiduBackend::with_endpoints`]).
@@ -99,7 +97,11 @@ pub(crate) fn md5_hex(bytes: &[u8]) -> String {
     use md5::{Digest, Md5};
     let mut hasher = Md5::new();
     hasher.update(bytes);
-    hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect()
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// Baidu-absolute path of the rev manifest next to `baidu_path` (D4 layout).
@@ -161,7 +163,13 @@ impl BaiduBackend {
     /// Production constructor (official endpoints + compiled-in
     /// AppKey/SecretKey). The caller checks [`baidu_configured`] first.
     pub fn new(app_key: &str, secret_key: &str, token_store: Arc<dyn SecretStore>) -> Self {
-        Self::with_endpoints(PAN_API_BASE, OAUTH_API_BASE, app_key, secret_key, token_store)
+        Self::with_endpoints(
+            PAN_API_BASE,
+            OAUTH_API_BASE,
+            app_key,
+            secret_key,
+            token_store,
+        )
     }
 
     /// Endpoint-injecting constructor — tests point at the local stub while
@@ -233,15 +241,16 @@ impl BaiduBackend {
     // -- token plumbing ------------------------------------------------------
 
     fn load_tokens(&self) -> Result<BaiduTokens, BackendError> {
-        let bytes = self.token_store.get(SYNC_BAIDU_TOKEN_ACCOUNT).map_err(|err| {
-            match err {
+        let bytes = self
+            .token_store
+            .get(SYNC_BAIDU_TOKEN_ACCOUNT)
+            .map_err(|err| match err {
                 SecretStoreError::NotFound => BackendError::Auth(
                     "Baidu Netdisk is not linked — complete the authorization flow first"
                         .to_string(),
                 ),
                 other => BackendError::Auth(format!("credential store unavailable: {other}")),
-            }
-        })?;
+            })?;
         serde_json::from_slice(&bytes)
             .map_err(|_| BackendError::Auth("stored Baidu token is corrupt — re-authorize".into()))
     }
@@ -294,7 +303,11 @@ impl BaiduBackend {
     // -- pan API calls -------------------------------------------------------
 
     /// `filemetas` for one path: `Ok(None)` = file does not exist.
-    fn filemetas(&self, access_token: &str, baidu_path: &str) -> Result<Option<FileMeta>, ApiError> {
+    fn filemetas(
+        &self,
+        access_token: &str,
+        baidu_path: &str,
+    ) -> Result<Option<FileMeta>, ApiError> {
         let url = format!(
             "{}/rest/2.0/xpan/file?method=filemetas&access_token={}&dlink=1&path={}",
             self.api_base,
@@ -321,16 +334,18 @@ impl BaiduBackend {
     /// the User-Agent header is set centrally in [`BaiduBackend::send`].
     fn fetch_dlink(&self, access_token: &str, dlink: &str) -> Result<Vec<u8>, ApiError> {
         let separator = if dlink.contains('?') { '&' } else { '?' };
-        let url = format!("{dlink}{separator}access_token={}", encode_value(access_token));
+        let url = format!(
+            "{dlink}{separator}access_token={}",
+            encode_value(access_token)
+        );
         let (status, body) = self.send("GET", url, Vec::new(), None)?;
         if status == 401 || status == 403 {
             return Err(ApiError::TokenExpired);
         }
         if !(200..300).contains(&status) {
-            return Err(BackendError::Network(format!(
-                "dlink download failed with HTTP {status}"
-            ))
-            .into());
+            return Err(
+                BackendError::Network(format!("dlink download failed with HTTP {status}")).into(),
+            );
         }
         Ok(body)
     }
@@ -359,7 +374,9 @@ impl BaiduBackend {
     /// on a token we did not mint — `stat` is the only producer, so a
     /// foreign token means the caller mixed backends.
     fn guard_manifest_rev(&self, baidu_path: &str, token: &str) -> Result<(), BackendError> {
-        let Some(expected) = token.strip_prefix("rev:").and_then(|rev| rev.parse::<u64>().ok())
+        let Some(expected) = token
+            .strip_prefix("rev:")
+            .and_then(|rev| rev.parse::<u64>().ok())
         else {
             return Err(BackendError::Conflict);
         };
@@ -490,10 +507,7 @@ fn require_ok(status: u16, body: &[u8], step: &str) -> Result<(), ApiError> {
     if (200..300).contains(&status) {
         Ok(())
     } else {
-        Err(BackendError::Network(format!(
-            "{step} returned HTTP {status}"
-        ))
-        .into())
+        Err(BackendError::Network(format!("{step} returned HTTP {status}")).into())
     }
 }
 
@@ -549,7 +563,10 @@ impl CloudBackend for BaiduBackend {
                 .map(|rev| format!("rev:{rev}"))
         };
         let meta = self.with_access_token(|token| self.filemetas(token, &baidu_path))?;
-        Ok(meta.map(|meta| RemoteStat { etag, size: meta.size }))
+        Ok(meta.map(|meta| RemoteStat {
+            etag,
+            size: meta.size,
+        }))
     }
 
     fn download(&self, path: &str) -> Result<Vec<u8>, BackendError> {
@@ -559,7 +576,9 @@ impl CloudBackend for BaiduBackend {
                 return Err(BackendError::Network("remote file vanished".to_string()).into());
             };
             let Some(dlink) = meta.dlink else {
-                return Err(BackendError::Network("filemetas returned no dlink".to_string()).into());
+                return Err(
+                    BackendError::Network("filemetas returned no dlink".to_string()).into(),
+                );
             };
             self.fetch_dlink(token, &dlink)
         })
@@ -579,8 +598,9 @@ impl CloudBackend for BaiduBackend {
         match &precondition {
             Precondition::IfMatch(token) => self.guard_manifest_rev(&baidu_path, token)?,
             Precondition::IfAbsent => {
-                let exists =
-                    self.with_access_token(|token| self.filemetas(token, &baidu_path))?.is_some();
+                let exists = self
+                    .with_access_token(|token| self.filemetas(token, &baidu_path))?
+                    .is_some();
                 if exists {
                     return Err(BackendError::Conflict);
                 }
@@ -619,9 +639,7 @@ impl CloudBackend for BaiduBackend {
                 // succeeds (idempotent, same contract as WebDAV).
                 Some(12) | Some(31066) => Ok(()),
                 Some(-6) => Err(ApiError::TokenExpired),
-                Some(other) => {
-                    Err(BackendError::Network(format!("delete errno {other}")).into())
-                }
+                Some(other) => Err(BackendError::Network(format!("delete errno {other}")).into()),
             }
         })
     }
