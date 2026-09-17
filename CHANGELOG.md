@@ -81,6 +81,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Touch ID setup no longer fails with "Security framework error -34018" on
+  unsigned local builds: the Keychain store now falls back from the
+  data-protection keychain (which requires signed entitlements) to the legacy
+  login keychain, which enforces the same biometric access control.
 - Auto-lock now counts local user activity (typing, pointer) via a throttled
   `touch_activity` IPC, not only vault API calls, so editing an entry no
   longer risks a silent mid-edit lock and reload.
