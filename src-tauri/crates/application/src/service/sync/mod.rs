@@ -29,6 +29,8 @@ mod tests_webdav;
 #[cfg(test)]
 mod tests_engine;
 #[cfg(test)]
+mod tests_connect;
+#[cfg(test)]
 mod tests_baidu;
 #[cfg(test)]
 mod tests_baidu_oauth;

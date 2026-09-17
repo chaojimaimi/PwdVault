@@ -11,8 +11,8 @@ use zeroize::Zeroizing;
 
 use super::backend::{BackendError, CloudBackend, MockCloudBackend, Precondition, RemoteStat};
 use super::engine::{
-    sync_connect_with_backend, sync_disconnect, sync_now, sync_now_with_backend, sync_status,
-    SyncConfig, SyncBackendKind,
+    sync_connect, sync_connect_with_backend, sync_disconnect, sync_now, sync_now_with_backend,
+    sync_status, SyncConfig, SyncBackendKind,
 };
 use crate::service::security::SYNC_CEK_BLOB_KEY;
 use crate::{create_entry, AppState, VaultError};
@@ -20,15 +20,17 @@ use pwdvault_infrastructure::crypto::{
     kdf::AdaptiveParams, unwrap_secret, WRAP_AAD_SYNC,
 };
 use pwdvault_infrastructure::database::{self, vault_store::{self, VaultStore}};
-use pwdvault_infrastructure::keychain::{MemorySecretStore, SecretStore};
+use pwdvault_infrastructure::keychain::{
+    MemorySecretStore, SecretStore, SYNC_WEBDAV_PASSWORD_ACCOUNT,
+};
 
 const TEST_PASSWORD: &str = "sync-test-password";
 const NEW_PASSWORD: &str = "a-whole-new-password!";
-const CONTAINER_PASSWORD: &str = "container-passphrase";
+pub(super) const CONTAINER_PASSWORD: &str = "container-passphrase";
 
 /// One primed, unlocked device: own redb file, weak KDF (fast tests),
 /// memory credential stores, session unlocked directly.
-fn test_state() -> (Arc<AppState>, TempDir) {
+pub(super) fn test_state() -> (Arc<AppState>, TempDir) {
     let dir = TempDir::new().unwrap();
     let db = Arc::new(database::init_database(dir.path().join("sync.db")).unwrap());
     let salt = [0x5D; 16];

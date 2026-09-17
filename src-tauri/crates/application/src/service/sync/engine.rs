@@ -120,6 +120,16 @@ pub fn sync_connect(
     container_password: Zeroizing<String>,
     webdav_password: Option<Zeroizing<String>>,
 ) -> Result<SyncStatusResponse, VaultError> {
+    // Credential-store interaction happens FIRST: `open_backend` reads the
+    // WebDAV password from the store, and on first-time connect the store is
+    // empty — resolving the backend before persisting the password made
+    // every initial connect fail with SYNC_CREDENTIALS_MISSING (manual QA).
+    if let Some(password) = webdav_password.as_ref() {
+        state
+            .sync_secret_store
+            .set(SYNC_WEBDAV_PASSWORD_ACCOUNT, password.as_bytes())
+            .map_err(sync_secret_error)?;
+    }
     let backend = open_backend(state, &config)?;
     sync_connect_with_backend(
         state,
