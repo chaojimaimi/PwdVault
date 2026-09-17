@@ -49,16 +49,26 @@ winreg = "0.55"
 # Platform-scoped like winreg above so Windows/Linux builds never pull them.
 # - security-framework: SecItem dictionary path (ACLs are not exposed by the
 #   high-level `passwords` module); OSX_10_15 enables kSecUseDataProtectionKeychain.
-# - objc2-local-authentication: LAContext canEvaluatePolicy availability check.
-#   objc2 0.6 is already in the dependency tree (0.6.4), so no extra copy.
+# - objc2-local-authentication: LAContext canEvaluatePolicy availability check
+#   plus the explicit evaluatePolicy gate that protects legacy-keychain bio
+#   items (the "block2" feature is required for its reply-block signature).
+#   objc2 0.6 / objc2-foundation 0.3 / block2 0.6 are already in the
+#   dependency tree, so no extra copies.
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = { version = "3", features = ["OSX_10_15"] }
 security-framework-sys = { version = "2", features = ["OSX_10_15"] }
 core-foundation = "0.10"
 objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSError",
+    "NSString",
+] }
 objc2-local-authentication = { version = "0.3", default-features = false, features = [
     "std",
     "LAContext",
+    "block2",
 ] }
 
 [dev-dependencies]
