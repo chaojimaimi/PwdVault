@@ -11,8 +11,8 @@ use zeroize::Zeroizing;
 
 use super::backend::{BackendError, CloudBackend, MockCloudBackend, Precondition, RemoteStat};
 use super::engine::{
-    sync_connect, sync_connect_with_backend, sync_disconnect, sync_now, sync_now_with_backend,
-    sync_status, SyncBackendKind, SyncConfig,
+    sync_connect_with_backend, sync_disconnect, sync_now, sync_now_with_backend, sync_status,
+    SyncBackendKind, SyncConfig,
 };
 use crate::service::security::SYNC_CEK_BLOB_KEY;
 use crate::{create_entry, AppState, VaultError};
@@ -21,9 +21,7 @@ use pwdvault_infrastructure::database::{
     self,
     vault_store::{self, VaultStore},
 };
-use pwdvault_infrastructure::keychain::{
-    MemorySecretStore, SecretStore, SYNC_WEBDAV_PASSWORD_ACCOUNT,
-};
+use pwdvault_infrastructure::keychain::{MemorySecretStore, SecretStore};
 
 pub(super) const TEST_PASSWORD: &str = "sync-test-password";
 pub(super) const NEW_PASSWORD: &str = "a-whole-new-password!";

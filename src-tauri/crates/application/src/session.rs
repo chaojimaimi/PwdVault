@@ -231,14 +231,15 @@ impl VaultSession {
             SessionInner::Unlocked {
                 enc_key,
                 mac_key,
-                last_activity,
+                last_activity: _,
                 wrap_key,
                 generation,
             } => {
                 // All secret material zeroizes when dropped here.
+                // (`last_activity` is an Instant — no Drop impl, nothing to
+                // release — so it is simply discarded with the struct.)
                 drop(enc_key);
                 drop(mac_key);
-                drop(last_activity);
                 drop(wrap_key);
                 *inner = SessionInner::Locked { generation };
                 true

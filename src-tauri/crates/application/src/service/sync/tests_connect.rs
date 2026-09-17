@@ -13,7 +13,7 @@ use crate::service::security::SYNC_CEK_BLOB_KEY;
 use crate::service::vault;
 use crate::{AppState, VaultError};
 use pwdvault_infrastructure::database::vault_store::{self, VaultStore};
-use pwdvault_infrastructure::keychain::{SecretStore, SYNC_WEBDAV_PASSWORD_ACCOUNT};
+use pwdvault_infrastructure::keychain::SYNC_WEBDAV_PASSWORD_ACCOUNT;
 
 fn get_db(state: &Arc<AppState>) -> Arc<redb::Database> {
     vault::get_db(state).unwrap()

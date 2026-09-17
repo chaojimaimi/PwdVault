@@ -7,11 +7,10 @@ use std::sync::Arc;
 use zeroize::Zeroizing;
 
 use super::backend::CloudBackend as _;
-use super::backend::{BackendError, CloudBackend, MockCloudBackend, Precondition};
+use super::backend::{BackendError, MockCloudBackend, Precondition};
 use super::baidu::BaiduBackend;
 use super::engine::{sync_connect_with_backend, SyncBackendKind, SyncConfig};
 use super::tests_baidu::*;
-use crate::AppState;
 use pwdvault_infrastructure::keychain::{MemorySecretStore, SecretStore, SYNC_BAIDU_TOKEN_ACCOUNT};
 
 /// Bodies larger than 4 MiB are split into ordered slices and reassembled.

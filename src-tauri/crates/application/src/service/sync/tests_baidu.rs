@@ -20,7 +20,6 @@ use std::time::Duration;
 
 use super::backend::{CloudBackend, Precondition};
 use super::baidu::{md5_hex, BaiduBackend};
-use super::engine::{sync_connect_with_backend, SyncBackendKind, SyncConfig};
 use crate::{AppState, VaultError};
 use pwdvault_infrastructure::keychain::{MemorySecretStore, SecretStore, SYNC_BAIDU_TOKEN_ACCOUNT};
 
@@ -603,7 +602,7 @@ fn unconditional_upload_slices_then_verifies() {
     assert_eq!(create_form.get("uploadid").unwrap(), "UP-1");
     assert_eq!(create_form.get("isdir").unwrap(), "0");
     assert!(
-        create_form.get("mtime").is_some(),
+        create_form.contains_key("mtime"),
         "create must sync mtime (plan P3.4)"
     );
 }
