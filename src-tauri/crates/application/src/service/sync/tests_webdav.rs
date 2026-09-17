@@ -110,7 +110,23 @@ fn handle_request(mut request: tiny_http::Request, state: &StubState) {
             "PROPFIND" => {
                 let files = state.files.lock().unwrap();
                 match files.get(&path) {
-                    None => (404, None, b"not found".to_vec()),
+                    None => {
+                        // 坚果云-style servers answer 409 (not 404) when an
+                        // ANCESTOR collection of the path is missing — the
+                        // exact first-connect situation before the remote
+                        // directory exists.
+                        let parent_missing = path
+                            .rsplit_once('/')
+                            .map(|(parent, _)| {
+                                !state.dirs.lock().unwrap().contains(parent)
+                            })
+                            .unwrap_or(false);
+                        if parent_missing {
+                            (409, None, b"ancestor missing".to_vec())
+                        } else {
+                            (404, None, b"not found".to_vec())
+                        }
+                    }
                     Some((file_body, etag)) => {
                         // Namespace-style tag matching real servers (nginx
                         // apache props): prefix differs from the DAV one.
@@ -258,6 +274,16 @@ fn webdav_download_roundtrip() {
         backend.download("vault/missing.pwsync"),
         Err(BackendError::Network(_))
     ));
+}
+
+/// 坚果云-style first connect: PROPFIND answers 409 (ancestor collection
+/// missing) instead of 404 — stat must map that to "absent" so the engine
+/// proceeds to bootstrap (the upload then MKCOLs the directory).
+#[test]
+fn webdav_stat_409_on_missing_ancestor_is_absent() {
+    let (base_url, _seen, _files) = spawn_stub();
+    let backend = make_backend(&base_url);
+    assert_eq!(backend.stat("vault/c.pwsync").unwrap(), None);
 }
 
 /// PUT If-Match: fresh etag overwrites; stale etag → BackendError::Conflict

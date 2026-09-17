@@ -384,7 +384,12 @@ impl WebDavBackend {
         )?;
         match response.status().as_u16() {
             207 => {}
-            404 => return Ok(None),
+            // 409: some servers (坚果云 among them) answer PROPFIND with
+            // Conflict instead of 404 when an ANCESTOR collection of the
+            // path is missing (e.g. the remote dir before the first
+            // connect). An ancestor cannot exist without the leaf existing
+            // first — the leaf is absent. Bootstrap will MKCOL it on upload.
+            404 | 409 => return Ok(None),
             401 | 403 => return Err(BackendError::Auth("PROPFIND rejected credentials".into())),
             other => {
                 return Err(BackendError::Network(format!(
@@ -449,7 +454,12 @@ impl CloudBackend for WebDavBackend {
         let mut response = self.send("GET", url, &[], &[])?;
         match response.status().as_u16() {
             200 => {}
-            404 => return Err(BackendError::Network("remote file vanished".to_string())),
+            // Same ancestor-missing nuance as stat: a 409 GET means the leaf
+            // is absent (the engine treats any download error as a transient
+            // failure and re-stats, so this stays consistent).
+            404 | 409 => {
+                return Err(BackendError::Network("remote file vanished".to_string()))
+            }
             401 | 403 => return Err(BackendError::Auth("GET rejected credentials".into())),
             other => return Err(BackendError::Network(format!("GET failed with HTTP {other}"))),
         }
