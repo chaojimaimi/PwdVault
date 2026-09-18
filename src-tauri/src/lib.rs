@@ -17,7 +17,7 @@ pub use pwdvault_application::{AppState, VaultError};
 pub use pwdvault_application::{
     BackupPayload, CreateEntryRequest, EntrySecretResponse, EntrySummary, ExportEntry,
     ImportResult, SyncBackendKind, SyncConfig, SyncState, SyncStatusResponse, UpdateEntryRequest,
-    UpdateInfo, VaultBackup,
+    VaultBackup,
 };
 pub use pwdvault_domain::{Group, PasswordEntry, Settings};
 
@@ -163,9 +163,14 @@ pub fn run() {
     let state = Arc::new(AppState::default());
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        // In-app auto-update: signed feed check + download/install (updater)
+        // and relaunch-after-install (process). The frontend drives them via
+        // the @tauri-apps/plugin-updater / plugin-process JS bindings; the
+        // capabilities file grants `updater:default` + `process:allow-restart`.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(state.clone())
         .setup(move |app| {
             // Start native messaging server in background thread.
@@ -310,7 +315,6 @@ pub fn run() {
             commands::revoke_extension_access,
             commands::export_vault,
             commands::import_vault,
-            commands::check_for_updates,
             // Phase 1 security operations — Tauri IPC only (D6).
             commands::change_password,
             commands::biometric_status,

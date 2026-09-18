@@ -883,6 +883,21 @@
   flex: 1;
 }
 
+/* Phase AU: download progress bar under the banner text row. */
+.update-progress {
+  height: 4px;
+  margin-top: var(--space-xs);
+  border-radius: var(--radius-sm);
+  background: var(--color-input);
+  overflow: hidden;
+}
+
+.update-progress-bar {
+  height: 100%;
+  background: var(--color-primary);
+  transition: width 0.2s ease;
+}
+
 /* --- Layout utilities --- */
 
 .header-spacer {

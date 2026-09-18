@@ -31,8 +31,15 @@ vi.mock("../../context/AppContext", () => ({
 		},
 	}),
 	useSettings: () => ({
-		state: { updateInfo: null, settings: {}, status: "idle", error: null },
-		actions: { dismissUpdate: vi.fn() },
+		state: {
+			update: null,
+			updatePhase: "available",
+			downloadProgress: 0,
+			settings: {},
+			status: "idle",
+			error: null,
+		},
+		actions: { installUpdate: vi.fn(), relaunchApp: vi.fn(), dismissUpdate: vi.fn() },
 	}),
 }));
 vi.mock("../../hooks/useTheme", () => ({

@@ -93,9 +93,13 @@ export function VaultScreen() {
 
 	return (
 		<div className="vault-container screen-shell">
-			{settingsState.updateInfo && (
+			{settingsState.update && (
 				<UpdateNotification
-					updateInfo={settingsState.updateInfo}
+					version={settingsState.update.version}
+					phase={settingsState.updatePhase}
+					progress={settingsState.downloadProgress}
+					onUpdate={() => void settingsActions.installUpdate()}
+					onRelaunch={() => void settingsActions.relaunchApp()}
 					onDismiss={() => settingsActions.dismissUpdate()}
 				/>
 			)}

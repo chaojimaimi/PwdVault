@@ -6,7 +6,6 @@
 //! window reload) are injected by the tauri-app adapter; the application layer
 //! only calls them through the stored closures.
 
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -44,8 +43,6 @@ pub struct AppState {
     /// Rate limiting for pair endpoint (requests per minute).
     pub pair_request_count: Mutex<u32>,
     pub pair_last_reset: Mutex<Option<Instant>>,
-    /// Cancellation flag for the in-flight update check (§5.6.2).
-    pub update_check_cancel: AtomicBool,
     /// Phase 1: platform credential store for the biometric wrap key
     /// (macOS Keychain; `UnavailableSecretStore` stub elsewhere). Tests
     /// replace this field with a `MemorySecretStore` — commands need no
@@ -96,10 +93,6 @@ impl AppState {
     /// Lock the vault: obtain exclusive access, wait for in-flight operations
     /// to drain, then atomically clear keys. Used by auto-lock and manual lock.
     pub fn lock_vault(&self) {
-        // §5.6.2: cancel any in-flight update check so its blocking worker
-        // returns promptly instead of holding a thread for the full timeout.
-        self.update_check_cancel
-            .store(true, std::sync::atomic::Ordering::SeqCst);
         self.session.exclusive_lock_and_clear();
         self.update_lock_menu("Unlock Vault");
     }
@@ -118,7 +111,6 @@ impl Default for AppState {
             lockout_until: Mutex::new(None),
             pair_request_count: Mutex::new(0),
             pair_last_reset: Mutex::new(None),
-            update_check_cancel: AtomicBool::new(false),
             secret_store: platform_default(),
             sync_secret_store: platform_sync_default(),
         }

@@ -1,9 +1,4 @@
-import type { CreateEntryRequest, UpdateEntryRequest, EntrySecretResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, UpdateInfo, Group, BiometricStatus, SyncConfig, SyncStatusResponse, TotpCodeResponse, BaiduAuthStart } from '../types';
-
-// Private-repository builds have no suitable unauthenticated release feed.
-// A release pipeline may explicitly enable this only after publishing a public,
-// trusted metadata endpoint. Never embed a GitHub token in the client.
-export const UPDATE_CHECK_AVAILABLE = import.meta.env.VITE_UPDATE_CHECK_ENABLED === 'true';
+import type { CreateEntryRequest, UpdateEntryRequest, EntrySecretResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, Group, BiometricStatus, SyncConfig, SyncStatusResponse, TotpCodeResponse, BaiduAuthStart } from '../types';
 
 // Unified invoke function that works in both Tauri and browser environments
 async function invoke<T>(cmd: string, args?: Record<string, any>): Promise<T> {
@@ -133,12 +128,6 @@ export async function exportVault(exportPassword: string): Promise<VaultBackup> 
 
 export async function importVault(backup: VaultBackup, importPassword: string): Promise<ImportResult> {
   return invoke('import_vault', { backup, importPassword });
-}
-
-// Update Check
-
-export async function checkForUpdates(): Promise<UpdateInfo> {
-  return invoke('check_for_updates');
 }
 
 // Security operations (Phase 1) — Tauri-IPC only (D6, touch_activity

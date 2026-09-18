@@ -5,7 +5,6 @@ import { showToast } from "../utils/toast";
 import { BackHeader } from "../components/BackHeader";
 import type { Settings } from "../types";
 import { UnsavedChangesModal } from "../components/UnsavedChangesModal";
-import { UPDATE_CHECK_AVAILABLE } from "../api/vault";
 import { revokeExtensionAccess } from "../api/vault";
 import { AccessibleDialog } from "../components/AccessibleDialog";
 import { SecuritySettingsSection } from "../components/SecuritySettingsSection";
@@ -196,18 +195,11 @@ export function SettingsScreen() {
 								type="checkbox"
 								className="checkbox"
 								checked={settings.check_updates}
-								disabled={!UPDATE_CHECK_AVAILABLE}
 								onChange={(e) =>
 									setSettings({ ...settings, check_updates: e.target.checked })
 								}
 							/>
 						</div>
-						{!UPDATE_CHECK_AVAILABLE && (
-							<p className="settings-hint">
-								Disabled in private builds until a public trusted update feed is
-								configured.
-							</p>
-						)}
 					</div>
 
 					<div className="settings-divider" />

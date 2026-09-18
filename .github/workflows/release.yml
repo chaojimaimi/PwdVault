@@ -5,11 +5,11 @@ name: Release
 #
 # Jobs:
 #   release-gate      — quality + version + security re-check
-#   build-macos       — DMG + app, conditional signing/notarize
-#   build-windows     — NSIS, conditional Authenticode
+#   build-macos       — DMG + app + updater tarball, conditional signing/notarize
+#   build-windows     — NSIS + updater sig, conditional Authenticode
 #   build-extension   — Chrome + Firefox zip + store upload
 #   provenance        — SBOM + SHA-256 + artifact attestation
-#   create-release    — GitHub Release (prerelease if unsigned)
+#   create-release    — GitHub Release (prerelease if unsigned) + latest.json feed
 
 on:
   push:
@@ -19,8 +19,6 @@ on:
 env:
   NODE_VERSION: '22'
   PNPM_VERSION: '11'
-  # Repo is public: the startup update check may query the Releases API.
-  VITE_UPDATE_CHECK_ENABLED: 'true'
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -148,6 +146,11 @@ jobs:
         run: pnpm tauri build --bundles dmg,app
         env:
           APPLE_SIGNING_IDENTITY: "${{ steps.secrets.outputs.macos_certs == 'true' && 'Developer ID Application: PwdVault' || '-' }}"
+          # Phase AU: bundle.createUpdaterArtifacts requires the minisign key —
+          # without it the build fails instead of silently shipping unsigned
+          # updater artifacts.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_PASSWORD }}
 
       - name: Notarize app
         if: steps.secrets.outputs.macos_certs == 'true'
@@ -171,6 +174,9 @@ jobs:
           path: |
             src-tauri/target/release/bundle/dmg/*.dmg
             src-tauri/target/release/bundle/macos/*.app
+            # Phase AU: updater artifacts (app bundle tarball + minisign sig)
+            src-tauri/target/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
 
   # ---------------------------------------------------------------------------
   # Windows build with conditional Authenticode (§5.6.6 #7/#8)
@@ -216,6 +222,10 @@ jobs:
 
       - name: Build Windows app
         run: pnpm tauri build --bundles nsis
+        env:
+          # Phase AU: bundle.createUpdaterArtifacts requires the minisign key.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_PASSWORD }}
 
       # Windows code signing — TODO: uncomment when WINDOWS_CERTIFICATE secret
       # is provisioned. The action reference was removed because the original
@@ -242,7 +252,10 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-artifacts
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            # Phase AU: updater signature for the NSIS installer
+            src-tauri/target/release/bundle/nsis/*.exe.sig
 
   # ---------------------------------------------------------------------------
   # Browser extension build + store upload (§5.6.4 package, §6a)
@@ -326,7 +339,7 @@ jobs:
           while IFS= read -r -d '' file; do
             hash=$(sha256sum "$file" | cut -d ' ' -f 1)
             printf '%s  %s\n' "$hash" "$(basename "$file")"
-          done < <(find . -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.zip" \) -print0 | sort -z) > SHA256SUMS
+          done < <(find . -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.zip" -o -name "*.app.tar.gz" -o -name "*.app.tar.gz.sig" -o -name "*.exe.sig" \) -print0 | sort -z) > SHA256SUMS
           cat SHA256SUMS
 
       - name: Generate Rust SBOM (CycloneDX)
@@ -348,6 +361,9 @@ jobs:
             artifacts/**/*.dmg
             artifacts/**/*.exe
             artifacts/**/*.zip
+            artifacts/**/*.app.tar.gz
+            artifacts/**/*.app.tar.gz.sig
+            artifacts/**/*.exe.sig
             artifacts/SHA256SUMS
             artifacts/*bom.cdx.json
 
@@ -374,7 +390,29 @@ jobs:
 
       - name: Determine version
         id: version
-        run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version_clean=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # Phase AU: build the signed updater feed from the downloaded artifacts
+      # and commit it to main so raw.githubusercontent.com serves it (D1.1).
+      # The script only includes platforms that produced a .sig file.
+      - name: Generate updater feed (latest.json)
+        run: |
+          node scripts/generate-latest-json.mjs \
+            --artifacts artifacts \
+            --version "${{ steps.version.outputs.version_clean }}" \
+            --output dist/latest.json
+
+      - name: Commit updater feed to main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/generate-latest-json.mjs \
+            --artifacts artifacts \
+            --version "${{ steps.version.outputs.version_clean }}" \
+            --output dist/latest.json \
+            --commit
 
       - name: Determine prerelease status
         id: prerelease
@@ -409,5 +447,9 @@ jobs:
             artifacts/**/*.dmg
             artifacts/**/*.exe
             artifacts/**/*.zip
+            artifacts/**/*.app.tar.gz
+            artifacts/**/*.app.tar.gz.sig
+            artifacts/**/*.exe.sig
             artifacts/**/SHA256SUMS
             artifacts/**/*bom.cdx.json
+            dist/latest.json

@@ -1,7 +1,7 @@
 //! PwdVault application layer (§5.6.3).
 //!
 //! Use cases: vault lifecycle (init/unlock/lock/migrate), entry/group/settings
-//! CRUD, backup import/export, session management, and update check. Depends
+//! CRUD, backup import/export, and session management. Depends
 //! on `pwdvault_domain` (entities, DTOs, validation) and
 //! `pwdvault_infrastructure` (redb, crypto, filesystem).
 
@@ -29,5 +29,5 @@ pub use validation::ValidationPolicy;
 pub use pwdvault_domain::{
     BackupPayload, BiometricStatus, CreateEntryRequest, EntrySecretResponse, EntrySummary,
     ExportEntry, Group, ImportResult, PasswordEntry, Settings, TotpCodeResponse,
-    UpdateEntryRequest, UpdateInfo, VaultBackup,
+    UpdateEntryRequest, VaultBackup,
 };

@@ -178,10 +178,3 @@ export interface ImportResult {
   entries_imported: number;
   groups_imported: number;
 }
-
-export interface UpdateInfo {
-  has_update: boolean;
-  latest_version: string;
-  release_notes: string;
-  download_url: string;
-}

@@ -4,7 +4,7 @@ A secure, local-first password manager built with Tauri v2, React, and Rust.
 
 All data is encrypted with AES-256-GCM and stored locally using an embedded
 database. **No accounts, no vendor servers, no telemetry.** Optional
-multi-device sync goes through *your own* cloud storage (WebDAV or Baidu
+multi-device sync goes through _your own_ cloud storage (WebDAV or Baidu
 Netdisk) as an end-to-end encrypted container — the cloud only ever sees
 ciphertext.
 
@@ -44,28 +44,28 @@ ciphertext.
 
 ## Security
 
-| Component | Detail |
-|-----------|--------|
-| Encryption | AES-256-GCM with unique random nonce per operation; records bound by AAD |
-| Key derivation | Argon2id (default 64 MB / 3 iterations; adaptive with an OWASP-floor import policy) |
-| Key storage | Memory only, zeroized on lock. Optional Touch ID wrap key lives in the macOS Keychain behind a biometric access control |
-| Integrity | AEAD-sealed vault header + HMAC digest over all tables; tampering fails unlock closed |
-| Database | redb (pure Rust, ACID-compliant, embedded) |
-| Master password | Verified via encrypted header, then zeroized |
-| Sync | End-to-end encrypted container on your own cloud drive; the provider sees only ciphertext |
-| Clipboard | Auto-clears after 30 seconds |
-| Lock | Memory keys immediately zeroized; extension bridge loopback-only with per-browser pairing |
+| Component       | Detail                                                                                                                  |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Encryption      | AES-256-GCM with unique random nonce per operation; records bound by AAD                                                |
+| Key derivation  | Argon2id (default 64 MB / 3 iterations; adaptive with an OWASP-floor import policy)                                     |
+| Key storage     | Memory only, zeroized on lock. Optional Touch ID wrap key lives in the macOS Keychain behind a biometric access control |
+| Integrity       | AEAD-sealed vault header + HMAC digest over all tables; tampering fails unlock closed                                   |
+| Database        | redb (pure Rust, ACID-compliant, embedded)                                                                              |
+| Master password | Verified via encrypted header, then zeroized                                                                            |
+| Sync            | End-to-end encrypted container on your own cloud drive; the provider sees only ciphertext                               |
+| Clipboard       | Auto-clears after 30 seconds                                                                                            |
+| Lock            | Memory keys immediately zeroized; extension bridge loopback-only with per-browser pairing                               |
 
 The browser extension never talks to the cloud and never sees sync
 credentials — it is a client of the local vault on its own machine only.
 
 ## Desktop App
 
-| Platform | Install | Biometric unlock | Cloud sync |
-|----------|---------|------------------|------------|
-| macOS 11+ (Apple Silicon) | `.dmg` | Touch ID | WebDAV / Baidu Netdisk |
-| Windows 10/11 | NSIS `.exe` | — (Windows Hello planned) | WebDAV / Baidu Netdisk |
-| Linux | build from source | — | WebDAV / Baidu Netdisk |
+| Platform                  | Install           | Biometric unlock          | Cloud sync             |
+| ------------------------- | ----------------- | ------------------------- | ---------------------- |
+| macOS 11+ (Apple Silicon) | `.dmg`            | Touch ID                  | WebDAV / Baidu Netdisk |
+| Windows 10/11             | NSIS `.exe`       | — (Windows Hello planned) | WebDAV / Baidu Netdisk |
+| Linux                     | build from source | —                         | WebDAV / Baidu Netdisk |
 
 Grab the artifacts from
 [GitHub Releases](https://github.com/chaojimaimi/PwdVault/releases) (the
@@ -77,7 +77,7 @@ Windows build is produced by CI; macOS local builds are unsigned — see
 1. Settings → Sync → pick **WebDAV** (e.g. 坚果云: `https://dav.jianguoyun.com/dav/`
    with an app-specific password) and connect — the first device creates the
    encrypted container using the **container password** you choose.
-2. On another device, install PwdVault, connect with the *same* WebDAV
+2. On another device, install PwdVault, connect with the _same_ WebDAV
    settings and container password — it pulls the full snapshot and merges.
 3. Edit anywhere, press **Sync now** — deterministic last-writer-wins
    arbitration per entry, with the last 10 encrypted snapshots kept on the
@@ -147,15 +147,15 @@ cd extensions/native-host && cargo test --locked
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | React 19, TypeScript, Vite |
-| Backend | Tauri v2, Rust (workspace: domain / infrastructure / application) |
-| Database | redb (pure Rust, ACID, embedded) |
-| Encryption | AES-256-GCM, Argon2id, HKDF subkeys, HMAC integrity layer |
-| Cloud sync | WebDAV + Baidu Netdisk adapters over an encrypted snapshot container |
-| Browser extension | Chrome/Firefox MV3, Native Messaging bridge |
-| CI/CD | GitHub Actions (macOS + Windows + extension, fmt/clippy/deny gates) |
+| Layer             | Technology                                                           |
+| ----------------- | -------------------------------------------------------------------- |
+| Frontend          | React 19, TypeScript, Vite                                           |
+| Backend           | Tauri v2, Rust (workspace: domain / infrastructure / application)    |
+| Database          | redb (pure Rust, ACID, embedded)                                     |
+| Encryption        | AES-256-GCM, Argon2id, HKDF subkeys, HMAC integrity layer            |
+| Cloud sync        | WebDAV + Baidu Netdisk adapters over an encrypted snapshot container |
+| Browser extension | Chrome/Firefox MV3, Native Messaging bridge                          |
+| CI/CD             | GitHub Actions (macOS + Windows + extension, fmt/clippy/deny gates)  |
 
 ## Project Status
 
@@ -171,11 +171,11 @@ v1.1.6. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ## Data Files
 
-| Platform | Path |
-|----------|------|
-| macOS | `~/Library/Application Support/com.pwdvault.app/vault.db` |
-| Windows | `%LOCALAPPDATA%/PwdVault/vault.db` |
-| Linux | `~/.local/share/pwdvault/vault.db` |
+| Platform | Path                                                      |
+| -------- | --------------------------------------------------------- |
+| macOS    | `~/Library/Application Support/com.pwdvault.app/vault.db` |
+| Windows  | `%LOCALAPPDATA%/PwdVault/vault.db`                        |
+| Linux    | `~/.local/share/pwdvault/vault.db`                        |
 
 ## License
 

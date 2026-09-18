@@ -34,7 +34,6 @@ fn native_messaging_commands() -> HashSet<&'static str> {
         "remove_group",
         "export_vault",
         "import_vault",
-        "check_for_updates",
         "handshake",
         "pair",
         "pair_confirm",
@@ -76,7 +75,6 @@ fn tauri_ipc_commands() -> HashSet<&'static str> {
         "revoke_extension_access",
         "export_vault",
         "import_vault",
-        "check_for_updates",
         // Phase 1 security operations — desktop-only (D6): they drive the
         // local credential store / touch the session state machine and must
         // never be reachable from the browser extension.
@@ -132,7 +130,6 @@ fn native_messaging_dispatcher_exposes_all_core_commands() {
         "remove_group",
         "export_vault",
         "import_vault",
-        "check_for_updates",
         "revoke_extension_access",
     ];
 

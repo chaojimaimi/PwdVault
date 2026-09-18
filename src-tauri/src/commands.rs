@@ -1,7 +1,7 @@
 //! Tauri IPC command wrappers (§5.6.3 adapter layer).
 //!
 //! Each command is a thin wrapper that delegates to the application service
-//! layer. CPU-intensive operations (KDF, import/export, update check) run on
+//! layer. CPU-intensive operations (KDF, import/export) run on
 //! `tauri::async_runtime::spawn_blocking` so the IPC thread and the window/
 //! tray stay responsive (§5.6.2).
 
@@ -239,20 +239,6 @@ pub async fn import_vault(
     tauri::async_runtime::spawn_blocking(move || app::import_vault(&state, backup, import_password))
         .await
         .map_err(|e| VaultError::InternalError(format!("import task join error: {}", e)))?
-}
-
-// ---------------------------------------------------------------------------
-// Update check
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub async fn check_for_updates(
-    state: State<'_, AppHandle>,
-) -> Result<pwdvault_domain::UpdateInfo, VaultError> {
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || app::check_for_updates(&state))
-        .await
-        .map_err(|e| VaultError::InternalError(format!("update check join error: {}", e)))?
 }
 
 // ---------------------------------------------------------------------------

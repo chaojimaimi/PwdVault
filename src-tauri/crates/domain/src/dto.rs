@@ -156,15 +156,6 @@ pub struct ImportResult {
     pub groups_imported: usize,
 }
 
-/// Update-check result.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UpdateInfo {
-    pub has_update: bool,
-    pub latest_version: String,
-    pub release_notes: String,
-    pub download_url: String,
-}
-
 /// Biometric unlock availability (Phase 1).
 ///
 /// `available` — the platform credential store can prompt for biometry
