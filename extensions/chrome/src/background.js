@@ -194,10 +194,15 @@ async function pairWithApp() {
 // Submit the user-entered 6-digit code to complete pairing. The nonce is
 // re-read from storage so a suspended-and-restarted service worker can still
 // finish a pairing session. A failed attempt keeps the nonce so the user can
-// retry the same code; only success clears it.
+// retry the same code; only success clears it. Every failure leaves a
+// coherent `lastConnectionError` behind so the popup can distinguish "wrong
+// code" from "cannot reach the desktop app" instead of always blaming the code.
 async function pairConfirm(code) {
 	const nonce = await restorePendingPairNonce();
 	if (!nonce) return false;
+	// Clear the sticky error first: a stale "cannot reach the app" from an
+	// earlier attempt must not masquerade as this attempt's outcome.
+	lastConnectionError = null;
 	try {
 		const data = await sendNativeMessageP({
 			id: 0,
@@ -211,8 +216,16 @@ async function pairConfirm(code) {
 			savePendingPairNonce(null);
 			return true;
 		}
+		// Host answered but refused — prefer the desktop-provided reason.
+		lastConnectionError = friendlyConnectionError(
+			data?.error_message || data?.error || "Invalid or expired code",
+		);
 		return false;
-	} catch {
+	} catch (error) {
+		// Host failed to launch / timed out / unreachable — classify via the
+		// shared connection copy so the popup reports a connection problem
+		// instead of blaming the code.
+		lastConnectionError = friendlyConnectionError(error);
 		return false;
 	}
 }
@@ -522,23 +535,81 @@ function setupContextMenu() {
 	}
 }
 
+// M12: deliver user-facing feedback through the page's content script — the
+// MV3 service worker has no toast mechanism, and chrome.notifications would
+// require a new manifest permission (intentionally not added).
+function notifyTab(tabId, message, notificationType = "info") {
+	chrome.tabs.sendMessage(
+		tabId,
+		{ type: "SHOW_NOTIFICATION", message, notificationType },
+		() => {
+			// Pages without a content script (chrome://, store pages, discarded
+			// tabs) reject the message; a warning is the best available signal.
+			if (chrome.runtime.lastError) {
+				console.warn(
+					"PwdVault: context-menu notification not delivered:",
+					chrome.runtime.lastError.message,
+				);
+			}
+		},
+	);
+}
+
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-	if (info.menuItemId === "pwdvault-fill") {
-		const entries = await getEntriesForUrl(tab.url);
-		if (entries.length > 0) {
-			const entry = await getEntry(entries[0].id);
+	// Wrap everything: a throw inside this listener would only surface as a
+	// silent unhandled rejection in the service worker console.
+	try {
+		if (info.menuItemId !== "pwdvault-fill" && info.menuItemId !== "pwdvault-generate") {
+			return;
+		}
+
+		// Without a URL there is nothing to filter entries against (fill), and
+		// even generate needs a live tab to report into.
+		if (!tab || !tab.url || !tab.id) {
+			console.warn(
+				"PwdVault: context-menu action skipped — active tab has no URL/id",
+			);
+			return;
+		}
+
+		const unlocked = await isVaultUnlocked().catch(() => false);
+		if (!unlocked) {
+			notifyTab(tab.id, "Vault is locked", "error");
+			return;
+		}
+
+		if (info.menuItemId === "pwdvault-fill") {
+			const entries = await getEntriesForUrl(tab.url);
+			if (entries.length > 0) {
+				const entry = await getEntry(entries[0].id);
+				if (!entry) {
+					// The entry was deleted between listing and fetching.
+					notifyTab(tab.id, "Entry no longer available", "error");
+					return;
+				}
+				chrome.tabs.sendMessage(tab.id, {
+					type: "AUTOFILL",
+					username: entry.username,
+					password: entry.password,
+					// The content script's domain gate rejects AUTOFILL without the
+					// entry URL (fail closed). getEntriesForUrl above guarantees a
+					// non-empty entry.url on this path.
+					entryUrl: entry.url,
+				});
+			}
+		} else {
+			const password = await generatePassword();
 			chrome.tabs.sendMessage(tab.id, {
-				type: "AUTOFILL",
-				username: entry.username,
-				password: entry.password,
+				type: "INSERT_PASSWORD",
+				password,
 			});
 		}
-	} else if (info.menuItemId === "pwdvault-generate") {
-		const password = await generatePassword();
-		chrome.tabs.sendMessage(tab.id, {
-			type: "INSERT_PASSWORD",
-			password,
-		});
+	} catch (error) {
+		// M12: never silent — but the SW has no UI channel, so log and stop.
+		console.error("PwdVault: context-menu action failed:", error);
+		if (tab && tab.id) {
+			notifyTab(tab.id, "PwdVault action failed — see app logs", "error");
+		}
 	}
 });
 
@@ -621,6 +692,13 @@ async function handleMessage(message, sender) {
 			return importVault(message.backup, message.importPassword);
 
 		case "AUTOFILL":
+			// Dead code (verified 2026-09): every AUTOFILL sender targets the
+			// tab directly via chrome.tabs.sendMessage (popup.js autofill, the
+			// context-menu handler and the keyboard command below) — nothing
+			// relays through the background. Kept deliberately: removing it is
+			// out of scope here. If it is ever revived, it MUST forward
+			// message.entryUrl — the content script rejects AUTOFILL without
+			// it (fail closed).
 			const [tab] = await chrome.tabs.query({
 				active: true,
 				currentWindow: true,
@@ -645,12 +723,18 @@ async function handleMessage(message, sender) {
 				error: lastConnectionError,
 			};
 
-		case "PAIR_CONFIRM":
+		case "PAIR_CONFIRM": {
 			const ok = await pairConfirm(message.code);
 			if (ok) {
 				return { success: true };
 			}
-			return { success: false, error: "Invalid or expired code" };
+			// Surface the classified reason (wrong code vs. connection problem)
+			// through the popup's existing result.error channel.
+			return {
+				success: false,
+				error: lastConnectionError || "Invalid or expired code",
+			};
+		}
 
 		case "GET_PAIRING_PENDING":
 			return {
@@ -682,6 +766,9 @@ chrome.commands.onCommand.addListener(async (command) => {
 						type: "AUTOFILL",
 						username: entry.username,
 						password: entry.password,
+						// Content script rejects AUTOFILL without the entry URL
+						// (fail closed). getEntriesForUrl guarantees non-empty.
+						entryUrl: entry.url,
 					});
 				}
 			} catch (error) {

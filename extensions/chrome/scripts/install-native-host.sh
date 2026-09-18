@@ -23,10 +23,22 @@ if [[ $# -lt 1 ]]; then
 fi
 
 CHROME_ID="$1"
-FIREFOX_ID="${2:-pwdvault@pwdvault.app}"
+DEFAULT_FIREFOX_ID="pwdvault@pwdvault.app"
+FIREFOX_ID="${2:-$DEFAULT_FIREFOX_ID}"
 
 if [[ ! "$CHROME_ID" =~ ^[a-p]{32}$ ]]; then
     echo "Invalid Chrome extension ID: expected 32 lowercase letters in the range a-p" >&2
+    exit 1
+fi
+
+# Firefox ID: empty/omitted falls back to the store default (say so); a
+# non-empty value must be whitespace-free — the NM manifest and the host's
+# allowed_origins check both treat the ID as a single token, and a stray
+# space would silently produce a host the browser can never match.
+if [[ -z "${2:-}" ]]; then
+    echo "No Firefox extension ID given — using the default: $DEFAULT_FIREFOX_ID"
+elif [[ "$FIREFOX_ID" =~ [[:space:]] ]]; then
+    echo "Invalid Firefox extension ID: must not contain whitespace" >&2
     exit 1
 fi
 

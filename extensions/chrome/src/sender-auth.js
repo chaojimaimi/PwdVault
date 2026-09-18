@@ -45,3 +45,26 @@ export function entryMatchesSenderUrl(entry, senderUrl) {
   const entryDomain = normalizedDomain(entry?.url);
   return Boolean(senderDomain && entryDomain && senderDomain === entryDomain);
 }
+
+// Single source of truth for "may this entry be filled on this page?".
+// Compares normalized domains (lowercase + strip a leading "www."), matching
+// the semantics of entryMatchesSenderUrl and background getEntriesForUrl.
+// NOTE: content.js carries a verbatim copy of this function — content scripts
+// are classic scripts and cannot import ES modules. Keep the two copies
+// byte-identical; the guard test in sender-auth.test.js enforces it.
+export function entryMatchesPageUrl(entryUrl, pageUrl) {
+  // Empty entryUrl = generic entry (no stored URL); an explicit popup fill is
+  // a deliberate user action, so allow it. Empty pageUrl = cannot judge.
+  if (!entryUrl) return true;
+  if (!pageUrl) return false;
+  // Entries are often stored scheme-less ("github.com/acme"); pad https://
+  // exactly like popup.js formatUrl before parsing, otherwise such entries
+  // would be rejected here despite being fillable nowhere else.
+  const withScheme = /^https?:\/\//i.test(entryUrl)
+    ? entryUrl
+    : `https://${entryUrl}`;
+  const entryDomain = normalizedDomain(withScheme);
+  const pageDomain = normalizedDomain(pageUrl);
+  // A parse failure yields null (cannot judge) → reject.
+  return Boolean(entryDomain && pageDomain && entryDomain === pageDomain);
+}

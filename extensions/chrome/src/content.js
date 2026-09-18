@@ -1,6 +1,39 @@
 // PwdVault Content Script
 // Detects login forms and handles auto-fill
 
+// === VERBATIM COPY: entryMatchesPageUrl from src/sender-auth.js ===
+// Content scripts are classic scripts and cannot import ES modules (a dynamic
+// import would require web_accessible_resources = manifest change + fingerprint
+// surface). Keep this copy byte-identical to sender-auth.js — the guard test
+// in sender-auth.test.js fails when the two drift apart. Hoisted, so the IIFE
+// below can use it.
+function entryMatchesPageUrl(entryUrl, pageUrl) {
+  // Empty entryUrl = generic entry (no stored URL); an explicit popup fill is
+  // a deliberate user action, so allow it. Empty pageUrl = cannot judge.
+  if (!entryUrl) return true;
+  if (!pageUrl) return false;
+  // Entries are often stored scheme-less ("github.com/acme"); pad https://
+  // exactly like popup.js formatUrl before parsing, otherwise such entries
+  // would be rejected here despite being fillable nowhere else.
+  const withScheme = /^https?:\/\//i.test(entryUrl)
+    ? entryUrl
+    : `https://${entryUrl}`;
+  const entryDomain = normalizedDomain(withScheme);
+  const pageDomain = normalizedDomain(pageUrl);
+  // A parse failure yields null (cannot judge) → reject.
+  return Boolean(entryDomain && pageDomain && entryDomain === pageDomain);
+}
+
+// Verbatim copy of the normalizedDomain helper from sender-auth.js — the
+// copied predicate above calls it. Keep in sync with sender-auth.js.
+function normalizedDomain(rawUrl) {
+  try {
+    return new URL(rawUrl).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
 (function () {
 	"use strict";
 
@@ -63,7 +96,18 @@
 		UNKNOWN: "unknown",
 	};
 
-	function detectFormType(container) {
+	function detectFormType(container, passwordInput) {
+		// Hard signal: autocomplete="new-password" marks a registration or
+		// account-creation field by author intent and outranks the text
+		// heuristics below (a login page's "create an account" link must not
+		// misclassify a form whose password field is explicitly a new one).
+		const autocomplete = (
+			passwordInput?.getAttribute("autocomplete") || ""
+		).toLowerCase();
+		if (autocomplete === "new-password") {
+			return FORM_TYPES.REGISTER;
+		}
+
 		const text = container.textContent || "";
 		const formAction = (container.getAttribute("action") || "").toLowerCase();
 
@@ -108,8 +152,9 @@
 		const container =
 			form || passwordInput.closest("div, section, article") || document.body;
 
-		// Detect form type
-		const formType = detectFormType(container);
+		// Detect form type — the chosen password field carries the
+		// autocomplete hard signal into the classifier.
+		const formType = detectFormType(container, passwordInput);
 
 		// Look for username field
 		const textInputs = Array.from(container.querySelectorAll("input")).filter(
@@ -1219,8 +1264,21 @@
 	chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 		switch (message.type) {
 			case "AUTOFILL":
+				// Authoritative gate (semantics: sender-auth.js
+				// entryMatchesPageUrl). The message must carry the entry's
+				// stored URL: a missing (non-string) entryUrl is a protocol
+				// violation and is rejected fail-closed. An empty string means
+				// a generic entry (no URL) — the popup's explicit fill stays
+				// allowed. A rejected fill never touches any credential field.
+				if (
+					typeof message.entryUrl !== "string" ||
+					!entryMatchesPageUrl(message.entryUrl, window.location.href)
+				) {
+					sendResponse({ ok: false, reason: "domain-mismatch" });
+					break;
+				}
 				autofillLogin(message.username, message.password);
-				sendResponse({ success: true });
+				sendResponse({ ok: true });
 				break;
 
 			case "INSERT_PASSWORD":
@@ -1237,6 +1295,18 @@
 				cachedEntries = null;
 				hideOverlay();
 				hideNotificationBar();
+				sendResponse({ success: true });
+				break;
+
+			case "SHOW_NOTIFICATION":
+				// M12: feedback channel for the background service worker (it has
+				// no toast mechanism of its own). Reuses the on-page notifier.
+				showNotification(
+					typeof message.message === "string" ? message.message : "",
+					typeof message.notificationType === "string"
+						? message.notificationType
+						: "info",
+				);
 				sendResponse({ success: true });
 				break;
 

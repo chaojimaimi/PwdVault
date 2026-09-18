@@ -1,10 +1,32 @@
 // PwdVault Popup Script - Enhanced with Groups, Generator UI, and Theme Switching
 import Fuse from "./fuse.min.mjs";
+import { entryMatchesPageUrl } from "../sender-auth.js";
+import { getPasswordStrength } from "../password-strength.js";
 
 // Handle of the pending clipboard auto-clear timer. Copying again cancels
 // the previous timer so the 30s window restarts from the most recent copy
 // (same pattern as the desktop app's clipboard utility).
 let activeClearTimer = null;
+
+// Handle of the pending toast hide timer. A new toast cancels the previous
+// one's timer so an early toast is never hidden by a stale 2s timeout.
+let activeToastTimer = null;
+
+// Fuzzy-search configuration — KEEP IN SYNC with src/utils/search.ts
+// (`fuseOptions`): same weighted keys and threshold so the popup surfaces
+// the same matches as the desktop vault search. Deliberately config-only:
+// the desktop's cached-index/perf work is out of scope here.
+const FUSE_SEARCH_OPTIONS = {
+	keys: [
+		{ name: "title", weight: 0.4 },
+		{ name: "username", weight: 0.3 },
+		{ name: "url", weight: 0.2 },
+		{ name: "tags", weight: 0.1 },
+	],
+	threshold: 0.3,
+	includeScore: true,
+	ignoreLocation: true,
+};
 
 class PopupApp {
 	constructor() {
@@ -237,63 +259,69 @@ class PopupApp {
 			active: true,
 			currentWindow: true,
 		});
-		if (tab) {
-			const fullEntry = await this.getEntryDetails(entry.id);
-			if (fullEntry && fullEntry.password) {
-				chrome.tabs.sendMessage(tab.id, {
-					type: "AUTOFILL",
-					username: fullEntry.username,
-					password: fullEntry.password,
-				});
-				window.close();
+		if (!tab) return;
+		const fullEntry = await this.getEntryDetails(entry.id);
+		if (!fullEntry || !fullEntry.password) return;
+
+		// Local pre-check: never put secrets on the wire for a page this entry
+		// cannot belong to. If tab.url is unavailable (rare), defer to the
+		// content script's authoritative gate. Same predicate semantics as
+		// sender-auth.js; an empty entryUrl (generic entry) passes.
+		const entryUrl = entry.url || "";
+		if (tab.url && !entryMatchesPageUrl(entryUrl, tab.url)) {
+			this.showToast(
+				"Entry domain does not match this page — fill cancelled",
+			);
+			return;
+		}
+
+		try {
+			const res = await chrome.tabs.sendMessage(tab.id, {
+				type: "AUTOFILL",
+				username: fullEntry.username,
+				password: fullEntry.password,
+				entryUrl,
+			});
+			if (res?.ok === false) {
+				// Content script refused (domain gate). Stay open so the toast
+				// is visible — window.close() would destroy the popup context.
+				this.showToast(
+					"Entry domain does not match this page — fill cancelled",
+				);
+				return;
 			}
+			window.close();
+		} catch {
+			// Pages without the content script (chrome://, extension stores)
+			// reject the sendMessage — say so instead of closing silently.
+			this.showToast("Cannot fill on this page");
 		}
 	}
 
-	// === Password Strength (simplified) ===
+	// === Password Strength ===
+
+	// Label → theme color, mirroring the desktop's strength-* CSS classes
+	// (src/styles/components.css): very-weak/weak/fair/strong/very-strong.
+	static STRENGTH_COLORS = {
+		"Very Weak": "var(--color-danger)",
+		Weak: "var(--color-warning)",
+		Fair: "var(--color-accent)",
+		Strong: "var(--color-success)",
+		"Very Strong": "var(--color-success)",
+	};
 
 	getPasswordStrength(password) {
 		if (!password)
 			return { score: 0, label: "", color: "var(--color-text-muted)" };
-
-		let score = 0;
-		if (password.length >= 8) score += 15;
-		if (password.length >= 12) score += 15;
-		if (password.length >= 16) score += 10;
-		if (password.length >= 24) score += 10;
-
-		const hasLower = /[a-z]/.test(password);
-		const hasUpper = /[A-Z]/.test(password);
-		const hasDigit = /[0-9]/.test(password);
-		const hasSymbol = /[^a-zA-Z0-9]/.test(password);
-
-		const types = [hasLower, hasUpper, hasDigit, hasSymbol].filter(
-			Boolean,
-		).length;
-		score += types * 12;
-
-		// Unique characters bonus
-		const unique = new Set(password).size;
-		score += Math.min(unique * 2, 14);
-
-		score = Math.min(score, 100);
-
-		let label, color;
-		if (score < 25) {
-			label = "Weak";
-			color = "var(--color-danger)";
-		} else if (score < 50) {
-			label = "Fair";
-			color = "var(--color-warning)";
-		} else if (score < 75) {
-			label = "Good";
-			color = "var(--color-primary)";
-		} else {
-			label = "Strong";
-			color = "var(--color-success)";
-		}
-
-		return { score, label, color };
+		// Same scoring engine as the desktop (src/utils/passwordStrength.ts,
+		// ported in ../password-strength.js) so both UIs agree on the number
+		// and the five-tier label.
+		const { score, label } = getPasswordStrength(password);
+		return {
+			score,
+			label,
+			color: PopupApp.STRENGTH_COLORS[label] || "var(--color-text-muted)",
+		};
 	}
 
 	// === Filtering ===
@@ -310,17 +338,7 @@ class PopupApp {
 		if (!this.state.searchQuery || !this.state.searchQuery.trim())
 			return entries;
 
-		const fuse = new Fuse(entries, {
-			keys: [
-				{ name: "title", weight: 0.4 },
-				{ name: "username", weight: 0.3 },
-				{ name: "url", weight: 0.2 },
-				{ name: "tags", weight: 0.1 },
-			],
-			threshold: 0.3,
-			includeScore: true,
-			ignoreLocation: true,
-		});
+		const fuse = new Fuse(entries, FUSE_SEARCH_OPTIONS);
 
 		return fuse.search(this.state.searchQuery).map((r) => r.item);
 	}
@@ -332,8 +350,12 @@ class PopupApp {
 		const messageEl = document.getElementById("toast-message");
 		messageEl.textContent = message;
 		toast.classList.add("show");
-		setTimeout(() => {
+		if (activeToastTimer !== null) {
+			clearTimeout(activeToastTimer);
+		}
+		activeToastTimer = setTimeout(() => {
 			toast.classList.remove("show");
+			activeToastTimer = null;
 		}, 2000);
 	}
 
@@ -1146,9 +1168,16 @@ class PopupApp {
 		if (genPwBtn) {
 			genPwBtn.onclick = async () => {
 				try {
+					// Honour the desktop's default generator length (Settings
+					// screen) via the existing GET_SETTINGS proxy. Fall back to
+					// 20 when settings cannot be read (vault locked, older app).
+					const settings = await this.sendMessage({
+						type: "GET_SETTINGS",
+					});
+					const length = Number(settings?.default_length) || 20;
 					const password = await this.sendMessage({
 						type: "GENERATE_PASSWORD",
-						options: { length: 20 },
+						options: { length },
 					});
 					if (password) {
 						const pwInput = document.getElementById("entry-password");
@@ -1431,7 +1460,10 @@ class PopupApp {
 	formatUrl(url) {
 		try {
 			const urlObj = new URL(url.startsWith("http") ? url : "https://" + url);
-			return urlObj.hostname.replace("www.", "");
+			// Anchored so only a leading "www." is stripped (same as
+			// background.js getEntriesForUrl) — "www.example.com" must not
+			// collapse to "example.com" mid-host.
+			return urlObj.hostname.replace(/^www\./, "");
 		} catch {
 			return url;
 		}
