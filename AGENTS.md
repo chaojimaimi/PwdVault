@@ -2,10 +2,10 @@
 
 A secure, local-first password manager built with Tauri + React.
 
-**Last Updated**: 2026-09-15
+**Last Updated**: 2026-09-17
 **Repository**: https://github.com/chaojimaimi/PwdVault (Private)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.1.4
-**Current Version**: `v1.1.5` (release candidate) — 2026-09 security audit fixes + Phase 0 hardening landed
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.1.6
+**Current Version**: `v1.1.6` — 2026-09 audit fixes + Phase 0 hardening + Phase 1 key infrastructure (master password change / Touch ID / recovery key) + Phase 2-3 (soft delete, TOTP, cloud sync over WebDAV & Baidu Netdisk)
 **Current Branch**: `main`
 
 ---
@@ -292,6 +292,44 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-09-17 (v1.1.6 — Phase 1/2/3 landed)
+
+**Phase 1 — key infrastructure** (`b05fb09` backend, `b8fa199` frontend):
+change master password (full reseal in one transaction, D8 exclusive-drain
+serialization), Touch ID unlock (macOS Keychain wrap key with biometric ACL,
+dual-mode: data-protection preferred with legacy login-keychain fallback for
+unsigned builds — `95c3544`, LAContext-gated `95c3544`/`6b491b3`), recovery
+key (256-bit, shown once, lock-screen reset). New `keychain.rs`,
+`crypto/wrap.rs`, `service/security/` (split to ≤800-line modules).
+
+**Phase 2 — format v3 groundwork** (`e45f01f`): soft delete (tombstones with
+`updated_at` bump), TOTP field + RFC 6238 generator (`totp.rs`, base32 +
+otpauth parsing), dual-read legacy blob compat in entry/group codecs
+(LegacyEntryV2/LegacyGroupV2, modeled on LegacySettingsV1 — bincode 1.x has
+no trailing-field defaults). Security notes were found already implemented.
+
+**Phase 3 — cloud sync** (`23cbc4a`, `37717ea`, `85549d2`, `364f4e0`):
+encrypted self-contained container on the user's own cloud drive (WebDAV +
+Baidu Netdisk adapters behind `CloudBackend`), device-side 2-way LWW merge
+with fingerprint tiebreak, D8 exclusive-window reuse (republish copies the
+original keys), rolling 10-snapshot history (= free encrypted backup),
+OAuth device pairing for Baidu (fixed loopback port 17777, no PKCE).
+Frontend: Sync settings section, TOTP field/codes.
+
+**Manual-QA fixes** (`493a155`, `67a280f`, `6b491b3`, `95c3544`, `417f5a0`):
+first-connect credential ordering, WebDAV 409-on-missing-ancestor treated
+as absent (Nutstore), Touch ID dual-mode keychain fallback (unsigned builds:
+data-protection keychain needs signed entitlements → legacy login keychain +
+LAContext gate).
+
+**CI gate fixes** (`a036eae`, `722d0d5`): workspace rustfmt drift, rustls
+0.23.45 (RUSTSEC-2026-0285), native-host Cargo.lock regeneration, clippy on
+latest stable (drop_non_drop + unused imports), over-cap modules split
+(native_messaging/ 1611→5 files, tests_baidu, tests_engine, vault_tests).
+All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
+169 frontend.
+
 
 ### 2026-09 (Security Audit + Phase 0 Hardening)
 
