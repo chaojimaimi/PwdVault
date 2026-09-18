@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth, useSettings } from "../context/AppContext";
 import { generatePassword } from "../api/vault";
 import { copyWithTimeout } from "../utils/clipboard";
@@ -20,21 +20,26 @@ export function GeneratorScreen() {
 	});
 	const [copied, setCopied] = useState(false);
 	const [pending, setPending] = useState(false);
-	const charsetValid =
-		options.includeUppercase ||
-		options.includeLowercase ||
-		options.includeNumbers ||
-		options.includeSymbols;
+	// Guard: once the user edits an option, saved defaults must no longer
+	// overwrite their choice.
+	const touchedRef = useRef(false);
+	// Mirrors `pending` for non-effect readers (the settings-resync effect
+	// below) without adding it to that effect's dependencies.
+	const pendingRef = useRef(pending);
+	pendingRef.current = pending;
+	const hasCharset = (opts: PasswordGeneratorOptions) =>
+		opts.includeUppercase ||
+		opts.includeLowercase ||
+		opts.includeNumbers ||
+		opts.includeSymbols;
+	const charsetValid = hasCharset(options);
 
-	useEffect(() => {
-		handleGenerate();
-	}, []);
-
-	const handleGenerate = async () => {
-		if (!charsetValid || pending) return;
+	const handleGenerate = async (overrides?: PasswordGeneratorOptions) => {
+		const opts = overrides ?? options;
+		if (!hasCharset(opts) || pending) return;
 		setPending(true);
 		try {
-			const pwd = await generatePassword(options);
+			const pwd = await generatePassword(opts);
 			setPassword(pwd);
 			setCopied(false);
 		} catch (error) {
@@ -45,6 +50,40 @@ export function GeneratorScreen() {
 			setPending(false);
 		}
 	};
+
+	// H4: latestRef pattern — generation must stay mount-only; adding
+	// handleGenerate (recreated per render, closes over options) to the deps
+	// would auto-regenerate on every option toggle.
+	const mountGenerateRef = useRef(handleGenerate);
+	mountGenerateRef.current = handleGenerate;
+	useEffect(() => {
+		void mountGenerateRef.current();
+	}, []);
+
+	// E16: settings may finish loading AFTER this screen mounts (the useState
+	// snapshot above can still hold DEFAULT_SETTINGS). When the load lands
+	// while the user has not touched anything, resync the options once — and
+	// regenerate with them (r2-P2), so the displayed password is not the one
+	// generated from the pre-load parameters. The identity check keeps the
+	// already-loaded mount case from generating twice.
+	const lastLoadedSettingsRef = useRef(settingsState.settings);
+	const resyncGenerateRef = useRef(handleGenerate);
+	resyncGenerateRef.current = handleGenerate;
+	useEffect(() => {
+		if (settingsState.status !== "success") return;
+		if (touchedRef.current) return;
+		if (settingsState.settings === lastLoadedSettingsRef.current) return;
+		lastLoadedSettingsRef.current = settingsState.settings;
+		const next: PasswordGeneratorOptions = {
+			length: settingsState.settings.default_length,
+			includeUppercase: settingsState.settings.default_include_uppercase,
+			includeLowercase: settingsState.settings.default_include_lowercase,
+			includeNumbers: settingsState.settings.default_include_numbers,
+			includeSymbols: settingsState.settings.default_include_symbols,
+		};
+		setOptions(next);
+		if (!pendingRef.current) void resyncGenerateRef.current(next);
+	}, [settingsState.status, settingsState.settings]);
 
 	const handleCopy = async () => {
 		await copyWithTimeout(password);
@@ -61,6 +100,7 @@ export function GeneratorScreen() {
 		key: keyof PasswordGeneratorOptions,
 		value: boolean | number,
 	) => {
+		touchedRef.current = true;
 		setOptions({ ...options, [key]: value });
 	};
 
@@ -156,7 +196,9 @@ export function GeneratorScreen() {
 
 				<button
 					className="btn btn-secondary"
-					onClick={handleGenerate}
+					// handleGenerate now takes an optional options override — never
+					// let the click event slip in as that argument.
+					onClick={() => void handleGenerate()}
 					disabled={!charsetValid || pending}
 				>
 					{pending ? "Generating…" : "Generate New Password"}

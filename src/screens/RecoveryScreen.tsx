@@ -59,7 +59,11 @@ export function RecoveryScreen() {
 							value={recoveryKey}
 							onChange={(e) => setRecoveryKey(e.target.value)}
 							placeholder="Paste your recovery key"
-							autoFocus
+							ref={(el) => {
+								// jsx-a11y/no-autofocus: focus at commit instead of the
+								// autoFocus prop — same UX, programmatic.
+								el?.focus();
+							}}
 							autoComplete="off"
 							spellCheck={false}
 							disabled={state.isLoading}

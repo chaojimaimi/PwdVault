@@ -49,6 +49,12 @@ export function AccessibleDialog({
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // Latest-ref pattern: the initial-focus target is read at open time.
+  // Keeping the selector out of the effect deps means a prop change while
+  // the dialog is open no longer tears the focus/key handling down and
+  // re-runs it (which would steal focus mid-interaction).
+  const initialFocusRef = useRef(initialFocusSelector);
+  initialFocusRef.current = initialFocusSelector;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -79,8 +85,9 @@ export function AccessibleDialog({
     const focusInitial = () => {
       const dialog = dialogRef.current;
       if (!dialog) return;
-      const preferred = initialFocusSelector
-        ? dialog.querySelector<HTMLElement>(initialFocusSelector)
+      const selector = initialFocusRef.current;
+      const preferred = selector
+        ? dialog.querySelector<HTMLElement>(selector)
         : null;
       (preferred || dialog.querySelector<HTMLElement>(FOCUSABLE) || dialog).focus();
     };
@@ -133,13 +140,14 @@ export function AccessibleDialog({
         snapshot = null;
       }
     };
-  }, [isOpen, initialFocusSelector]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
   return createPortal(
     <div
       className="modal-overlay"
+      role="presentation"
       onMouseDown={(event) => {
         if (closeOnOverlay && event.target === event.currentTarget) onClose();
       }}

@@ -140,6 +140,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const success = await api.unlockVault(password);
         if (success) {
           postUnlock();
+        } else {
+          // Wrong password resolves Ok(false) without any error written, so
+          // write it here. Deliberately NOT branching on state.error: the
+          // actions closure always sees the mount-time state snapshot
+          // (useMemo deps are [dispatch]), so a literal state.error check
+          // would be vacuously empty and silently drop this message. The
+          // throw path cannot reach this branch (catch short-circuits), so
+          // this is the only writer for false results without an error.
+          dispatch({ type: 'SET_ERROR', payload: 'Invalid password' });
         }
         return success;
       } catch (error) {

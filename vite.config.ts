@@ -1,6 +1,7 @@
 /// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { configDefaults } from "vitest/config";
 import { createRequire } from 'module';
 import path from 'path';
 
@@ -64,5 +65,10 @@ export default defineConfig(async () => ({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    // extensions/*/dist is build.sh's packaging STAGING copy of the shared
+    // extension sources — running those copies as suites would double-execute
+    // every extension test with broken relative imports. Keep only the
+    // canonical sources under extensions/*/src.
+    exclude: [...configDefaults.exclude, 'extensions/*/dist/**'],
   },
 }));

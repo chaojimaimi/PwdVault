@@ -1,6 +1,5 @@
-import React from "react";
 import { render, fireEvent, screen, waitFor } from "@testing-library/react";
-import { vi, afterEach, describe, it, expect } from "vitest";
+import { vi, beforeEach, afterEach, describe, it, expect } from "vitest";
 
 const groups = [
 	{ id: "g1", name: "Work", created_at: 1, updated_at: 1 },
@@ -12,6 +11,11 @@ const createGroup = vi.fn();
 const updateGroup = vi.fn();
 const deleteGroup = vi.fn();
 const navigate = vi.fn();
+
+beforeEach(() => {
+	// The mount load now attaches .catch — the mock must return a promise.
+	loadGroups.mockResolvedValue(undefined);
+});
 
 // GroupManager now subscribes to useAuth (navigate) and useVault (groups + CRUD).
 vi.mock("../../context/AppContext", () => ({

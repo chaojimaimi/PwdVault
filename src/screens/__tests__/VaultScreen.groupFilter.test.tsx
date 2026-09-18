@@ -1,9 +1,5 @@
 import { test, expect } from "vitest";
-
-const mockGroups = [
-	{ id: "g1", name: "Work", created_at: 1, updated_at: 1 },
-	{ id: "g2", name: "Personal", created_at: 1, updated_at: 1 },
-];
+import type { EntrySummary } from "../../types";
 
 const mockEntries = [
 	{
@@ -39,7 +35,10 @@ const mockEntries = [
 ];
 
 test("filters entries by selected group (pure function)", () => {
-	const filterEntries = (entries: any[], selectedGroup: string | null) =>
+	const filterEntries = (
+		entries: EntrySummary[],
+		selectedGroup: string | null,
+	) =>
 		entries.filter((entry) => {
 			if (selectedGroup) return entry.group_id === selectedGroup;
 			return true;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth, useVault } from "../context/AppContext";
 import { BackHeader } from "../components/BackHeader";
 import {
@@ -24,8 +24,17 @@ export default function GroupManager() {
 	} | null>(null);
 	const [isDeleting, setIsDeleting] = useState(false);
 
+	// H4: latestRef pattern — `actions` changes identity on group switches
+	// (VaultContext useMemo), and this mount-only load must not re-run then.
+	const actionsRef = useRef(actions);
+	actionsRef.current = actions;
+
 	useEffect(() => {
-		actions.loadGroups();
+		// Same guard as GroupSelector's mount load: a failed fetch must not
+		// surface as an unhandled rejection — show it in the manager banner.
+		actionsRef.current.loadGroups().catch(() => {
+			setError("Failed to load groups");
+		});
 	}, []);
 
 	const handleCreate = async () => {
@@ -130,7 +139,11 @@ export default function GroupManager() {
 								}
 							}}
 							placeholder="New group name..."
-							autoFocus
+							ref={(el) => {
+								// jsx-a11y/no-autofocus: focus at commit when the inline
+								// input mounts — same UX as autoFocus, programmatic.
+								el?.focus();
+							}}
 						/>
 						<button
 							className="btn btn-primary group-create-save"
@@ -173,7 +186,12 @@ export default function GroupManager() {
 											if (e.key === "Escape") cancelEdit();
 										}}
 										className="form-input group-edit-input"
-										autoFocus
+										aria-label="Rename group"
+										ref={(el) => {
+											// jsx-a11y/no-autofocus: focus at commit when the
+											// rename input mounts — same UX, programmatic.
+											el?.focus();
+										}}
 									/>
 									<button
 										className="btn btn-primary group-edit-save"

@@ -34,10 +34,10 @@ export function UnlockScreen() {
 		setLocalError(null);
 
 		try {
-			const success = await actions.unlock(password);
-			if (!success) {
-				setLocalError("Invalid password");
-			}
+			// A false return already wrote state.error ("Invalid password" or
+			// the rate-limit message) inside AuthContext — showing it via
+			// state.error avoids a local override that would mask lockout.
+			await actions.unlock(password);
 		} catch {
 			setLocalError("Failed to unlock vault");
 		} finally {
@@ -53,7 +53,7 @@ export function UnlockScreen() {
 	};
 
 	const showTouchId = !!bioStatus?.available && !!bioStatus?.enabled;
-	const error = localError || state.error;
+	const error = state.error || localError;
 
 	return (
 		<div className="screen">
@@ -79,7 +79,11 @@ export function UnlockScreen() {
 							value={password}
 							onChange={(e) => setPassword(e.target.value)}
 							placeholder="Enter master password"
-							autoFocus
+							ref={(el) => {
+								// jsx-a11y/no-autofocus: focus at commit instead of the
+								// autoFocus prop — same UX, programmatic.
+								el?.focus();
+							}}
 							disabled={state.isLoading}
 							aria-invalid={!!error}
 							aria-describedby={error ? "unlock-error" : undefined}

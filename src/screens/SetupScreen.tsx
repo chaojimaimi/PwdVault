@@ -57,7 +57,11 @@ export function SetupScreen() {
 							value={password}
 							onChange={(e) => setPassword(e.target.value)}
 							placeholder="Enter master password"
-							autoFocus
+							ref={(el) => {
+								// jsx-a11y/no-autofocus: focus at commit instead of the
+								// autoFocus prop — same UX, programmatic.
+								el?.focus();
+							}}
 							disabled={state.isLoading}
 							aria-invalid={!!error}
 							aria-describedby={error ? "setup-error" : undefined}

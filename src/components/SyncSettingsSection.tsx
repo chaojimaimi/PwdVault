@@ -9,6 +9,7 @@ import {
 } from "../api/vault";
 import { errorMessage } from "../utils/errorMessage";
 import { showToast } from "../utils/toast";
+import { useVault } from "../context/VaultContext";
 import { AccessibleDialog } from "./AccessibleDialog";
 import type { SyncBackendKind, SyncStatusResponse } from "../types";
 
@@ -71,6 +72,9 @@ function openAuthorizeUrl(url: string): void {
 export function SyncSettingsSection() {
 	const [status, setStatus] = useState<SyncStatusResponse | null>(null);
 	const [busy, setBusy] = useState<BusyOp>(null);
+	// Sync can pull in entries/groups changed on other devices — the in-memory
+	// vault lists must be reloaded after a successful sync (H3).
+	const { actions: vaultActions } = useVault();
 
 	// Connect form (not-connected state)
 	const [backend, setBackend] = useState<SyncBackendKind>("webdav");
@@ -201,7 +205,23 @@ export function SyncSettingsSection() {
 		setBusy("sync");
 		try {
 			setStatus(await syncNow());
-			showToast("Sync completed");
+			// Refresh the vault lists so remote changes are visible without a
+			// remount. A refresh failure must not hide that the sync itself
+			// succeeded.
+			let refreshed = true;
+			try {
+				await Promise.all([
+					vaultActions.loadEntries(),
+					vaultActions.loadGroups(),
+				]);
+			} catch {
+				refreshed = false;
+			}
+			showToast(
+				refreshed
+					? "Sync completed"
+					: "Sync completed, but local list refresh failed",
+			);
 		} catch (error) {
 			showToast(errorMessage(error, "Sync failed"));
 		} finally {

@@ -3,6 +3,7 @@ import {
 	useEffect,
 	useDeferredValue,
 	useMemo,
+	useRef,
 	useState,
 } from "react";
 import { Virtuoso } from "react-virtuoso";
@@ -30,12 +31,22 @@ export function VaultScreen() {
 	const { toggleTheme } = useTheme();
 	const [copiedId, setCopiedId] = useState<string | null>(null);
 
+	// H4: `actions` gets a new identity whenever selectedGroupId changes (see
+	// VaultContext's useMemo deps), so putting it in the dependency array would
+	// re-run the load on every group switch. The latestRef pattern keeps the
+	// effect's semantic "run once per unlock transition" while always calling
+	// the newest actions.
+	const actionsRef = useRef(actions);
+	actionsRef.current = actions;
+
 	useEffect(() => {
 		if (authState.isUnlocked) {
-			void Promise.allSettled([actions.loadEntries(), actions.loadGroups()]);
+			void Promise.allSettled([
+				actionsRef.current.loadEntries(),
+				actionsRef.current.loadGroups(),
+			]);
 		}
-		// loadEntries/loadGroups are stable enough for the unlock transition;
-		// we intentionally only re-run on isUnlocked.
+		// Intentionally only re-runs on isUnlocked; actions are read via ref.
 	}, [authState.isUnlocked]);
 
 	// §5.6.1: apply the group filter first, then search the filtered set.
@@ -172,6 +183,7 @@ export function VaultScreen() {
 						<button
 							className={`group-tab ${!state.selectedGroupId ? "active" : ""}`}
 							onClick={() => actions.selectGroup(null)}
+							aria-current={!state.selectedGroupId || undefined}
 						>
 							All
 						</button>
@@ -180,6 +192,7 @@ export function VaultScreen() {
 								key={g.id}
 								className={`group-tab ${state.selectedGroupId === g.id ? "active" : ""}`}
 								onClick={() => actions.selectGroup(g.id)}
+								aria-current={state.selectedGroupId === g.id || undefined}
 							>
 								{g.name}
 							</button>

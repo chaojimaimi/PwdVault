@@ -54,6 +54,10 @@ export function EntryScreen() {
 	// contract (CreateEntryRequest), so new entries add TOTP via a second edit.
 	const [totpSecret, setTotpSecret] = useState("");
 	const [totpChanged, setTotpChanged] = useState(false);
+	// TOTP secrets are paste-only (no on-demand fetch like the password
+	// field), so the toggle is a plain visibility switch that never exposes
+	// the value by default.
+	const [showTotpSecret, setShowTotpSecret] = useState(false);
 	const isOtpauthUri = totpSecret.trim().startsWith("otpauth://");
 	const [secretLoading, setSecretLoading] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
@@ -89,6 +93,7 @@ export function EntryScreen() {
 			setNotesChanged(false);
 			setTotpSecret("");
 			setTotpChanged(false);
+			setShowTotpSecret(false);
 		} else {
 			setFormData({
 				title: "",
@@ -105,6 +110,7 @@ export function EntryScreen() {
 			setNotesChanged(false);
 			setTotpSecret("");
 			setTotpChanged(false);
+			setShowTotpSecret(false);
 		}
 	}, [state.selectedEntry]);
 
@@ -139,16 +145,6 @@ export function EntryScreen() {
 		window.addEventListener("beforeunload", warn);
 		return () => window.removeEventListener("beforeunload", warn);
 	}, [isDirty]);
-
-	// Clear plaintext secrets from component state as soon as the user leaves
-	// the screen, minimizing the time they reside in memory.
-	useEffect(() => {
-		return () => {
-			setFormData((prev) => ({ ...prev, password: "", notes: "" }));
-			setOriginalSecret(null);
-			setTotpSecret("");
-		};
-	}, []);
 
 	const handleBack = () => {
 		if (isDirty) {
@@ -549,19 +545,28 @@ export function EntryScreen() {
 					<div className="form-group">
 						<TotpCode entryId={state.selectedEntry.id} />
 						<label htmlFor="entry-totp">TOTP Secret</label>
-						<input
-							id="entry-totp"
-							type="text"
-							className="form-input"
-							value={totpSecret}
-							onChange={(e) => {
-								setTotpSecret(e.target.value);
-								setTotpChanged(true);
-							}}
-							placeholder="Unchanged"
-							autoComplete="off"
-							spellCheck={false}
-						/>
+						<div className="password-field">
+							<input
+								id="entry-totp"
+								type={showTotpSecret ? "text" : "password"}
+								className="form-input"
+								value={totpSecret}
+								onChange={(e) => {
+									setTotpSecret(e.target.value);
+									setTotpChanged(true);
+								}}
+								placeholder="Unchanged"
+								autoComplete="off"
+								spellCheck={false}
+							/>
+							<button
+								type="button"
+								onClick={() => setShowTotpSecret((s) => !s)}
+								aria-label={showTotpSecret ? "Hide TOTP secret" : "Show TOTP secret"}
+							>
+								{showTotpSecret ? <EyeOffIcon /> : <EyeIcon />}
+							</button>
+						</div>
 						{isOtpauthUri ? (
 							<p className="totp-hint totp-hint-active" role="status">
 								otpauth:// URI detected — it will be saved as-is and the code

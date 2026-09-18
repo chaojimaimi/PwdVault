@@ -60,15 +60,38 @@ export interface Group {
   updated_at: number;
 }
 
+// M10: mirrors pwdvault_application::VaultError
+// (src-tauri/crates/application/src/error.rs) with serde's external tagging:
+// unit variants arrive as plain strings; payload-carrying variants arrive as
+// single-key objects. 22 variants = 14 unit + 6 newtype(String) +
+// InvalidInput/RateLimited struct variants. REGENERATE this union whenever
+// the Rust enum changes — it is the wire contract for IPC rejections.
 export type VaultError =
+  // --- unit variants (14) ---
   | 'VaultLocked'
   | 'VaultAlreadyExists'
+  | 'LegacyVaultRequiresMigration'
   | 'InvalidPassword'
   | 'EntryNotFound'
+  | 'WeakKdfParams'
+  | 'BiometricUnavailable'
+  | 'BiometricCancelled'
+  | 'BiometricLockedOut'
+  | 'WrapBlobCorrupt'
+  | 'RecoveryKeyInvalid'
+  | 'RecoveryNotEnabled'
+  | 'CurrentPasswordInvalid'
+  | 'IntegrityCheckFailed'
+  // --- newtype(String) variants (6) ---
   | { EncryptionFailed: string }
   | { DecryptionFailed: string }
   | { DatabaseError: string }
-  | { InternalError: string };
+  | { InternalError: string }
+  | { InvalidBackup: string }
+  | { KeychainError: string }
+  // --- struct variants (2) ---
+  | { InvalidInput: { code: string; message: string } }
+  | { RateLimited: { retry_after_secs: number } };
 
 // App State Types
 

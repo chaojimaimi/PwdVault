@@ -1,5 +1,4 @@
-import React from "react";
-import { render, fireEvent, screen, waitFor } from "@testing-library/react";
+import { render, fireEvent, screen, waitFor, act } from "@testing-library/react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { TotpCode } from "./TotpCode";
 import { copyWithTimeout } from "../utils/clipboard";
@@ -45,5 +44,50 @@ describe("TotpCode", () => {
 
 		await waitFor(() => expect(totpCode).toHaveBeenCalledOnce());
 		expect(container).toBeEmptyDOMElement();
+	});
+
+	it("retries after a transient failure instead of wedging at zero", async () => {
+		vi.useFakeTimers();
+		try {
+			totpCode.mockRejectedValueOnce({ InternalError: "backend busy" });
+			totpCode.mockResolvedValue({ code: "654321", seconds_remaining: 12 });
+			render(<TotpCode entryId="entry-1" />);
+
+			// First fetch fails (transient) — the badge hides, nothing renders.
+			await act(async () => {});
+			expect(totpCode).toHaveBeenCalledTimes(1);
+			expect(screen.queryByText(/s$/)).not.toBeInTheDocument();
+
+			// The retry countdown ticks down; hitting zero triggers one refetch,
+			// which now succeeds and shows the code.
+			await act(async () => {
+				vi.advanceTimersByTime(6000);
+			});
+			await act(async () => {});
+			expect(totpCode).toHaveBeenCalledTimes(2);
+			expect(screen.getByText("654321")).toBeInTheDocument();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("stops polling entirely on TOTP_NOT_CONFIGURED (permanent)", async () => {
+		vi.useFakeTimers();
+		try {
+			totpCode.mockRejectedValue({
+				InvalidInput: { code: "TOTP_NOT_CONFIGURED", message: "no secret" },
+			});
+			const { container } = render(<TotpCode entryId="entry-1" />);
+
+			await act(async () => {});
+			await act(async () => {
+				vi.advanceTimersByTime(60000);
+			});
+			await act(async () => {});
+			expect(totpCode).toHaveBeenCalledOnce();
+			expect(container).toBeEmptyDOMElement();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

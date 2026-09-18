@@ -15,12 +15,19 @@ import {
 } from '../vault';
 import type { VaultBackup } from '../../types';
 
+// Tauri injects __TAURI_INTERNALS__ onto window at runtime; this narrow
+// augmentation replaces the previous `(window as any)` casts.
+type TauriInternalsWindow = Window & {
+  __TAURI_INTERNALS__?: Record<string, unknown>;
+};
+const asTauriWindow = (): TauriInternalsWindow => window as TauriInternalsWindow;
+
 describe('vault API client', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
     // Default: no Tauri environment
-    delete (window as any).__TAURI_INTERNALS__;
+    delete asTauriWindow().__TAURI_INTERNALS__;
   });
 
   describe('non-Tauri environment', () => {
@@ -36,7 +43,7 @@ describe('vault API client', () => {
 
   describe('Tauri environment', () => {
     it('should call tauriInvoke when __TAURI_INTERNALS__ is set', async () => {
-      (window as any).__TAURI_INTERNALS__ = {};
+      asTauriWindow().__TAURI_INTERNALS__ = {};
 
       const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
       (tauriInvoke as ReturnType<typeof vi.fn>).mockResolvedValue(true);
@@ -48,7 +55,7 @@ describe('vault API client', () => {
     });
 
     it('should pass args to tauriInvoke', async () => {
-      (window as any).__TAURI_INTERNALS__ = {};
+      asTauriWindow().__TAURI_INTERNALS__ = {};
 
       const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
       (tauriInvoke as ReturnType<typeof vi.fn>).mockResolvedValue(true);
@@ -59,7 +66,7 @@ describe('vault API client', () => {
     });
 
     it('uses Tauri camelCase argument names for backup commands', async () => {
-      (window as any).__TAURI_INTERNALS__ = {};
+      asTauriWindow().__TAURI_INTERNALS__ = {};
 
       const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
       (tauriInvoke as ReturnType<typeof vi.fn>).mockResolvedValue({});

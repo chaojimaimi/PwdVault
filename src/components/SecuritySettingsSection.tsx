@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
 	biometricStatus,
 	changePassword,
@@ -79,7 +79,10 @@ export function SecuritySettingsSection() {
 	const [recoveryDisablePassword, setRecoveryDisablePassword] = useState("");
 	const [recoveryError, setRecoveryError] = useState<string | null>(null);
 
-	const refreshStatuses = async () => {
+	// H4: stable via useCallback — the mount effect below depends on it. A
+	// fresh function per render plus the fresh objects biometricStatus()
+	// returns would otherwise risk re-probing loops once this lands in deps.
+	const refreshStatuses = useCallback(async () => {
 		try {
 			const [bio, recovery] = await Promise.all([
 				biometricStatus(),
@@ -90,13 +93,13 @@ export function SecuritySettingsSection() {
 		} catch {
 			/* keep last known state; probes are non-critical */
 		}
-	};
+	}, []);
 
-	// Probe once on mount (the setter callbacks are stable; refreshStatuses
-	// only reads them).
+	// Probe once on mount (refreshStatuses is a stable useCallback; the API
+	// functions and both setters it closes over are module/stable refs).
 	useEffect(() => {
 		void refreshStatuses();
-	}, []);
+	}, [refreshStatuses]);
 
 	const handleChangePassword = async () => {
 		if (busy) return;

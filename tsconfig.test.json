@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  // M13: type-check the test files too. The main tsconfig excludes tests
+  // (vite build must not type them); extends inherits that exclude, so an
+  // explicit empty exclude is REQUIRED to override it (TS does not merge
+  // include/exclude from parent and child).
+  "include": ["src"],
+  "exclude": [],
+  "compilerOptions": {
+    "types": ["vitest/globals", "node"]
+  }
+}

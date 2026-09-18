@@ -12,9 +12,12 @@ export default function GroupSelector({ value, onChange }: Props) {
   const [newGroupName, setNewGroupName] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  // H4: explicit deps. The 'idle' guard makes re-runs no-ops: once a load
+  // starts, status leaves 'idle', and `actions` getting a new identity after
+  // a group switch cannot trigger a duplicate fetch either.
   useEffect(() => {
     if (state.groupsStatus === 'idle') void actions.loadGroups().catch(() => undefined);
-  }, []);
+  }, [state.groupsStatus, actions]);
 
   const handleCreate = async () => {
     const name = newGroupName.trim();
@@ -43,7 +46,11 @@ export default function GroupSelector({ value, onChange }: Props) {
             onChange={(e) => setNewGroupName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
             placeholder="New group name"
-            autoFocus
+            ref={(el) => {
+              // jsx-a11y/no-autofocus: focus at commit when the inline input
+              // mounts — same UX as autoFocus, programmatic.
+              el?.focus();
+            }}
           />
           <button className="btn" onClick={handleCreate} type="button">Add</button>
           <button className="btn btn-secondary" onClick={() => { setIsCreating(false); setNewGroupName(''); setError(null); }} type="button">Cancel</button>

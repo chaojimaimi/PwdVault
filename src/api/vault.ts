@@ -1,9 +1,10 @@
 import type { CreateEntryRequest, UpdateEntryRequest, EntrySecretResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, Group, BiometricStatus, SyncConfig, SyncStatusResponse, TotpCodeResponse, BaiduAuthStart } from '../types';
+import { isTauriEnvironment } from '../utils/environment';
 
 // Unified invoke function that works in both Tauri and browser environments
-async function invoke<T>(cmd: string, args?: Record<string, any>): Promise<T> {
+async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   // Check if running in Tauri environment
-  if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+  if (isTauriEnvironment()) {
     const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
     return tauriInvoke(cmd, args);
   }

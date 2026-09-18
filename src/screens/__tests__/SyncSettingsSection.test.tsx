@@ -1,10 +1,16 @@
-import React from "react";
 import { render, fireEvent, screen, waitFor } from "@testing-library/react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 
 const showToast = vi.fn();
 
 vi.mock("../../utils/toast", () => ({ showToast }));
+
+const loadEntries = vi.fn();
+const loadGroups = vi.fn();
+
+vi.mock("../../context/VaultContext", () => ({
+	useVault: () => ({ actions: { loadEntries, loadGroups } }),
+}));
 
 const syncStatus = vi.fn();
 const syncConnect = vi.fn();
@@ -32,6 +38,8 @@ beforeEach(() => {
 		last_result: null,
 		remote_rev: null,
 	});
+	loadEntries.mockResolvedValue(undefined);
+	loadGroups.mockResolvedValue(undefined);
 });
 
 async function renderSection() {
@@ -293,6 +301,37 @@ describe("SyncSettingsSection connected state", () => {
 				expect.stringContaining("cloud unreachable"),
 			),
 		);
+		// Backend failure: no local refresh is attempted.
+		expect(loadEntries).not.toHaveBeenCalled();
+		expect(loadGroups).not.toHaveBeenCalled();
+	});
+
+	it("refreshes the vault lists after a successful sync", async () => {
+		syncNow.mockResolvedValue({ ...CONNECTED, remote_rev: 9 });
+		await renderSection();
+
+		fireEvent.click(await screen.findByRole("button", { name: "Sync Now" }));
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith("Sync completed"),
+		);
+		// H3: remote changes must show up without remounting the screen.
+		expect(loadEntries).toHaveBeenCalledOnce();
+		expect(loadGroups).toHaveBeenCalledOnce();
+	});
+
+	it("reports a failed local refresh after a successful sync", async () => {
+		syncNow.mockResolvedValue({ ...CONNECTED, remote_rev: 10 });
+		loadEntries.mockRejectedValue(new Error("reload boom"));
+		await renderSection();
+
+		fireEvent.click(await screen.findByRole("button", { name: "Sync Now" }));
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith(
+				"Sync completed, but local list refresh failed",
+			),
+		);
+		// The success toast must not fire alongside the refresh-failure toast.
+		expect(showToast).not.toHaveBeenCalledWith("Sync completed");
 	});
 
 	it("disconnects only after confirmation and returns to the bootstrap form", async () => {
