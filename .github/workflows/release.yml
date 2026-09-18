@@ -19,6 +19,8 @@ on:
 env:
   NODE_VERSION: '22'
   PNPM_VERSION: '11'
+  # Repo is public: the startup update check may query the Releases API.
+  VITE_UPDATE_CHECK_ENABLED: 'true'
 
 jobs:
   # ---------------------------------------------------------------------------

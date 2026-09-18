@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use crate::{AppState, UpdateInfo, VaultError};
 
-const UPDATE_URL: &str = "https://api.github.com/repos/chaojimaimi/PwdVault/releases/latest";
+const UPDATE_URL: &str = "https://api.github.com/repos/chaojimaimi/PwdVault/releases?per_page=5";
 const TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Response body cap for the update check (D5). The releases payload is a few
@@ -64,22 +64,51 @@ pub fn check_for_updates(state: &std::sync::Arc<AppState>) -> Result<UpdateInfo,
     let json: serde_json::Value = serde_json::from_str(&body)
         .map_err(|_| VaultError::InternalError("Invalid response".to_string()))?;
 
-    let tag_name = json["tag_name"]
-        .as_str()
-        .unwrap_or("")
-        .trim_start_matches('v');
+    let latest = pick_latest_release(&json)
+        .ok_or_else(|| VaultError::InternalError("No parseable release found".to_string()))?;
 
     let current_ver = semver::Version::parse(current)
         .map_err(|e| VaultError::InternalError(format!("Invalid current version: {}", e)))?;
-    let latest_ver = semver::Version::parse(tag_name)
-        .map_err(|e| VaultError::InternalError(format!("Invalid remote version: {}", e)))?;
 
     Ok(UpdateInfo {
-        has_update: latest_ver > current_ver,
-        latest_version: tag_name.to_string(),
-        release_notes: json["body"].as_str().unwrap_or("").to_string(),
-        download_url: json["html_url"].as_str().unwrap_or("").to_string(),
+        has_update: latest.version > current_ver,
+        latest_version: latest.version.to_string(),
+        release_notes: latest.notes,
+        download_url: latest.url,
     })
+}
+
+/// Pick the highest-semver release from the releases list payload.
+///
+/// Uses the LIST endpoint instead of `releases/latest`: CI publishes every
+/// build as a prerelease while unsigned (the §5.6.6 #8 policy), and the
+/// latest-release endpoint hides prereleases — it would forever point at an
+/// old full release. Parsing the list and taking the max semver tag works
+/// regardless of the prerelease flag.
+fn pick_latest_release(json: &serde_json::Value) -> Option<LatestRelease> {
+    let mut best: Option<(semver::Version, LatestRelease)> = None;
+    for entry in json.as_array()? {
+        let tag = entry["tag_name"].as_str()?.trim_start_matches('v');
+        let Ok(version) = semver::Version::parse(tag) else {
+            continue; // skip non-semver tags instead of failing the check
+        };
+        let candidate = LatestRelease {
+            version: version.clone(),
+            notes: entry["body"].as_str().unwrap_or("").to_string(),
+            url: entry["html_url"].as_str().unwrap_or("").to_string(),
+        };
+        best = match &best {
+            Some((best_version, _)) if *best_version >= version => best,
+            _ => Some((version, candidate)),
+        };
+    }
+    best.map(|(_, release)| release)
+}
+
+struct LatestRelease {
+    version: semver::Version,
+    notes: String,
+    url: String,
 }
 
 /// Mark the in-flight update check (if any) as cancelled.
@@ -101,5 +130,51 @@ fn no_update(current: &str) -> UpdateInfo {
         latest_version: current.to_string(),
         release_notes: String::new(),
         download_url: String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The releases LIST endpoint answers with an array; the checker must
+    /// take the highest semver tag regardless of order, skip non-semver
+    /// entries, and compare against the running version.
+    #[test]
+    fn pick_latest_takes_max_semver_and_skips_unparsable() {
+        let json: serde_json::Value = serde_json::from_str(
+            r#"[
+            {"tag_name": "v1.0.2", "body": "old full release", "html_url": "u1"},
+            {"tag_name": "not-a-version", "body": "", "html_url": "u2"},
+            {"tag_name": "v1.1.6", "body": "prerelease notes", "html_url": "u3"},
+            {"tag_name": "v1.1.5", "body": "", "html_url": "u4"}
+        ]"#,
+        )
+        .unwrap();
+        let latest = pick_latest_release(&json).unwrap();
+        assert_eq!(latest.version, semver::Version::new(1, 1, 6));
+        assert_eq!(latest.notes, "prerelease notes");
+        assert_eq!(latest.url, "u3");
+    }
+
+    #[test]
+    fn pick_latest_returns_none_on_garbage() {
+        assert!(pick_latest_release(&serde_json::json!([])).is_none());
+        assert!(pick_latest_release(&serde_json::json!({"tag_name": "v1.0.0"})).is_none());
+        let all_garbage: serde_json::Value =
+            serde_json::from_str(r#"[{"tag_name": "nope"}]"#).unwrap();
+        assert!(pick_latest_release(&all_garbage).is_none());
+    }
+
+    /// Pin the comparison semantics the checker depends on: semver compares
+    /// patch/minor numerically (a plain string sort would put "1.1.6" above
+    /// "1.1.10" — the classic bug this must never regress into).
+    #[test]
+    fn version_comparison_is_numeric_not_lexicographic() {
+        let current = semver::Version::parse("1.1.6").unwrap();
+        let newer_patch = semver::Version::parse("1.1.10").unwrap();
+        let newer_minor = semver::Version::parse("1.2.0").unwrap();
+        assert!(newer_patch > current, "1.1.10 > 1.1.6 numerically");
+        assert!(newer_minor > current);
     }
 }

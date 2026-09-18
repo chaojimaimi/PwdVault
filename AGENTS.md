@@ -3,7 +3,7 @@
 A secure, local-first password manager built with Tauri + React.
 
 **Last Updated**: 2026-09-17
-**Repository**: https://github.com/chaojimaimi/PwdVault (Private)
+**Repository**: https://github.com/chaojimaimi/PwdVault (Public)
 **Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.1.6
 **Current Version**: `v1.1.6` — 2026-09 audit fixes + Phase 0 hardening + Phase 1 key infrastructure (master password change / Touch ID / recovery key) + Phase 2-3 (soft delete, TOTP, cloud sync over WebDAV & Baidu Netdisk)
 **Current Branch**: `main`
