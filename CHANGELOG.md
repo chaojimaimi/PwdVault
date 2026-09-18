@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.7] - 2026-09-18
+
+### Added
+
+- In-app automatic updates: the app now checks a signed update feed on
+  startup (when "Check for updates" is enabled), shows a banner with
+  download progress, and installs the new version after signature
+  verification — no manual download required. Update packages are minisign
+  signed in CI; the public key ships inside the app (see
+  docs/UPDATER-KEYS.md).
+- WebDAV/Baidu sync: first-release bootstrap now creates the remote
+  directory automatically and the updater feed is published with every
+  release.
+- Behavior note: 1.1.6 clients do not have the updater — update this one
+  time by installing 1.1.7 manually; from 1.1.8 on, updates arrive in-app.
+
+### Fixed
+
+- Sync: the first-ever Connect no longer fails with
+  SYNC_CREDENTIALS_MISSING (the WebDAV password is persisted before the
+  backend is resolved).
+- Sync: WebDAV servers that answer 409 (missing ancestor collection —
+  Nutstore/jianguoyun) on the first status probe no longer abort the
+  initial connect.
+- Touch ID setup no longer fails with -34018 on unsigned local builds
+  (legacy login-keychain fallback with the same biometric access control).
+- clippy on the latest stable toolchain (drop_non_drop, unused imports in
+  split test modules).
+
 ## [1.1.6] - 2026-09-16
 
 ### Added

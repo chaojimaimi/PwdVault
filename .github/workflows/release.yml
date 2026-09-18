@@ -394,26 +394,6 @@ jobs:
           echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           echo "version_clean=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      # Phase AU: build the signed updater feed from the downloaded artifacts
-      # and commit it to main so raw.githubusercontent.com serves it (D1.1).
-      # The script only includes platforms that produced a .sig file.
-      - name: Generate updater feed (latest.json)
-        run: |
-          node scripts/generate-latest-json.mjs \
-            --artifacts artifacts \
-            --version "${{ steps.version.outputs.version_clean }}" \
-            --output dist/latest.json
-
-      - name: Commit updater feed to main
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          node scripts/generate-latest-json.mjs \
-            --artifacts artifacts \
-            --version "${{ steps.version.outputs.version_clean }}" \
-            --output dist/latest.json \
-            --commit
-
       - name: Determine prerelease status
         id: prerelease
         run: |
@@ -452,4 +432,25 @@ jobs:
             artifacts/**/*.exe.sig
             artifacts/**/SHA256SUMS
             artifacts/**/*bom.cdx.json
-            dist/latest.json
+
+      # Phase AU: build the signed updater feed from the RELEASED assets and
+      # commit it to main so raw.githubusercontent.com serves it (D1.1/D1.3).
+      # Runs AFTER the release so the feed's asset URLs resolve immediately;
+      # a feed commit failure only delays the feed, never blocks the release.
+      # The script only includes platforms that produced a .sig file.
+      - name: Generate updater feed (latest.json)
+        run: |
+          node scripts/generate-latest-json.mjs \
+            --artifacts artifacts \
+            --version "${{ steps.version.outputs.version_clean }}" \
+            --output dist/latest.json
+
+      - name: Commit updater feed to main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/generate-latest-json.mjs \
+            --artifacts artifacts \
+            --version "${{ steps.version.outputs.version_clean }}" \
+            --output dist/latest.json \
+            --commit

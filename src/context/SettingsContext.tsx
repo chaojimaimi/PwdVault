@@ -80,7 +80,6 @@ export interface SettingsContextValue {
   actions: {
     loadSettings: () => Promise<void>;
     updateSettings: (settings: Settings) => Promise<void>;
-    checkForUpdates: () => Promise<void>;
     installUpdate: () => Promise<void>;
     relaunchApp: () => Promise<void>;
     dismissUpdate: () => void;
@@ -174,26 +173,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'SET_RESOURCE', payload: { status: 'success' } });
       } catch (error) {
         throw error;
-      }
-    },
-
-    checkForUpdates: async () => {
-      try {
-        const update = await check({ timeout: UPDATE_CHECK_TIMEOUT_MS });
-        if (!update) {
-          dispatch({ type: 'SET_UPDATE', payload: null });
-          return;
-        }
-        const dismissed = localStorage.getItem(DISMISSED_UPDATE_KEY);
-        if (dismissed === update.version) {
-          void update.close().catch(() => {});
-          dispatch({ type: 'SET_UPDATE', payload: null });
-          return;
-        }
-        updateRef.current = update;
-        dispatch({ type: 'SET_UPDATE', payload: { version: update.version } });
-      } catch {
-        /* silent degradation — same semantics as the startup check */
       }
     },
 
