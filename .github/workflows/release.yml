@@ -20,12 +20,19 @@ env:
   NODE_VERSION: '22'
   PNPM_VERSION: '11'
 
+# M8 least privilege: the default is no permissions at all; each job grants
+# the single scope it needs. provenance/create-release keep their explicit
+# (broader) blocks — they are the only jobs that write.
+permissions: {}
+
 jobs:
   # ---------------------------------------------------------------------------
   # Release gate: quality + version consistency must pass
   # ---------------------------------------------------------------------------
   release-gate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -43,8 +50,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: TypeScript type-check
-        run: pnpm tsc --noEmit
+      - name: TypeScript type-check (app + tests)
+        run: pnpm typecheck
       - name: ESLint
         run: pnpm lint
       - name: Frontend tests
@@ -105,6 +112,8 @@ jobs:
   build-macos:
     needs: release-gate
     runs-on: macos-latest
+    permissions:
+      contents: read
     outputs:
       signing-status: ${{ steps.secrets.outputs.macos_certs }}
     steps:
@@ -184,6 +193,8 @@ jobs:
   build-windows:
     needs: release-gate
     runs-on: windows-latest
+    permissions:
+      contents: read
     outputs:
       signing-status: ${{ steps.secrets.outputs.windows_certs }}
     steps:
@@ -263,6 +274,8 @@ jobs:
   build-extension:
     needs: release-gate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -438,13 +451,9 @@ jobs:
       # Runs AFTER the release so the feed's asset URLs resolve immediately;
       # a feed commit failure only delays the feed, never blocks the release.
       # The script only includes platforms that produced a .sig file.
-      - name: Generate updater feed (latest.json)
-        run: |
-          node scripts/generate-latest-json.mjs \
-            --artifacts artifacts \
-            --version "${{ steps.version.outputs.version_clean }}" \
-            --output dist/latest.json
-
+      # (D8: an earlier generate-only step was removed — it produced the same
+      # dist/latest.json that this --commit run regenerates and nothing
+      # consumed the un-committed copy.)
       - name: Commit updater feed to main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

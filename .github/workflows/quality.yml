@@ -4,8 +4,9 @@ name: Quality Gates
 # These gates MUST pass before any stable release tag is accepted.
 #
 # Jobs:
-#   quality-frontend  — Node/pnpm pinned, tsc, vitest, ESLint
-#   quality-rust      — fmt, clippy -D warnings, test --locked (workspace)
+#   quality-frontend  — Node/pnpm pinned, tsc (app + tests), vitest, ESLint
+#   quality-rust      — fmt, clippy -D warnings, test --locked (workspace, Linux)
+#   quality-rust-windows — test --locked (workspace, Windows parity)
 #   quality-native-host — fmt, clippy, test (native host binary)
 #   quality-extension — deterministic Chrome/Firefox packages + strict Firefox lint
 #   security          — cargo deny, cargo audit, pnpm audit, gitleaks
@@ -21,6 +22,11 @@ concurrency:
   group: quality-${{ github.ref }}
   cancel-in-progress: true
 
+# M8 least privilege: the default is no permissions at all; every job then
+# grants the single scope it needs (read-only checkout). upload-artifact and
+# gitleaks work with the runtime token; none of these jobs write to the repo.
+permissions: {}
+
 # Pinned versions (§5.6.4): exact Node and pnpm major.minor to avoid
 # drift between CI runs.
 env:
@@ -33,6 +39,8 @@ jobs:
   # ---------------------------------------------------------------------------
   quality-frontend:
     runs-on: macos-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -41,8 +49,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: TypeScript type-check
-        run: pnpm tsc --noEmit
+      - name: TypeScript type-check (app + tests)
+        run: pnpm typecheck
       - name: ESLint
         run: pnpm lint
       - name: Frontend tests
@@ -53,6 +61,8 @@ jobs:
   # ---------------------------------------------------------------------------
   quality-rust:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install Linux system dependencies (Tauri GTK/webkit)
@@ -85,10 +95,45 @@ jobs:
         run: cargo test --workspace --locked
 
   # ---------------------------------------------------------------------------
+  # Rust workspace on Windows: platform parity for the test suite (D8).
+  # The release builds are produced on Windows; until this job existed, the
+  # workspace tests only ever ran on Linux/macOS.
+  # ---------------------------------------------------------------------------
+  quality-rust-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      # Pre-build the native messaging host so tauri-build's resource glob
+      # (binaries/pwdvault-native*) resolves. Same shape as release.yml's
+      # build-windows step — explicit bash shell with the .exe → no-ext copy
+      # fallback.
+      - name: Build native messaging host (placeholder for resource glob)
+        shell: bash
+        run: |
+          cd extensions/native-host
+          cargo build --release
+          mkdir -p ../../src-tauri/binaries
+          cp target/release/pwdvault-native.exe ../../src-tauri/binaries/ || \
+          cp target/release/pwdvault-native ../../src-tauri/binaries/
+
+      - name: Run tests
+        working-directory: src-tauri
+        run: cargo test --workspace --locked
+
+  # ---------------------------------------------------------------------------
   # Rust native host: fmt, clippy, test
   # ---------------------------------------------------------------------------
   quality-native-host:
     runs-on: macos-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
@@ -109,6 +154,8 @@ jobs:
   # be observed by the macOS/Linux unit-test jobs.
   quality-native-host-windows:
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
@@ -149,6 +196,8 @@ jobs:
   # ---------------------------------------------------------------------------
   quality-extension:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -170,6 +219,8 @@ jobs:
   # ---------------------------------------------------------------------------
   security:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       # Full history so gitleaks' push-range scan (before^..after) can resolve
       # the base revision in the shallow-checkout runner.
@@ -220,6 +271,8 @@ jobs:
   # ---------------------------------------------------------------------------
   version-consistency:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Check version consistency
