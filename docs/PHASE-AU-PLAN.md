@@ -1,7 +1,7 @@
 # Phase AU 实施方案：应用内自动更新（tauri-plugin-updater v1.1.7）
 
 > 依据：仓库已转 Public、签名密钥对已生成（`~/.pwdvault/updater.key`，**带密码保护**），
-> `TAURI_SIGNING_PRIVATE_KEY` 已存入 GitHub Secrets（`TAURI_SIGNING_PRIVATE_PASSWORD`
+> `TAURI_SIGNING_PRIVATE_KEY` 已存入 GitHub Secrets（`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 > 由用户本人设置，密码不过第三方）。目标版本 v1.1.7。
 > 流程：本方案 → plan-reviewer → ds-worker（单批）→ code-review 门。
 
@@ -26,15 +26,15 @@ API** 提交回 main——不用 `releases/latest/download` 稳定重定向，�
 ### D1.2 签名与产物
 
 - `tauri.conf.json` 增加 `bundle.createUpdaterArtifacts: true`；构建步骤注入
-  `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_PASSWORD`（均来自
+  `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（均来自
   Secrets）→ 产出带 `.sig` 的更新产物：macOS `PwdVault.app.tar.gz(.sig)`、
   Windows `PwdVault_<ver>_x64-setup.exe(.sig)`。
 - `tauri.conf.json` 增加 `plugins.updater = { pubkey: "<内置公钥>",
 endpoints: ["https://raw.githubusercontent.com/chaojimaimi/PwdVault/main/latest.json"] }`。
   公钥（base64，已从 `updater.key.pub` 取得）：
   `dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM2NEI2MUFFRTRENjFDRkEKUldUNkhOYmtybUZMeHMyZFEvUTV5bnRjVXMxVGdidkozSzhkY0hHcm1Na1hWK3FxdHB5KzhWdVIK`
-- Secrets 已就位：`TAURI_SIGNING_PRIVATE_KEY` ✓；`TAURI_SIGNING_PRIVATE_PASSWORD`
-  **由用户本人执行 `gh secret set TAURI_SIGNING_PRIVATE_PASSWORD`（交互输入）**——
+- Secrets 已就位：`TAURI_SIGNING_PRIVATE_KEY` ✓；`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+  **由用户本人执行 `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（交互输入）**——
   批 1 开工的前置条件（密钥带密码保护，已实测验证；此前误设的空密码 Secret 已删除）。
 - **CI 上传链修补（评审 P0，关键）**：现有 glob 不覆盖 updater 产物——必须：
   - build-macos 的 upload-artifact 增加 `bundle/macos/*.app.tar.gz` 与
@@ -137,7 +137,7 @@ endpoints: ["https://raw.githubusercontent.com/chaojimaimi/PwdVault/main/latest.
    注释显示 main 有保护规则；若含"require PR"则直推被 403 拒绝——fallback：
    feed 改放不受保护的 `gh-pages` 分支或独立 feed 仓库，raw 路径同步调整，
    评审 P1-3）；`gh secret list` 断言
-   `TAURI_SIGNING_PRIVATE_PASSWORD` 已由用户设置。
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 已由用户设置。
 1. **配置**：tauri.conf.json（createUpdaterArtifacts、plugins.updater pubkey +
    endpoints）；capabilities 加 `updater:default` 与 `process:allow-restart`；
    Cargo 加 tauri-plugin-updater + tauri-plugin-process；前端

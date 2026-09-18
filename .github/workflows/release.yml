@@ -150,7 +150,7 @@ jobs:
           # without it the build fails instead of silently shipping unsigned
           # updater artifacts.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Notarize app
         if: steps.secrets.outputs.macos_certs == 'true'
@@ -225,7 +225,7 @@ jobs:
         env:
           # Phase AU: bundle.createUpdaterArtifacts requires the minisign key.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       # Windows code signing — TODO: uncomment when WINDOWS_CERTIFICATE secret
       # is provisioned. The action reference was removed because the original

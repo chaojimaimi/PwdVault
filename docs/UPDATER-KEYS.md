@@ -20,7 +20,7 @@ latest.json                      （feed：平台 → {signature, url}，经 Con
 ```
 
 - **私钥**：`~/.pwdvault/updater.key`，由 `tauri signer generate` 生成，带密码保护。
-  密码由用户本人交互式存入 `TAURI_SIGNING_PRIVATE_PASSWORD` Secret（不经任何第三方，
+  密码由用户本人交互式存入 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Secret（不经任何第三方，
   包括 AI 工具）。**私钥本体永不入库、永不进 CI 日志**——CI 只经 Secrets 注入环境变量。
 - **公钥**：base64 一行，写死在 `src-tauri/tauri.conf.json` 的
   `plugins.updater.pubkey`。随应用分发，换钥 = 发新版（见第 3 节）。
@@ -38,7 +38,7 @@ cat ~/.pwdvault/updater.key.pub
 
 # 私钥存入 GitHub Secrets（value 走交互 stdin，勿放命令行参数）
 gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.pwdvault/updater.key
-gh secret set TAURI_SIGNING_PRIVATE_PASSWORD   # 交互输入密码
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD   # 交互输入密码
 
 # 验证
 gh secret list   # 应同时看到 KEY 与 PASSWORD 两项
@@ -57,7 +57,7 @@ gh secret list   # 应同时看到 KEY 与 PASSWORD 两项
 公钥随应用二进制分发，**新旧公钥无法热切换**，轮换必须发一个“过渡版本”：
 
 1. `pnpm tauri signer generate -w ~/.pwdvault/updater.key.new`（新密码）。
-2. 更新 Secrets：覆盖 `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_PASSWORD`
+2. 更新 Secrets：覆盖 `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
    为新钥；`tauri.conf.json` 的 `pubkey` 换成新公钥。
 3. 发过渡版本 vX.Y.Z（内置新公钥），**发布说明注明“须手动下载安装”**——
    旧版用户内置的是旧公钥，无法验签新 feed，最后一次必须手动升级。
