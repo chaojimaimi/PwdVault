@@ -2,10 +2,10 @@
 
 A secure, local-first password manager built with Tauri + React.
 
-**Last Updated**: 2026-09-17
+**Last Updated**: 2026-09-18
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.1.6
-**Current Version**: `v1.1.6` — 2026-09 audit fixes + Phase 0 hardening + Phase 1 key infrastructure (master password change / Touch ID / recovery key) + Phase 2-3 (soft delete, TOTP, cloud sync over WebDAV & Baidu Netdisk)
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.1.7
+**Current Version**: `v1.1.7` — 2026-09 audit fixes + Phase 0 hardening + Phase 1 key infrastructure (master password change / Touch ID / recovery key) + Phase 2-3 (soft delete, TOTP, cloud sync over WebDAV & Baidu Netdisk) + P3 quick-win batch (repo/doc hygiene, extension & frontend fixes, Rust cleanup)
 **Current Branch**: `main`
 
 ---
@@ -182,18 +182,18 @@ PwdVault/
 ### v0.1.0 Release (2026-03-27)
 - Initial release: Tauri v2 + React 5 screens, AES-256-GCM + Argon2id, redb, HTTP API, Chrome extension, CI/CD
 
-**Test Suite Summary** (counts from actual test output, 2026-09-15):
+**Test Suite Summary** (counts from actual test output, 2026-09-18):
 
 | Module | Tests | Command |
 |--------|-------|---------|
 | Rust tauri-app lib | 28 | `cd src-tauri && cargo test` |
 | Rust capability contract | 1 | (same run) |
 | Rust golden contract | 2 | (same run) |
-| Rust application crate | 35 | `cd src-tauri && cargo test --workspace` |
-| Rust infrastructure crate | 51 | (same run) |
+| Rust application crate | 135 | `cd src-tauri && cargo test --workspace` |
+| Rust infrastructure crate | 101 | (same run) |
 | Rust domain crate | 4 | (same run) |
 | Rust native-host | 19 | `cd extensions/native-host && cargo test` |
-| Frontend (total) | 137 (38 files) | `pnpm test` |
+| Frontend (total) | 237 (46 files) | `pnpm test` |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.

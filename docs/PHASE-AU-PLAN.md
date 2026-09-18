@@ -33,6 +33,9 @@ API** 提交回 main——不用 `releases/latest/download` 稳定重定向，�
 endpoints: ["https://raw.githubusercontent.com/chaojimaimi/PwdVault/main/latest.json"] }`。
   公钥（base64，已从 `updater.key.pub` 取得）：
   `dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM2NEI2MUFFRTRENjFDRkEKUldUNkhOYmtybUZMeHMyZFEvUTV5bnRjVXMxVGdidkozSzhkY0hHcm1Na1hWK3FxdHB5KzhWdVIK`
+  **（已作废：这是早期空密码保护、事后已轮换的密钥，仅作历史记录保留。
+  现行 updater 公钥以 `src-tauri/tauri.conf.json` 的
+  `plugins.updater.pubkey` 为准，勿引用上面的 blob。）**
 - Secrets 已就位：`TAURI_SIGNING_PRIVATE_KEY` ✓；`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
   **由用户本人执行 `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（交互输入）**——
   批 1 开工的前置条件（密钥带密码保护，已实测验证；此前误设的空密码 Secret 已删除）。

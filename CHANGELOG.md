@@ -4,6 +4,57 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Changed
+
+- WebDAV sync now requires `https://`. Plain-http server URLs are rejected
+  when connecting a new server ("WebDAV server URL must use https:// — plain
+  http would expose your cloud-drive password"), and an already-persisted
+  http configuration fails on the next sync with the same guidance: open
+  Settings → Sync and update the server URL to its https form.
+- Windows: cloud-sync credentials (the WebDAV password and the Baidu token)
+  are now encrypted at rest with Windows DPAPI. Entries in the credential
+  file are stored as `dpapi1:`-prefixed blobs instead of plain base64; the
+  first credential write after updating re-encrypts the whole file.
+
+### Behavior notes / downgrade
+
+- A credential file written by the new Windows version contains `dpapi1:`
+  entries that older versions cannot read: an old client reports the sync
+  credentials as unavailable/corrupt ("encrypted by the Windows version").
+  Run matching (current) versions on all installations that share a synced
+  vault profile. Conversely, files written on Windows stay readable on
+  Linux: reading one is refused per credential, and rewriting a credential
+  preserves the Windows-encrypted entries untouched.
+
+### Added (P2 hardening batch)
+
+- React hooks linting (react-hooks rules-of-hooks=error / exhaustive-deps=warn)
+  and jsx-a11y recommended rules are now enforced in ESLint; the dependency-
+  array gaps they surfaced were fixed (VaultScreen / GroupManager / Generator
+  mount effects via a latestRef pattern, GroupSelector explicit deps, Security
+  status probe stabilized with useCallback), and six `autoFocus` props were
+  converted to equivalent programmatic focus.
+- Clipboard auto-clear now uses the Tauri clipboard plugin inside the desktop
+  app (works while the window is unfocused), and a failed scheduled clear is
+  retried once and then surfaced via a one-time toast instead of failing
+  silently. Capabilities grant only `clipboard-manager:allow-write-text` /
+  `allow-read-text`.
+- CI: least-privilege `permissions` blocks across quality.yml and release.yml
+  (read-only for all build/test jobs; release-writing jobs keep their scopes),
+  CodeQL results are uploaded to code scanning again, the workspace test suite
+  runs on Windows in CI (new `quality-rust-windows` job), and a dead
+  generate-only updater-feed step was removed from the release pipeline.
+- Frontend: `VaultError` TS type regenerated from the full 22-variant Rust
+  enum, `isVaultError` type guard added, rate-limit rejections surface as
+  "Too many attempts — retry in Ns".
+- Browser extension: the context-menu (right-click) actions no longer fail
+  silently — the vault-locked state, a missing entry, and unreachable pages
+  now give on-page feedback or a service-worker warning.
+- Test files are type-checked (`pnpm typecheck` covers app and tests; CI uses
+  the chained script).
+
 ## [1.1.7] - 2026-09-18
 
 ### Added

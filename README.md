@@ -142,7 +142,7 @@ cd extensions/native-host && cargo test --locked
 ### Version Bump
 
 ```bash
-./scripts/bump-version.sh 1.1.6 --changelog
+./scripts/bump-version.sh 1.1.7 --changelog
 ```
 
 ## Tech Stack
@@ -159,7 +159,7 @@ cd extensions/native-host && cargo test --locked
 
 ## Project Status
 
-v1.1.6. See [CHANGELOG.md](CHANGELOG.md) for details.
+v1.1.7. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ### Roadmap
 

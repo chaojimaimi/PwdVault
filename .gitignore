@@ -45,6 +45,8 @@ vault.db
 /releases/PwdVault-*-Extension-*/
 /releases/pwdvault-native-*/
 /releases/pairing-toast-*.html
+# Checksum manifests for local release artifacts
+/releases/SHA256SUMS*
 # Release bundles and expanded subdirectories (any versioned subfolder)
 /releases/*/
 /releases/**/*.zip
