@@ -171,7 +171,11 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
+      # Full history so gitleaks' push-range scan (before^..after) can resolve
+      # the base revision in the shallow-checkout runner.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       # cargo-deny: advisories (RUSTSEC allowlist in deny.toml) + licenses
