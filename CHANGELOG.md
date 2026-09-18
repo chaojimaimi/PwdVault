@@ -4,7 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [1.1.8] - 2026-09-19
+
+### Security
+
+- The three exclusive vault windows (cloud-sync merge, master-password
+  change, recovery-key reseal) are now mutually exclusive. Previously two
+  overlapping windows could interleave and either corrupt the integrity
+  digest (vault locked out until restore) or silently drop remotely merged
+  entries. Digest writes are now verified against the current digest before
+  refresh and fail closed on stale-key writes; a lock requested during a
+  window is never silently undone.
+- Browser extension: popup "Auto-fill" now verifies the entry's domain
+  against the active page (content-side, fail-closed) before injecting
+  credentials — an unrelated entry can no longer be filled into a lookalike
+  page from the popup. Context-menu and keyboard-shortcut fills are
+  unchanged.
+- Recovery-key and biometric wrap-key material is zeroized along all
+  handling paths (IPC boundary through key derivation).
 
 ### Changed
 
@@ -27,6 +44,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   vault profile. Conversely, files written on Windows stay readable on
   Linux: reading one is refused per credential, and rewriting a credential
   preserves the Windows-encrypted entries untouched.
+
+### Fixed
+
+- The unlock screen no longer masks a rate-limit lockout as "Invalid
+  password"; the backend lockout copy (with retry seconds) is shown.
+- The vault list now reloads after a completed cloud sync, so entries and
+  groups pulled from another device are visible without relocking.
+- The extension register-form detection honors `autocomplete="new-password"`
+  as a hard signal, and the popup password-strength meter now uses the same
+  algorithm as the desktop app.
+- TOTP codes no longer get stuck when a code fetch fails (retry with
+  backoff; polling stops for not-configured entries), and the TOTP secret
+  field is masked with a reveal toggle.
+- Miscellaneous: unanchored `www.` stripping in the extension, popup toast
+  timer race, pairing failures now show connection-specific guidance,
+  quick-create generator honors the configured default length, group
+  manager reload errors are handled, group rename input and tabs are
+  labeled for screen readers.
 
 ### Added (P2 hardening batch)
 
