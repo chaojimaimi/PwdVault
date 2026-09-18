@@ -174,27 +174,47 @@ pub fn verify_master_and_integrity(
     Ok((enc_key, mac_key))
 }
 
-/// Publish verified keys and run the unlock side effects (steps 8-9):
-/// session unlock, rate-limit reset, auto-lock timeout application, menu and
-/// activity refresh. Must only be called after verification succeeded.
+/// Publish verified keys and run the unlock side effects unconditionally
+/// (steps 8-9 — the plain unlock path). See [`complete_unlock_if`] for the
+/// gated form used inside D8 windows.
 pub fn complete_unlock(
     state: &Arc<AppState>,
     enc_key: SecretKey,
     mac_key: SecretKey,
 ) -> Result<(), VaultError> {
+    complete_unlock_if(state, enc_key, mac_key, |_| true).map(|_| ())
+}
+
+/// [`complete_unlock`] with a publish predicate (fix plan A §2.3).
+///
+/// The predicate is evaluated in the SAME critical section as the state
+/// flip (under the session write lock, immediately before it — no
+/// check/publish gap) and receives the live session generation. When it
+/// declines, the session is left untouched and NONE of the side effects run
+/// (review P3-3: menu text, rate limit and timeout must never contradict a
+/// lock that fired mid-window). Returns whether the publish happened.
+pub fn complete_unlock_if(
+    state: &Arc<AppState>,
+    enc_key: SecretKey,
+    mac_key: SecretKey,
+    predicate: impl FnOnce(u64) -> bool,
+) -> Result<bool, VaultError> {
     // Load settings BEFORE publishing so a failure leaves the vault Locked.
     let db = get_db(state)?;
     let settings = load_settings(&db)?;
 
     // Step 8: atomically publish — THE LAST STEP.
-    state.session.unlock(enc_key, mac_key);
+    let published = state.session.unlock_if(enc_key, mac_key, predicate);
+    if !published {
+        return Ok(false);
+    }
 
-    // Step 9: side effects.
+    // Step 9: side effects — only on the publish-success branch.
     reset_rate_limit(state);
     *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
     state.touch_activity();
     state.update_lock_menu("Lock Vault");
-    Ok(())
+    Ok(true)
 }
 
 /// Reject vaults that predate the AEAD header or have integrity enforcement
@@ -283,8 +303,12 @@ fn reencrypt_entry_inner(
 /// plaintext path, unlike `migrate_database`), re-encrypts inner secret
 /// fields, then replaces entries, groups, the verification row, the header
 /// (same version/integrity flags, re-sealed with `new_enc`) and applies
-/// `rewraps` in a single `VaultStore::write` transaction so the digest is
+/// `rewraps` in a single `VaultStore::write_rekey` transaction so the digest is
 /// refreshed atomically with the content.
+///
+/// `old_mac` (fix plan A §2.2) keys the digest PRE-verification: the stored
+/// digest is still sealed under the OLD mac until this very transaction
+/// commits, so verifying under `new_mac` would false-positive.
 ///
 /// D2 inheritance: a stored `sync_cek` row (the sync container key, wrapped
 /// under the session enc subkey) is re-wrapped here as well — `load_blob →
@@ -295,6 +319,7 @@ fn reencrypt_entry_inner(
 pub(super) fn reseal_vault(
     db: &Arc<redb::Database>,
     old_enc: &SecretKey,
+    old_mac: &[u8; 32],
     new_enc: &SecretKey,
     new_mac: &SecretKey,
     new_verification: &VerificationData,
@@ -336,9 +361,11 @@ pub(super) fn reseal_vault(
             VaultError::InternalError("vault header vanished during re-seal".to_string())
         })?;
 
-    // --- Single transaction: everything or nothing. ---
+    // --- Single transaction: everything or nothing. The rekey variant
+    // verifies the pre-existing digest under the OLD mac and refreshes it
+    // under the NEW mac in the same transaction (fix plan A §2.2). ---
     let store = VaultStore::new(db);
-    store.write(new_mac.as_ref(), |txn| {
+    store.write_rekey(old_mac, new_mac.as_ref(), |txn| {
         {
             let mut t = txn.open_table(database::ENTRIES_TABLE)?;
             for id in &entry_ids {
@@ -423,10 +450,14 @@ pub(super) fn collect_rewraps(
     let mut rewraps = Vec::new();
 
     if let Some(blob) = vault_store::load_blob(db, BIO_WRAP_BLOB_KEY)? {
-        let wrap_key: [u8; 32] = match state.session.cached_wrap_key() {
+        // Prefer the session-cached wrap key; both sources hand the key over
+        // zeroized (session slot copy or keychain bytes wrapped on import).
+        let wrap_key: SecretKey = match state.session.cached_wrap_key() {
             Some(key) => key,
             None => match state.secret_store.get(BIO_WRAP_ACCOUNT) {
-                Ok(bytes) => bytes.try_into().map_err(|_| VaultError::WrapBlobCorrupt)?,
+                Ok(bytes) => {
+                    SecretKey::new(bytes.try_into().map_err(|_| VaultError::WrapBlobCorrupt)?)
+                }
                 Err(SecretStoreError::NotFound) => {
                     return Err(VaultError::KeychainError(
                         BIO_KEYCHAIN_MISSING_GUIDANCE.to_string(),
@@ -440,10 +471,10 @@ pub(super) fn collect_rewraps(
         // Prove the wrap key still matches the stored blob before replacing
         // it — a stale keychain item must abort the change, not strand an
         // undecryptable blob.
-        unwrap_secret(&wrap_key, &blob, WRAP_AAD_BIO)?;
+        unwrap_secret(wrap_key.as_ref(), &blob, WRAP_AAD_BIO)?;
         rewraps.push(BlobRewrite::Write {
             key: BIO_WRAP_BLOB_KEY,
-            blob: wrap_secret(&wrap_key, new_master, WRAP_AAD_BIO)?,
+            blob: wrap_secret(wrap_key.as_ref(), new_master, WRAP_AAD_BIO)?,
         });
     }
 
@@ -456,11 +487,11 @@ pub(super) fn collect_rewraps(
         })?;
         let wrap_key = recovery_wrap_key(paste)?;
         // Correctness proof: only the true recovery key opens the blob.
-        unwrap_secret(&wrap_key, &blob, WRAP_AAD_RECOVERY)
+        unwrap_secret(wrap_key.as_ref(), &blob, WRAP_AAD_RECOVERY)
             .map_err(|_| VaultError::RecoveryKeyInvalid)?;
         rewraps.push(BlobRewrite::Write {
             key: RECOVERY_WRAP_BLOB_KEY,
-            blob: wrap_secret(&wrap_key, new_master, WRAP_AAD_RECOVERY)?,
+            blob: wrap_secret(wrap_key.as_ref(), new_master, WRAP_AAD_RECOVERY)?,
         });
     }
 

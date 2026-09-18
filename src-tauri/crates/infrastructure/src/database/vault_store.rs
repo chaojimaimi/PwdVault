@@ -22,19 +22,50 @@ impl<'a> VaultStore<'a> {
 
     /// Execute a write operation with automatic digest refresh.
     ///
-    /// Opens a single write transaction, calls `f` to perform business
-    /// mutations (using the `_in_txn` helpers), then computes and stores
-    /// the integrity digest **within the same transaction**, and commits.
+    /// Opens a single write transaction, **pre-verifies the stored digest
+    /// under `mac_key`** (fix plan A §2.2 — a stale-key or interleaved write
+    /// is rejected with [`DatabaseError::IntegrityMismatch`] instead of
+    /// silently re-baselining the digest over content it cannot account
+    /// for), then calls `f` to perform business mutations (using the
+    /// `_in_txn` helpers), and computes and stores the integrity digest
+    /// **within the same transaction**, and commits.
     ///
-    /// If `f` or the digest computation returns an error, the transaction
-    /// is aborted (rolled back) — no partial state is committed.
+    /// If `f`, the pre-verification, or the digest computation returns an
+    /// error, the transaction is aborted (rolled back) — no partial state is
+    /// committed.
     pub fn write<F, R>(&self, mac_key: &[u8; 32], f: F) -> Result<R, DatabaseError>
     where
         F: FnOnce(&WriteTransaction) -> Result<R, DatabaseError>,
     {
         let txn = self.db.begin_write()?;
+        integrity::verify_digest_in_txn(&txn, mac_key)?;
         let result = f(&txn)?;
         integrity::refresh_digest_in_txn(&txn, mac_key)?;
+        txn.commit()?;
+        Ok(result)
+    }
+
+    /// Execute a key-rotating write — the D8 re-seal path (fix plan A §2.2).
+    ///
+    /// Identical to [`VaultStore::write`] except that the pre-existing digest
+    /// is verified under `old_mac` (the key the CURRENT digest was sealed
+    /// with) while the refresh after `f` uses `new_mac`. Verifying under
+    /// `new_mac` would false-positive: the stored digest stays keyed by
+    /// `old_mac` until this very transaction commits. Used by change
+    /// password / recovery, which rotate the whole vault in one transaction.
+    pub fn write_rekey<F, R>(
+        &self,
+        old_mac: &[u8; 32],
+        new_mac: &[u8; 32],
+        f: F,
+    ) -> Result<R, DatabaseError>
+    where
+        F: FnOnce(&WriteTransaction) -> Result<R, DatabaseError>,
+    {
+        let txn = self.db.begin_write()?;
+        integrity::verify_digest_in_txn(&txn, old_mac)?;
+        let result = f(&txn)?;
+        integrity::refresh_digest_in_txn(&txn, new_mac)?;
         txn.commit()?;
         Ok(result)
     }
@@ -289,5 +320,102 @@ mod tests {
         txn.commit().unwrap();
 
         assert!(!integrity::verify_integrity(&db, &TEST_MAC_KEY).unwrap());
+    }
+
+    // -----------------------------------------------------------------------
+    // Digest pre-verification (fix plan A §2.2)
+    // -----------------------------------------------------------------------
+
+    /// A write holding STALE keys must be rejected loudly instead of
+    /// silently re-baselining the digest over content it cannot account
+    /// for — and the failed write must leave the digest untouched.
+    #[test]
+    fn test_stale_mac_write_rejected_with_integrity_mismatch() {
+        let temp = NamedTempFile::new().unwrap();
+        let db = super::super::init_database(temp.path()).unwrap();
+        let store = VaultStore::new(&db);
+
+        let entry = PasswordEntry::new("Baseline".into(), None, "user".into());
+        store
+            .write(&TEST_MAC_KEY, |txn| {
+                save_entry_in_txn(txn, &TEST_KEY, &entry)?;
+                Ok(())
+            })
+            .unwrap();
+
+        let stale_mac = [3u8; 32];
+        let result: Result<(), DatabaseError> = store.write(&stale_mac, |_txn| Ok(()));
+        assert!(
+            matches!(result, Err(DatabaseError::IntegrityMismatch)),
+            "unexpected result: {result:?}"
+        );
+
+        // The rejected write did not re-baseline the digest: the REAL key
+        // still verifies and the stale key still does not.
+        assert!(integrity::verify_integrity(&db, &TEST_MAC_KEY).unwrap());
+        assert!(!integrity::verify_integrity(&db, &stale_mac).unwrap());
+    }
+
+    /// A freshly created database has no digest row yet — the FIRST write
+    /// must establish the baseline rather than fail the pre-check.
+    #[test]
+    fn test_fresh_database_first_write_establishes_digest() {
+        let temp = NamedTempFile::new().unwrap();
+        let db = super::super::init_database(temp.path()).unwrap();
+        assert!(!integrity::has_digest(&db).unwrap());
+
+        let store = VaultStore::new(&db);
+        let entry = PasswordEntry::new("First".into(), None, "user".into());
+        store
+            .write(&TEST_MAC_KEY, |txn| {
+                save_entry_in_txn(txn, &TEST_KEY, &entry)?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(integrity::has_digest(&db).unwrap());
+        assert!(integrity::verify_integrity(&db, &TEST_MAC_KEY).unwrap());
+    }
+
+    /// A stored digest whose VERSION is below the current one is a
+    /// pre-rebuild baseline (same semantics as `needs_digest_rebuild`):
+    /// the pre-check must SKIP it — even under a mismatching mac key —
+    /// instead of false-positiving legacy/migration flows, and the write
+    /// re-establishes a current-version digest.
+    #[test]
+    fn test_pre_v4_digest_row_skips_precheck() {
+        let temp = NamedTempFile::new().unwrap();
+        let db = super::super::init_database(temp.path()).unwrap();
+
+        // Forge a v3-era digest row: wrong bytes + an old version marker.
+        {
+            let txn = db.begin_write().unwrap();
+            {
+                let mut meta = txn.open_table(integrity::META_TABLE).unwrap();
+                meta.insert(integrity::DB_DIGEST_KEY, &[0xFFu8; 32].as_slice())
+                    .unwrap();
+                meta.insert(
+                    integrity::DB_DIGEST_VERSION_KEY,
+                    3u32.to_le_bytes().as_slice(),
+                )
+                .unwrap();
+            }
+            txn.commit().unwrap();
+        }
+        assert!(integrity::needs_digest_rebuild(&db).unwrap());
+
+        // Even a mac key that cannot match the forged digest passes, and
+        // the write replaces the row with a current-version baseline.
+        let legacy_mac = [9u8; 32];
+        let store = VaultStore::new(&db);
+        let entry = PasswordEntry::new("Migrated".into(), None, "user".into());
+        store
+            .write(&legacy_mac, |txn| {
+                save_entry_in_txn(txn, &TEST_KEY, &entry)?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(!integrity::needs_digest_rebuild(&db).unwrap());
+        assert!(integrity::verify_integrity(&db, &legacy_mac).unwrap());
     }
 }

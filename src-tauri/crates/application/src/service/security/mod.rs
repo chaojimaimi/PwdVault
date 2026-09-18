@@ -23,15 +23,27 @@
 //!    password, derive the new keys, and complete ALL credential-store
 //!    interaction (Touch ID prompts). Then take ONE lease to copy the old
 //!    enc/mac into local `SecretKey`s and release it immediately.
-//! 2. Call `session.exclusive_lock_and_clear()` — drains every in-flight
-//!    lease and rejects new ones (never called while holding a lease).
+//! 2. Capture `AppState::lock_epoch`, take the `AppState::exclusive_window`
+//!    mutex, then call `session.exclusive_lock_and_clear()` — drains every
+//!    in-flight lease and rejects new ones (never called while holding a
+//!    lease). Fix plan A: the epoch + mutex serialize ALL THREE D8 windows
+//!    (these re-seals and the sync merge window) from before the drain to
+//!    the final republish, and the epoch makes any mid-window manual/auto
+//!    lock win: the window's republish is skipped instead of silently
+//!    un-locking the vault. Lock order: `exclusive_window` -> session
+//!    internals; window functions never enter holding a lease and
+//!    `lock_vault` never takes the guard — no deadlock (reviewed).
 //! 3. Assert the session is still Locked (a concurrent password unlock in
 //!    between aborts the operation cleanly instead of mixing keys), read the
 //!    full vault with the old-key copy, and re-seal everything — new
 //!    verification row, re-encrypted header, re-wrapped blobs — in ONE
-//!    `VaultStore::write` transaction.
-//! 4. Success: republish the new keys exactly once. Failure: the transaction
-//!    rolls back (disk unchanged) and the previous state is restored.
+//!    `VaultStore::write_rekey` transaction (the digest pre-verification is
+//!    keyed by the OLD mac; the refresh by the NEW mac).
+//! 4. Success: republish the new keys exactly once — gated on the epoch, so
+//!    a mid-window lock keeps the vault Locked (the disk change stands; the
+//!    user unlocks with the new password). Failure: the transaction rolls
+//!    back (disk unchanged) and the previous unlocked state is restored —
+//!    likewise gated, so an explicit mid-window lock is not resurrected.
 //!
 //! Blob-writing settings operations (`enable_biometric`, `enable_recovery`,
 //! `disable_*`) require an unlocked vault and hold a lease across their

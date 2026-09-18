@@ -5,7 +5,10 @@ use std::sync::Arc;
 use zeroize::Zeroizing;
 
 use super::backend::MockCloudBackend;
-use super::engine::{sync_connect, sync_connect_with_backend, SyncBackendKind, SyncConfig};
+use super::engine::{
+    sync_connect, sync_connect_with_backend, sync_now, SyncBackendKind, SyncConfig,
+};
+use super::state_io::{validate_config, SYNC_CONFIG_BLOB_KEY};
 use super::tests_engine::{
     test_config, test_state, CONTAINER_PASSWORD, NEW_PASSWORD, TEST_PASSWORD,
 };
@@ -26,12 +29,14 @@ fn get_db(state: &Arc<AppState>) -> Arc<redb::Database> {
 #[test]
 fn first_time_connect_stores_webdav_password_before_backend() {
     let (state, _dir) = test_state();
-    // Unreachable server (discard port): connection refused immediately, so
-    // the connect fails at the network step — far past the credential store.
+    // Unreachable https server (discard port): connection refused
+    // immediately, so the connect fails at the network step — far past the
+    // credential store. (https:// keeps the C2 scheme validation passing, so
+    // the failure genuinely comes from the network, not from config checks.)
     let config = SyncConfig {
         enabled: true,
         backend: SyncBackendKind::Webdav,
-        server_url: "http://127.0.0.1:9".to_string(),
+        server_url: "https://127.0.0.1:9".to_string(),
         remote_dir: "PwdVault".to_string(),
         username: "user@example.com".to_string(),
     };
@@ -61,6 +66,73 @@ fn first_time_connect_stores_webdav_password_before_backend() {
             .unwrap(),
         b"dav-pass".to_vec()
     );
+}
+
+/// C2 (https-only): `validate_config` rejects plain http with a message that
+/// says WHY, under the stable SYNC_INVALID_CONFIG code, while https still
+/// passes (the remaining URL rules are untouched).
+#[test]
+fn validate_config_rejects_plain_http() {
+    let config = SyncConfig {
+        enabled: true,
+        backend: SyncBackendKind::Webdav,
+        server_url: "http://dav.example.com/dav".to_string(),
+        remote_dir: "PwdVault".to_string(),
+        username: "user@example.com".to_string(),
+    };
+    match validate_config(&config) {
+        Err(VaultError::InvalidInput { code, message }) => {
+            assert_eq!(code, "SYNC_INVALID_CONFIG");
+            assert!(
+                message.contains("https://"),
+                "rejection must explain the https requirement: {message}"
+            );
+        }
+        other => panic!("expected SYNC_INVALID_CONFIG, got {other:?}"),
+    }
+
+    let mut ok = config.clone();
+    ok.server_url = "https://dav.example.com/dav".to_string();
+    assert!(validate_config(&ok).is_ok());
+}
+
+/// C2: a persisted PLAIN-HTTP config fails at `open_backend` on the next
+/// `sync_now` — the path that previously built its backend straight from the
+/// persisted config and never saw `validate_config`. The rejection happens
+/// before any network or merge work, with the same guidance message.
+#[test]
+fn sync_now_rejects_persisted_http_config() {
+    let (state, _dir) = test_state();
+    let config = SyncConfig {
+        enabled: true,
+        backend: SyncBackendKind::Webdav,
+        server_url: "http://127.0.0.1:9".to_string(),
+        remote_dir: "PwdVault".to_string(),
+        username: "user@example.com".to_string(),
+    };
+    // Persist the config row exactly the way a pre-C2 version would have
+    // left it (plaintext JSON blob, digest-covered).
+    {
+        let db = get_db(&state);
+        let store = VaultStore::new(&db);
+        let json = serde_json::to_vec(&config).unwrap();
+        store
+            .write(&state.session.get_mac_key().unwrap(), |txn| {
+                vault_store::save_blob_in_txn(txn, SYNC_CONFIG_BLOB_KEY, &json)
+            })
+            .unwrap();
+    }
+
+    match sync_now(&state) {
+        Err(VaultError::InvalidInput { code, message }) => {
+            assert_eq!(code, "SYNC_INVALID_CONFIG");
+            assert!(
+                message.contains("https://"),
+                "rejection must explain the https requirement: {message}"
+            );
+        }
+        other => panic!("expected SYNC_INVALID_CONFIG, got {other:?}"),
+    }
 }
 
 /// A corrupt sync_cek row fails the reseal CLOSED: the whole password

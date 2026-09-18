@@ -138,6 +138,9 @@ pub fn open_entry(
 }
 
 /// Returns `true` if the blob is in the encrypted format (v1 or v2).
+/// Test-only: production readers decide via `decode_entry`'s versioned
+/// fallback chain, not via a pre-classification probe.
+#[cfg(test)]
 pub fn is_encrypted(blob: &[u8]) -> bool {
     if super::check_encoded_blob_size(blob).is_err() {
         return false;

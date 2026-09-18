@@ -22,6 +22,12 @@
 //! pure move); the re-exports below keep the pre-split import paths
 //! (`service::engine::…` in service/mod.rs, `super::engine::…` for the
 //! sync module's adapters and tests) working unchanged.
+//!
+//! D8 windows (fix plan A) serialize on `AppState::exclusive_window` and
+//! capture `AppState::lock_epoch` before their drain so a mid-window manual
+//! or auto lock is never silently revoked by the window's republish. Lock
+//! order: `exclusive_window` -> session internals; see also the D8 block in
+//! `service/security/mod.rs`.
 
 // Pre-split import paths, preserved verbatim.
 pub(crate) use super::state_io::backend_error;
@@ -31,6 +37,7 @@ pub use super::state_io::{
     SYNC_STATE_BLOB_KEY,
 };
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use zeroize::Zeroizing;
@@ -63,13 +70,32 @@ use super::state_io::{
 /// merge + single-transaction write-back, then republish the copied keys.
 /// `remote = None` means "no remote content to pull" (push-only cycle) —
 /// the merge result is then the local state itself.
+///
+/// D8 mutual exclusion (fix plan A): this function holds
+/// `state.exclusive_window` from before the drain to after the final
+/// republish, serializing it against the other two D8 windows (change
+/// password, recovery re-seal). Lock order: `exclusive_window` -> session
+/// internals; this function never enters holding a lease and `lock_vault`
+/// never takes the guard — no deadlock (reviewed, see security/mod.rs D8).
 fn run_merge_window(
     state: &Arc<AppState>,
     keys: &mut SessionKeys,
     remote: Option<&SyncSnapshot>,
 ) -> Result<MergedSnapshot, VaultError> {
+    let _window_guard = state
+        .exclusive_window
+        .lock()
+        .expect("exclusive window lock poisoned");
+    // Capture the lock epoch BEFORE the drain: any lock from this point on
+    // must win over our republish (fix plan A §2.3). Reading it after the
+    // drain could absorb a lock that fired in between and republish right
+    // over the user's lock.
+    let epoch_at_window = state.lock_epoch.load(Ordering::Acquire);
     // Drain every in-flight lease and refuse new ones.
     state.session.exclusive_lock_and_clear();
+    // Test seam (one-shot, instance-scoped): park after the drain.
+    #[cfg(test)]
+    state.merge_window_gate.wait_if_armed();
     // A concurrent password unlock slipping in between the drain and this
     // check must abort us cleanly — never proceed over a live session.
     if state.session.is_unlocked() {
@@ -99,15 +125,47 @@ fn run_merge_window(
     })();
 
     // Republish the copied session keys exactly once (success or failure —
-    // on failure the transaction rolled back, disk unchanged).
-    keys.republish(state);
+    // on failure the transaction rolled back, disk unchanged) — but never
+    // over a lock that fired mid-window: a skipped publish leaves the vault
+    // Locked, and the window outcome is then reported as VaultLocked
+    // (retriable; the in-window outcome error, if any, is logged).
+    let published = keys.republish_if(state, epoch_at_window);
     state.touch_activity();
-    outcome
+    match (outcome, published) {
+        (Ok(merged), true) => Ok(merged),
+        (Ok(_), false) => {
+            tracing::warn!("sync window skipped republish: the vault was locked mid-window");
+            Err(VaultError::VaultLocked)
+        }
+        (Err(err), true) => Err(err),
+        (Err(err), false) => {
+            tracing::warn!("sync window failed and was locked mid-window: {err}");
+            Err(VaultError::VaultLocked)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+/// Persist the WebDAV password to the credential store. Idempotent: the write
+/// is skipped when the store already holds the exact same secret, so the
+/// pre-`open_backend` write in [`sync_connect`] and the defensive write at the
+/// top of [`sync_connect_with_backend`] never double-hit the credential store.
+fn store_webdav_password(
+    state: &Arc<AppState>,
+    password: &Zeroizing<String>,
+) -> Result<(), VaultError> {
+    match state.sync_secret_store.get(SYNC_WEBDAV_PASSWORD_ACCOUNT) {
+        Ok(existing) if existing.as_slice() == password.as_bytes() => return Ok(()),
+        _ => {}
+    }
+    state
+        .sync_secret_store
+        .set(SYNC_WEBDAV_PASSWORD_ACCOUNT, password.as_bytes())
+        .map_err(sync_secret_error)
+}
 
 /// Bootstrap this device onto an existing (or new) cloud container (D2).
 /// Requires an unlocked session. `webdav_password` is stored in the
@@ -123,10 +181,7 @@ pub fn sync_connect(
     // empty — resolving the backend before persisting the password made
     // every initial connect fail with SYNC_CREDENTIALS_MISSING (manual QA).
     if let Some(password) = webdav_password.as_ref() {
-        state
-            .sync_secret_store
-            .set(SYNC_WEBDAV_PASSWORD_ACCOUNT, password.as_bytes())
-            .map_err(sync_secret_error)?;
+        store_webdav_password(state, password)?;
     }
     let backend = open_backend(state, &config)?;
     sync_connect_with_backend(
@@ -154,11 +209,11 @@ pub fn sync_connect_with_backend(
     let mut keys = SessionKeys::copy(state)?;
 
     // ALL credential-store interaction happens before any window (D8 rule 1).
-    if let Some(password) = webdav_password {
-        state
-            .sync_secret_store
-            .set(SYNC_WEBDAV_PASSWORD_ACCOUNT, password.as_bytes())
-            .map_err(sync_secret_error)?;
+    // `store_webdav_password` skips the write when `sync_connect` already
+    // persisted the same secret above; tests that enter through this seam
+    // directly still get the persistence guarantee.
+    if let Some(password) = webdav_password.as_ref() {
+        store_webdav_password(state, password)?;
     }
 
     // --- Pull-or-bootstrap (network only; no window yet). ---

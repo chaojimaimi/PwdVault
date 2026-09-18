@@ -6,6 +6,7 @@
 //! Orchestration lives in [`super::engine`], the cloud pull/push paths in
 //! [`super::publish`].
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use rand::rngs::OsRng;
@@ -207,8 +208,11 @@ pub(super) fn content_hash(entries: &[SyncEntry], groups: &[SyncGroup]) -> Strin
     let mut sorted_groups = groups.to_vec();
     sorted_groups.sort_by(|a, b| a.id.cmp(&b.id));
     let payload = serde_json::json!({ "entries": sorted_entries, "groups": sorted_groups });
+    // A plain JSON document of owned strings serializes infallibly; the old
+    // `unwrap_or_default()` silently turned a failure into an empty-payload
+    // hash, which would corrupt the anti-echo comparison.
     to_hex(&Sha256::digest(
-        serde_json::to_vec(&payload).unwrap_or_default(),
+        serde_json::to_vec(&payload).expect("plain JSON snapshot serializes"),
     ))
 }
 
@@ -216,10 +220,15 @@ pub(super) fn content_hash(entries: &[SyncEntry], groups: &[SyncGroup]) -> Strin
 /// The URL/username checks are WebDAV-specific — the Baidu backend gets its
 /// endpoints from the build (OAuth pairing, P3.4), so only the remote
 /// layout is user input there.
+///
+/// Plan C2 (https-only): plain http is rejected outright — Basic Auth would
+/// carry the cloud-drive password in clear text. The check lives here and
+/// at [`open_backend`], so BOTH production construction paths
+/// (`sync_connect` and the previously-unchecked `sync_now`) enforce it.
 pub(super) fn validate_config(config: &SyncConfig) -> Result<(), VaultError> {
     if matches!(config.backend, SyncBackendKind::Webdav) {
         let url = config.server_url.trim();
-        let scheme_ok = url.starts_with("https://") || url.starts_with("http://");
+        let scheme_ok = url.starts_with("https://");
         if !scheme_ok
             || url.len() <= 8
             || url.len() > 2048
@@ -227,7 +236,8 @@ pub(super) fn validate_config(config: &SyncConfig) -> Result<(), VaultError> {
         {
             return Err(invalid_sync(
                 "SYNC_INVALID_CONFIG",
-                "Server URL must be an http(s) URL without whitespace",
+                "WebDAV server URL must use https:// — plain http would expose \
+                 your cloud-drive password",
             ));
         }
         if config.username.len() > 512 {
@@ -273,10 +283,19 @@ pub(super) fn remote_paths(config: &SyncConfig) -> RemotePaths {
 }
 
 /// Build the backend for the configured kind (P3.2 WebDAV, P3.4 Baidu).
+///
+/// Plan C2: this is the single PRODUCTION construction point (only callers:
+/// `sync_connect` and `sync_now`; tests inject backends directly), so the
+/// https-only validation runs here first — that seals the `sync_now` path,
+/// which previously built its backend straight from the persisted config and
+/// never saw `validate_config`. An already-persisted http config therefore
+/// fails on the next sync with the guidance message instead of silently
+/// continuing in the clear.
 pub(super) fn open_backend(
     state: &Arc<AppState>,
     config: &SyncConfig,
 ) -> Result<Arc<dyn CloudBackend>, VaultError> {
+    validate_config(config)?;
     match config.backend {
         SyncBackendKind::Webdav => {
             let password = state
@@ -478,15 +497,34 @@ impl SessionKeys {
         self.mac.as_ref()
     }
 
-    /// Republish the COPIED keys — sync never rotates them (review P3).
-    /// `unlock` increments the live generation by exactly one; tracking it
-    /// keeps `generation` equal to the session our keys own after the window.
-    pub(super) fn republish(&mut self, state: &Arc<AppState>) {
-        state.session.unlock(
+    /// Republish the COPIED keys — sync never rotates them (review P3) —
+    /// but ONLY while the window still owns the session (fix plan A §2.3):
+    /// the lock epoch captured before the window's drain must be unchanged
+    /// (a manual/auto lock during the window is never silently revoked) and
+    /// the live generation must equal our copy's generation (review P1-1:
+    /// a moved generation proves a concurrent re-seal published NEW keys —
+    /// our stale material must not overwrite them; the digest pre-check in
+    /// `VaultStore::write` already rejected our stale writes).
+    ///
+    /// Returns whether the publish happened. On `false` the copied keys are
+    /// dropped (zeroized) and the session is left exactly as it was.
+    pub(super) fn republish_if(&mut self, state: &Arc<AppState>, epoch_at_window: u64) -> bool {
+        let expected_generation = self.generation;
+        let published = state.session.unlock_if(
             SecretKey::new(*self.enc.as_ref()),
             SecretKey::new(*self.mac.as_ref()),
+            |live_generation| {
+                state.lock_epoch.load(Ordering::Acquire) == epoch_at_window
+                    && live_generation == expected_generation
+            },
         );
-        self.generation += 1;
+        if published {
+            // `unlock_if` bumps the live generation by exactly one; tracking
+            // it keeps `generation` equal to the session our keys own after
+            // the window.
+            self.generation += 1;
+        }
+        published
     }
 }
 

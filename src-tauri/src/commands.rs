@@ -249,7 +249,10 @@ pub async fn import_vault(
 pub async fn change_password(
     current_password: Zeroizing<String>,
     new_password: Zeroizing<String>,
-    recovery_key: Option<String>,
+    // Zeroized on drop like the other password args (same-file precedent at
+    // current_password/new_password): the one-time recovery key must not
+    // linger in heap memory after the change completes.
+    recovery_key: Option<Zeroizing<String>>,
     state: State<'_, AppHandle>,
 ) -> Result<(), VaultError> {
     let state = state.inner().clone();
@@ -326,13 +329,13 @@ pub async fn disable_recovery(
 
 #[tauri::command]
 pub async fn recover_vault(
-    recovery_key: String,
+    recovery_key: Zeroizing<String>,
     new_password: Zeroizing<String>,
     state: State<'_, AppHandle>,
 ) -> Result<(), VaultError> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        app::recover_vault(&state, &recovery_key, new_password)
+        app::recover_vault(&state, recovery_key.as_str(), new_password)
     })
     .await
     .map_err(|e| VaultError::InternalError(format!("recover vault task join error: {}", e)))?

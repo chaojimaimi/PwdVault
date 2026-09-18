@@ -137,6 +137,16 @@ fn load_extension_ids() -> native_host_setup::ExtensionIds {
     }
     if let Some(firefox) = value.get("firefox").and_then(|value| value.as_str()) {
         if !firefox.is_empty() && !firefox.contains(['\r', '\n']) {
+            if firefox != native_host_setup::FIREFOX_EXTENSION_ID {
+                // Advisory only — the manifest keeps whatever ID is configured
+                // here, but the host's allowed_origins hard-check rejects
+                // browsers whose ID does not match, so warn loudly.
+                tracing::warn!(
+                    "native-host.json firefox id does not match the host's expected id \
+                     ({}): the host will refuse connection attempts from that browser",
+                    native_host_setup::FIREFOX_EXTENSION_ID
+                );
+            }
             ids.firefox = firefox.to_string();
         }
     }
@@ -165,6 +175,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        // M11: clipboard write/read for the auto-clear mechanism; the
+        // capabilities file grants only allow-write-text + allow-read-text.
+        .plugin(tauri_plugin_clipboard_manager::init())
         // In-app auto-update: signed feed check + download/install (updater)
         // and relaunch-after-install (process). The frontend drives them via
         // the @tauri-apps/plugin-updater / plugin-process JS bindings; the

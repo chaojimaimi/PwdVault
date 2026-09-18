@@ -81,7 +81,8 @@ pub(super) fn test_config() -> SyncConfig {
     }
 }
 
-fn create_entry_titled(state: &Arc<AppState>, title: &str) -> String {
+/// Shared with `tests_window` (fix plan A regression suite).
+pub(super) fn create_entry_titled(state: &Arc<AppState>, title: &str) -> String {
     create_entry(
         state,
         crate::CreateEntryRequest {

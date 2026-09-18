@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Capability for the main window. Permission boundary note (M11): clipboard-manager:allow-read-text deliberately grants the main webview persistent clipboard READ access (including while the vault is locked). This is an explicit minimal-privilege expansion required by the clipboard auto-clear digest guard; it is accepted because the CSP is 'self'-only (no remote content can invoke the bridge) and src/utils/clipboard.ts only clears after verifying a SHA-256 digest match.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -9,6 +9,8 @@
     "fs:default",
     "updater:default",
     "process:allow-restart",
+    "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-read-text",
     {
       "identifier": "fs:allow-write-file",
       "allow": [

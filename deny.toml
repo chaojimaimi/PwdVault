@@ -34,6 +34,10 @@ allow = [
     "Zlib",
     "CC0-1.0",
     "MPL-2.0",
+    # BSL-1.0 (permissive, OSI-approved): transitive Windows clipboard crates
+    # clipboard-win / error-code pulled in by tauri-plugin-clipboard-manager
+    # (M11).
+    "BSL-1.0",
 ]
 confidence-threshold = 0.8
 

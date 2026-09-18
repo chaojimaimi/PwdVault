@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use zeroize::Zeroizing;
 
-use super::{cipher, EncryptedData, KEY_SIZE};
+use super::{cipher, EncryptedData, SecretKey, KEY_SIZE};
 
 /// AAD binding for the biometric wrap blob.
 pub const WRAP_AAD_BIO: &[u8] = b"pwdvault-bio-wrap-v1";
@@ -94,20 +94,26 @@ pub fn unwrap_secret(
 /// trim → base64url decode (43 chars / 32 bytes expected) → SHA-256. The
 /// recovery key has 256 bits of entropy, so SHA-256 alone is a sound AES key
 /// — no password KDF needed.
-pub fn recovery_wrap_key(recovery_key_paste: &str) -> Result<[u8; KEY_SIZE], WrapError> {
+///
+/// Both the decoded paste (`raw`) and the returned digest live in
+/// zeroizing buffers: the digest is a wrap key, and the paste itself is a
+/// 256-bit secret that must not linger in heap memory.
+pub fn recovery_wrap_key(recovery_key_paste: &str) -> Result<SecretKey, WrapError> {
     let trimmed = recovery_key_paste.trim();
-    let raw = URL_SAFE_NO_PAD
-        .decode(trimmed.as_bytes())
-        .map_err(|_| WrapError::RecoveryKeyInvalid)?;
+    let raw = Zeroizing::new(
+        URL_SAFE_NO_PAD
+            .decode(trimmed.as_bytes())
+            .map_err(|_| WrapError::RecoveryKeyInvalid)?,
+    );
     // Accept exactly 32 decoded bytes. The canonical encoding is 43 chars, but
     // accept any base64url spelling that decodes to 32 bytes (e.g. a stray
     // '=' padded variant is rejected by URL_SAFE_NO_PAD, which is intended).
     if raw.len() != KEY_SIZE {
         return Err(WrapError::RecoveryKeyInvalid);
     }
-    let key: [u8; KEY_SIZE] = raw.try_into().map_err(|_| WrapError::RecoveryKeyInvalid)?;
-    let digest: [u8; KEY_SIZE] = Sha256::digest(key).into();
-    Ok(digest)
+    // Digest straight over the zeroizing buffer — no intermediate key copy.
+    let digest: [u8; KEY_SIZE] = Sha256::digest(raw.as_slice()).into();
+    Ok(SecretKey::new(digest))
 }
 
 /// Generate a fresh biometric wrap key: 32 random bytes from the OS CSPRNG.
@@ -233,9 +239,9 @@ mod tests {
 
         // The derived wrap key must be reproducible from the same paste and
         // usable as an AES key for a full wrap roundtrip.
-        let blob = wrap_secret(&derived, &MASTER, WRAP_AAD_RECOVERY).unwrap();
+        let blob = wrap_secret(derived.as_ref(), &MASTER, WRAP_AAD_RECOVERY).unwrap();
         assert_eq!(
-            *unwrap_secret(&derived, &blob, WRAP_AAD_RECOVERY).unwrap(),
+            *unwrap_secret(derived.as_ref(), &blob, WRAP_AAD_RECOVERY).unwrap(),
             MASTER
         );
     }
@@ -244,7 +250,7 @@ mod tests {
     fn recovery_keys_are_unique() {
         let a = recovery_wrap_key(&generate_recovery_key()).unwrap();
         let b = recovery_wrap_key(&generate_recovery_key()).unwrap();
-        assert_ne!(a, b);
+        assert_ne!(a.as_ref(), b.as_ref());
     }
 
     #[test]

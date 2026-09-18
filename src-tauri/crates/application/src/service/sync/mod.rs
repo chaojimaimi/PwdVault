@@ -36,6 +36,8 @@ mod tests_connect;
 mod tests_engine;
 #[cfg(test)]
 mod tests_webdav;
+#[cfg(test)]
+mod tests_window;
 
 use std::collections::HashMap;
 

@@ -52,6 +52,10 @@ pub enum VaultError {
     /// The platform credential store failed in an unexpected way. The string
     /// carries user guidance only — never secret material.
     KeychainError(String),
+    /// Digest pre-verification rejected a write (fix plan A §2.2): the
+    /// stored digest does not match the database contents under the keys the
+    /// caller held. The transaction rolled back; the vault is unchanged.
+    IntegrityCheckFailed,
 }
 
 impl From<DomainError> for VaultError {
@@ -83,7 +87,12 @@ impl From<VerificationError> for VaultError {
 
 impl From<DatabaseError> for VaultError {
     fn from(e: DatabaseError) -> Self {
-        VaultError::DatabaseError(e.to_string())
+        match e {
+            // Surface the integrity failure distinctly so public_message can
+            // tell the user their data refused verification (fix plan A).
+            DatabaseError::IntegrityMismatch => VaultError::IntegrityCheckFailed,
+            other => VaultError::DatabaseError(other.to_string()),
+        }
     }
 }
 
@@ -147,6 +156,7 @@ impl std::fmt::Display for VaultError {
                 write!(f, "Current password is incorrect")
             }
             VaultError::KeychainError(e) => write!(f, "Keychain error: {}", e),
+            VaultError::IntegrityCheckFailed => write!(f, "Database integrity check failed"),
         }
     }
 }
@@ -202,6 +212,12 @@ impl VaultError {
                 "Current password is incorrect".to_string()
             }
             VaultError::KeychainError(e) => format!("Keychain error: {}", e),
+            VaultError::IntegrityCheckFailed => {
+                "Vault integrity check failed. The operation was cancelled and \
+                the vault is unchanged — if this keeps happening, restore from \
+                a backup"
+                    .to_string()
+            }
         }
     }
 }

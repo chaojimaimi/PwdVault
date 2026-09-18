@@ -195,7 +195,7 @@ pub fn enable_recovery(
 
     let recovery_key = generate_recovery_key();
     let wrap_key = recovery_wrap_key(&recovery_key)?;
-    let blob = wrap_secret(&wrap_key, &master, WRAP_AAD_RECOVERY)?;
+    let blob = wrap_secret(wrap_key.as_ref(), &master, WRAP_AAD_RECOVERY)?;
 
     let store_handle = VaultStore::new(&db);
     store_handle.write(mac_key.as_ref(), |txn| {

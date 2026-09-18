@@ -299,6 +299,13 @@ pub(crate) fn encode_remote_path(path: &str) -> Result<String, BackendError> {
 impl WebDavBackend {
     /// Build a backend for `server_url` (trailing slashes normalized away)
     /// with Basic Auth from `username`/`password`.
+    ///
+    /// Both http and https URLs construct here ON PURPOSE: the local test
+    /// stubs (tests_webdav) are plain-http loopback servers. Production
+    /// callers MUST have passed the config through `validate_config` first
+    /// (plan C2: https-only; it runs inside `open_backend`, which covers
+    /// both `sync_connect` and `sync_now`) — this constructor deliberately
+    /// does not re-check the scheme.
     pub fn new(
         server_url: &str,
         username: &str,

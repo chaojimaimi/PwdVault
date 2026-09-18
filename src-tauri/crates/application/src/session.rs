@@ -83,21 +83,50 @@ impl VaultSession {
     /// unlock flow (§5.1.3 step 8) — it must only be called after all
     /// verification has passed.
     pub fn unlock(&self, enc_key: impl Into<SecretKey>, mac_key: impl Into<SecretKey>) {
+        self.unlock_if(enc_key, mac_key, |_| true);
+    }
+
+    /// Atomically transition to Unlocked state ONLY while `predicate` holds
+    /// (fix plan A §2.3: publish window keys without ever revoking a lock).
+    ///
+    /// The predicate is evaluated inside the SAME critical section as the
+    /// state flip — under the session's write lock, immediately before it —
+    /// so there is no check/publish gap for a concurrent lock to slip
+    /// through. It receives the live session generation (the counter that
+    /// locking preserves and each unlock bumps), letting callers detect a
+    /// concurrent key rotation without taking a second lock (which would
+    /// deadlock against this write guard).
+    ///
+    /// Returns whether the keys were published. On `false` the session is
+    /// left EXACTLY as it was and the offered keys are dropped (zeroized).
+    pub fn unlock_if(
+        &self,
+        enc_key: impl Into<SecretKey>,
+        mac_key: impl Into<SecretKey>,
+        predicate: impl FnOnce(u64) -> bool,
+    ) -> bool {
         let mut inner = self.inner.write().expect("session lock poisoned");
-        let next_generation = match &*inner {
-            SessionInner::Unlocked { generation, .. } => generation + 1,
-            SessionInner::Locked { generation } => generation + 1,
+        let live_generation = match &*inner {
+            SessionInner::Unlocked { generation, .. } => *generation,
+            SessionInner::Locked { generation } => *generation,
         };
+        if !predicate(live_generation) {
+            // Declined: the keys are dropped here (zeroized); the session
+            // stays untouched (Locked for a drained D8 window).
+            return false;
+        }
+        // Same increment rule as the unconditional unlock above.
         *inner = SessionInner::Unlocked {
             enc_key: enc_key.into(),
             mac_key: mac_key.into(),
             last_activity: Mutex::new(Instant::now()),
-            generation: next_generation,
+            generation: live_generation + 1,
             // A fresh session never carries a wrap key; only
             // [`VaultSession::set_wrap_key`] installs one after a
             // successful Touch ID unlock (D5).
             wrap_key: None,
         };
+        true
     }
 
     /// Check if the vault is currently unlocked (keys are in memory).
@@ -151,15 +180,16 @@ impl VaultSession {
     /// Touch ID. Returns `None` when the caller must fall back to the
     /// credential store (which may prompt).
     ///
-    /// The 32-byte copy is intended for immediate wrap/unwrap use; it is
-    /// never written to disk or logs by any caller in this codebase.
-    pub fn cached_wrap_key(&self) -> Option<[u8; 32]> {
+    /// The copy is handed over as a zeroizing [`SecretKey`] (never a bare
+    /// array) so it is wiped on drop; it is never written to disk or logs by
+    /// any caller in this codebase.
+    pub fn cached_wrap_key(&self) -> Option<SecretKey> {
         let inner = self.inner.read().expect("session lock poisoned");
         match &*inner {
             SessionInner::Unlocked {
                 wrap_key: Some(key),
                 ..
-            } => Some(*key.as_ref()),
+            } => Some(SecretKey::new(*key.as_ref())),
             _ => None,
         }
     }
@@ -256,8 +286,9 @@ impl VaultSession {
 ///
 /// While held, auto-lock cannot clear the session keys. The `generation`
 /// field captures the session_generation at acquisition time; callers can
-/// use [`SessionLease::check_valid`] to detect that the session changed
-/// (e.g. another thread locked and re-unlocked) during the operation.
+/// compare `generation()` against a fresh lease's snapshot later on to
+/// detect that the session changed (e.g. another thread locked and
+/// re-unlocked) during the operation.
 pub struct SessionLease<'a> {
     guard: RwLockReadGuard<'a, SessionInner>,
     generation: u64,
@@ -302,20 +333,12 @@ impl<'a> SessionLease<'a> {
     /// Returns `Ok(())` if the session is still the same generation (or still
     /// unlocked with a newer generation — the caller should treat a generation
     /// mismatch as a stale-state error).
+    #[cfg(test)]
     pub fn check_valid(&self) -> Result<(), VaultError> {
         match &*self.guard {
             SessionInner::Unlocked { generation, .. } if *generation == self.generation => Ok(()),
             _ => Err(VaultError::VaultLocked),
         }
-    }
-}
-
-/// Legacy-named wrapper kept for callers of the pre-session API; prefer
-/// [`VaultSession::is_unlocked`] directly.
-impl VaultSession {
-    /// Check if unlocked (compatibility wrapper).
-    pub fn is_session_unlocked(&self) -> bool {
-        self.is_unlocked()
     }
 }
 
@@ -448,6 +471,34 @@ mod tests {
         assert!(!session.exclusive_lock_and_clear());
     }
 
+    /// Fix plan A §2.3: `unlock_if` publishes only when the predicate holds,
+    /// the predicate sees the live generation under the same critical
+    /// section, and a declined publish leaves the session untouched.
+    #[test]
+    fn test_unlock_if_predicate_gates_publish() {
+        let session = VaultSession::new();
+
+        // Declined: no publish, session stays Locked.
+        assert!(!session.unlock_if(TEST_ENC_KEY, TEST_MAC_KEY, |_| false));
+        assert!(!session.is_unlocked());
+
+        // Accepted: keys are live and the generation bumped by exactly one.
+        assert!(session.unlock_if(TEST_ENC_KEY, TEST_MAC_KEY, |gen| gen == 0));
+        assert!(session.is_unlocked());
+        assert_eq!(session.get_enc_key().unwrap(), TEST_ENC_KEY);
+
+        // The predicate observes the live generation (1 after one publish).
+        let seen = std::cell::Cell::new(0u64);
+        assert!(!session.unlock_if(TEST_ENC_KEY, TEST_MAC_KEY, |gen| {
+            seen.set(gen);
+            false
+        }));
+        assert_eq!(seen.get(), 1);
+        // Still the first publish's generation — the declined call was inert.
+        let lease = session.lease().unwrap();
+        assert_eq!(lease.generation(), 1);
+    }
+
     /// Phase 1 (D5): the wrap key slot lives only in the session that
     /// unlocked via Touch ID — a republish (session.unlock) drops it and an
     /// exclusive lock zeroizes it.
@@ -455,23 +506,25 @@ mod tests {
     fn test_wrap_key_slot_lifecycle() {
         let session = VaultSession::new();
         session.unlock(TEST_ENC_KEY, TEST_MAC_KEY);
-        assert_eq!(session.cached_wrap_key(), None);
+        assert!(session.cached_wrap_key().is_none());
 
         session.set_wrap_key(SecretKey::new([0xCC; 32]));
-        assert_eq!(session.cached_wrap_key(), Some([0xCC_u8; 32]));
+        let cached = session.cached_wrap_key();
+        assert_eq!(cached.as_ref().map(SecretKey::as_ref), Some(&[0xCC_u8; 32]));
+        drop(cached);
 
         // Republish (e.g. change_password) rebuilds the session without it.
         session.unlock(TEST_ENC_KEY, TEST_MAC_KEY);
-        assert_eq!(session.cached_wrap_key(), None);
+        assert!(session.cached_wrap_key().is_none());
 
         session.set_wrap_key(SecretKey::new([0xDD; 32]));
         // Locking clears the slot entirely.
         assert!(session.exclusive_lock_and_clear());
-        assert_eq!(session.cached_wrap_key(), None);
+        assert!(session.cached_wrap_key().is_none());
 
         // set_wrap_key on a Locked session is a silent no-op (key dropped).
         session.set_wrap_key(SecretKey::new([0xEE; 32]));
-        assert_eq!(session.cached_wrap_key(), None);
+        assert!(session.cached_wrap_key().is_none());
     }
 
     #[test]

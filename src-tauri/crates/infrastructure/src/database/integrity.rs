@@ -298,6 +298,55 @@ pub fn compute_digest_from_txn(
     Ok(digest)
 }
 
+/// Verify the stored digest inside an open write transaction, BEFORE the
+/// caller applies its mutations (fix plan A §2.2, defense in depth).
+///
+/// `VaultStore::write` calls this so a write holding stale/foreign keys
+/// fails LOUDLY with [`DatabaseError::IntegrityMismatch`] instead of
+/// silently re-baselining the digest over content it cannot account for.
+///
+/// Skips verification (returns `Ok`) when:
+/// - (a) no digest row exists yet — a fresh database's first write
+///   establishes the baseline;
+/// - (b) the stored digest version differs from the current
+///   [`DB_DIGEST_VERSION`] — the exact semantics of [`needs_digest_rebuild`]:
+///   the digest was computed by an incompatible older build and the caller's
+///   flow (legacy migration) re-establishes it, so it must never be treated
+///   as tampering.
+pub fn verify_digest_in_txn(
+    txn: &redb::WriteTransaction,
+    mac_key: &[u8; 32],
+) -> Result<(), DatabaseError> {
+    // Read the stored version + digest inside a scope so all table guards
+    // are dropped before `compute_digest_from_txn` re-opens the txn tables.
+    let (stored_digest, stored_version) = {
+        let table = txn.open_table(META_TABLE)?;
+        let Some(stored) = table.get(DB_DIGEST_KEY)? else {
+            // (a) Fresh database — the first write establishes the baseline.
+            return Ok(());
+        };
+        let bytes = stored.value();
+        let mut digest = [0u8; 32];
+        digest.copy_from_slice(&bytes[..32.min(bytes.len())]);
+        let version = table.get(DB_DIGEST_VERSION_KEY)?.map(|v| {
+            let bytes = v.value();
+            let mut buf = [0u8; 4];
+            buf.copy_from_slice(&bytes[..4.min(bytes.len())]);
+            u32::from_le_bytes(buf)
+        });
+        (digest, version)
+    };
+    if stored_version != Some(DB_DIGEST_VERSION) {
+        // (b) Pre-rebuild baseline — same exemption as needs_digest_rebuild.
+        return Ok(());
+    }
+    let actual = compute_digest_from_txn(txn, mac_key)?;
+    if stored_digest != actual {
+        return Err(DatabaseError::IntegrityMismatch);
+    }
+    Ok(())
+}
+
 /// Recompute and store the digest within a caller-owned `WriteTransaction`.
 ///
 /// Unlike `refresh_digest`, this does NOT open its own transaction or commit.

@@ -36,6 +36,9 @@ pwdvault-application = { version = "1.1.0", path = "crates/application" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+# M11: system clipboard access from the webview so auto-clear works even when
+# the window is not OS-focused (navigator.clipboard is focus-gated).
+tauri-plugin-clipboard-manager = "2"
 
 # Serialization (native_messaging HTTP JSON)
 serde = { version = "1", features = ["derive"] }

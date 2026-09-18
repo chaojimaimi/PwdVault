@@ -41,9 +41,18 @@ uuid = { version = "1", features = ["v4"] }
 dirs = "5"
 tracing = "0.1"
 
-# Native messaging host registration (Windows registry)
+# Native messaging host registration (Windows registry) + Windows DPAPI
+# at-rest encryption for the sync credential file (plan C1):
+# CryptProtectData/CryptUnprotectData live in Win32::Security::Cryptography,
+# LocalFree/DATA_BLOB plumbing in Win32::Foundation — Win32_System_Memory is
+# NOT needed. Scoped to Windows exactly like winreg, so macOS/Linux
+# dependency trees are unchanged.
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+] }
 
 # macOS Keychain + LocalAuthentication for biometric unlock (Phase 1).
 # Platform-scoped like winreg above so Windows/Linux builds never pull them.

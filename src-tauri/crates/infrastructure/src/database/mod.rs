@@ -71,6 +71,14 @@ pub enum DatabaseError {
     #[error("Entry not found")]
     EntryNotFound,
 
+    /// Digest pre-verification (fix plan A §2.2): the stored digest does not
+    /// match the database contents under the caller's mac key. A write that
+    /// would silently re-baseline the digest over foreign/stale content is
+    /// rejected instead. Carries no detail on purpose — the public message
+    /// stays free of internal layout information.
+    #[error("Database integrity check failed: stored digest does not match contents")]
+    IntegrityMismatch,
+
     #[error(
         "Stored record exceeds the maximum encoded size of {} bytes",
         MAX_ENCODED_BLOB

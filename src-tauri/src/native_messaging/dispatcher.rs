@@ -29,15 +29,13 @@ pub(super) fn execute_command(
     app_handle: Option<tauri::AppHandle>,
     caller: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    // Vault operations now acquire a session lease (§5.1.1) inside each
-    // service function, which provides the same serialization guarantee
-    // that op_lock formerly provided — but uniformly across HTTP and Tauri
-    // IPC paths. Pair/pair_confirm only manipulate in-memory state and
-    // don't need a lease.
-    //
-    // NOTE: The per-operation lease will be added in the service layer
-    // migration. For now, the service functions check is_unlocked() and
-    // obtain keys from the session directly.
+    // Vault operations acquire a per-operation session lease (§5.1.1) inside
+    // each service function: the lease holds a read guard that keeps the keys
+    // alive and blocks auto-lock's exclusive clear until the operation
+    // finishes, and snapshots the session generation for staleness checks.
+    // This provides the same serialization guarantee that op_lock formerly
+    // provided — but uniformly across HTTP and Tauri IPC paths. Pair /
+    // pair_confirm only manipulate in-memory state and don't need a lease.
 
     match req.command.as_str() {
         "handshake" => Ok(serde_json::json!({

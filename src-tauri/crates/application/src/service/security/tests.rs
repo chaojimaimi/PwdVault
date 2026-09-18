@@ -189,7 +189,7 @@ fn change_password_requires_recovery_key_when_recovery_enabled() {
             &vault.state,
             Zeroizing::new(TEST_PASSWORD.to_string()),
             Zeroizing::new(NEW_PASSWORD.to_string()),
-            Some("definitely-not-the-key".to_string()),
+            Some(Zeroizing::new("definitely-not-the-key".to_string())),
         ),
         Err(VaultError::RecoveryKeyInvalid)
     ));
@@ -240,7 +240,7 @@ fn change_password_rewraps_bio_and_recovery_blobs() {
         &vault.state,
         Zeroizing::new(TEST_PASSWORD.to_string()),
         Zeroizing::new(NEW_PASSWORD.to_string()),
-        Some(recovery_key.clone()),
+        Some(Zeroizing::new(recovery_key.clone())),
     )
     .unwrap();
     // Republish dropped the wrap-key cache (D5).
@@ -467,7 +467,12 @@ fn concurrent_writes_during_change_password_do_not_corrupt_vault() {
 fn change_password_on_legacy_header_then_unlock_migrates() {
     let vault = create_test_vault(2, 0);
     // Splice in a downgraded header (integrity_required=false), like the
-    // B1 test does, but WITHOUT tampering so migration may proceed.
+    // B1 test does, but WITHOUT tampering so migration may proceed. The
+    // splice is a plain transaction, so the digest row must be refreshed
+    // afterwards: the digest pre-verification on every VaultStore::write
+    // (fix plan A §2.2) rejects a write whose baseline is stale — exactly
+    // the property `downgraded_header_with_stale_digest_is_rejected`
+    // asserts for the unlock path.
     {
         let db = get_db(&vault.state).unwrap();
         let params = AdaptiveParams {
@@ -477,12 +482,13 @@ fn change_password_on_legacy_header_then_unlock_migrates() {
         };
         let (master_key, _) =
             crypto::kdf::derive_key_with_params(TEST_PASSWORD, &TEST_SALT, &params).unwrap();
-        let (enc_key, _) = crypto::kdf::derive_subkeys(&master_key, &TEST_SALT);
+        let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &TEST_SALT);
         let mut header = pwdvault_infrastructure::vault_header::VaultHeader::new_initial();
         header.integrity_required = false;
         let txn = db.begin_write().unwrap();
         pwdvault_infrastructure::vault_header::save_header_in_txn(&txn, &header, &enc_key).unwrap();
         txn.commit().unwrap();
+        database::integrity::refresh_digest(&db, &mac_key).unwrap();
     }
 
     // Prime the session directly (a password unlock would run the
