@@ -96,8 +96,12 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Rust workspace on Windows: platform parity for the test suite (D8).
-  # The release builds are produced on Windows; until this job existed, the
-  # workspace tests only ever ran on Linux/macOS.
+  # Windows platform parity for the logic crates (D8): domain /
+  # infrastructure / application, including the DPAPI credential path that
+  # only compiles on Windows. The release builds are produced on Windows.
+  # The tauri adapter crate itself is tested on Linux/macOS only — its test
+  # binary cannot load on hosted Windows runners (WebView2Loader shadowing,
+  # STATUS_ENTRYPOINT_NOT_FOUND).
   # ---------------------------------------------------------------------------
   quality-rust-windows:
     runs-on: windows-latest
@@ -123,9 +127,14 @@ jobs:
           cp target/release/pwdvault-native.exe ../../src-tauri/binaries/ || \
           cp target/release/pwdvault-native ../../src-tauri/binaries/
 
+      # The tauri adapter's test binary (pwdvault_lib) cannot LOAD on hosted
+      # Windows runners — exit 0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND) from a
+      # shadowing WebView2Loader.dll, before any test runs. The adapter's lib
+      # tests still run on Linux/macOS in quality-rust; this job's purpose is
+      # Windows platform parity + DPAPI coverage for the logic crates.
       - name: Run tests
         working-directory: src-tauri
-        run: cargo test --workspace --locked
+        run: cargo test -p pwdvault-domain -p pwdvault-infrastructure -p pwdvault-application --locked
 
   # ---------------------------------------------------------------------------
   # Rust native host: fmt, clippy, test

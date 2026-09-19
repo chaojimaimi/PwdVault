@@ -186,6 +186,17 @@ do_bump() {
         set_line_version "extensions/firefox/manifest.json" 4 "firefox/manifest.json"
     fi
 
+    # native-host carries its own Cargo.lock and CI builds it with --locked;
+    # a stale lock after a bump fails quality-native-host-windows. Refresh it
+    # when cargo is available (same failure as 0a426c7, now prevented).
+    if command -v cargo >/dev/null 2>&1; then
+        if (cd extensions/native-host && cargo update -w --quiet); then
+            echo "  native-host/Cargo.lock → refreshed"
+        else
+            echo "  ⚠️  native-host/Cargo.lock refresh failed — run it manually before pushing"
+        fi
+    fi
+
     # Optional: prepend a CHANGELOG entry
     if $want_changelog; then
         local date
