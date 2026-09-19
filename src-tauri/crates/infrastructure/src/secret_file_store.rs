@@ -628,10 +628,11 @@ mod tests {
 
     /// Windows-only DPAPI end-to-end (plan C): set → get round-trips, the
     /// migration rewrite keeps BOTH accounts readable, and the file carries
-    /// the dpapi1: prefix with no plaintext. NOTE: CI has no Windows
-    /// cargo-test job (release.yml runs tests on ubuntu only; the Windows
-    /// job only builds) — this test is enforced locally on Windows and by a
-    /// future CI test job, not by the current pipeline.
+    /// the dpapi1: prefix with no plaintext. Verified by the Windows CI test
+    /// job (quality-rust-windows) — first real run caught the whole-file
+    /// plaintext scan false-positiveing on the account KEY name
+    /// ("sync-webdav-password" contains "dav-pass"), so the secret under
+    /// test must not be a substring of any key name.
     #[cfg(windows)]
     #[test]
     fn dpapi_roundtrip_migration_and_file_prefix() {
@@ -639,8 +640,12 @@ mod tests {
         let path = dir.path().join("sync-secrets.json");
         let store = FileSecretStore::new(path.clone());
 
+        // '-' cannot occur in the base64 value alphabet, and this string is
+        // not a substring of any account key — the leak scan below can only
+        // trip on genuinely leaked ciphertext input.
+        const DAV_SECRET: &[u8] = b"dav-s3cret-7Q3x";
         store
-            .set(crate::keychain::SYNC_WEBDAV_PASSWORD_ACCOUNT, b"dav-pass")
+            .set(crate::keychain::SYNC_WEBDAV_PASSWORD_ACCOUNT, DAV_SECRET)
             .unwrap();
         store
             .set(crate::keychain::SYNC_BAIDU_TOKEN_ACCOUNT, &[0xde, 0xad])
@@ -649,7 +654,7 @@ mod tests {
             store
                 .get(crate::keychain::SYNC_WEBDAV_PASSWORD_ACCOUNT)
                 .unwrap(),
-            b"dav-pass".to_vec()
+            DAV_SECRET.to_vec()
         );
         assert_eq!(
             store
@@ -664,7 +669,7 @@ mod tests {
             "file must hold dpapi1: values"
         );
         assert!(
-            !content.contains("dav-pass"),
+            !content.contains(std::str::from_utf8(DAV_SECRET).unwrap()),
             "no plaintext may leak to disk"
         );
     }
