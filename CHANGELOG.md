@@ -4,6 +4,58 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.1.9] - 2026-10-05
+
+### Security
+
+- Password and Touch ID unlock now serialize against the exclusive vault
+  windows (master-password change, recovery re-seal, cloud-sync merge) and
+  re-validate the verification header before publishing keys. A concurrent
+  unlock landing inside a window used to be able to publish stale keys and
+  leave orphan rows that only surfaced as decrypt failures on later reads.
+- The webview no longer holds a filesystem capability over
+  `$HOME`/`/Volumes`/`$TEMP`. Backup export/import and the optional
+  recovery-key file are now read and written by desktop Rust commands
+  through native dialogs (atomic 0600 writes, 14 MiB backup cap,
+  vault-data-directory path exclusion), so a webview compromise can no
+  longer read or overwrite arbitrary files in the user's home directory.
+- Cloud-sync plaintext-domain structures now zeroize on drop, and the sync
+  decrypt helper no longer clones plaintext out of the zeroized buffer.
+- Browser extension: a failed secret fetch can no longer masquerade as an
+  empty-password success. Context-menu and shortcut autofill, popup copy,
+  and the content-script fill path now surface an explicit error instead of
+  filling `""` while reporting success (or doing nothing silently).
+
+### Fixed
+
+- Extension clipboard auto-clear failure is no longer invisible — it warns
+  and notifies the user (once per page) to clear the clipboard manually.
+- A failed lock-command transport now shows a visible toast; the UI still
+  falls back to the lock screen defensively.
+- Credential files are created with 0600 permissions from the start on Unix
+  (no umask window), and permission-restriction failures are logged.
+- Backend errors reach the UI as readable messages everywhere: the three
+  React contexts share the `errorMessage` helper, so a rate-limited unlock
+  shows "Too many attempts — retry in 60s" instead of raw JSON or enum
+  names.
+
+### Added
+
+- React error boundary: a render crash now shows a recovery screen with a
+  Restart App button instead of a white window while the tray keeps
+  serving the extension.
+- Settings: "Save to file" option when enabling the recovery key — the key
+  file is written by the backend in the same step (the key never crosses
+  the IPC boundary twice).
+
+### Changed
+
+- `import_vault` split into staged validation/decryption/preparation
+  helpers (no behavior change).
+- Documented auto-lock semantics: paired-extension vault operations count
+  as user activity (trusted endpoint); decoupling remote activity is on
+  the v1.2 roadmap.
+
 ## [1.1.8] - 2026-09-19
 
 ### Security
