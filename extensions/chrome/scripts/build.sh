@@ -22,6 +22,10 @@ mkdir -p "$DIST_DIR"
 # Preserve the source layout used by manifest.json. This avoids platform-
 # specific sed invocations and makes local packages identical to CI packages.
 cp -R "$EXTENSION_DIR/src" "$DIST_DIR/src"
+# Test files never ship in the package: Firefox web-ext lint treats
+# DANGEROUS_EVAL (the parity test's Function constructor) as a blocker and
+# bundle hygiene keeps the zip minimal. Tests run via vitest at the repo root.
+find "$DIST_DIR/src" -name '*.test.js' -delete
 cp "$EXTENSION_DIR/manifest.json" "$DIST_DIR/"
 
 # Copy icons
@@ -43,6 +47,7 @@ mkdir -p "$FIREFOX_DIST"
 
 # Dereference shared source into a self-contained staging directory.
 cp -RL "$FIREFOX_DIR/src" "$FIREFOX_DIST/src"
+find "$FIREFOX_DIST/src" -name '*.test.js' -delete
 cp "$FIREFOX_DIR/manifest.json" "$FIREFOX_DIST/"
 cp -RL "$FIREFOX_DIR/icons" "$FIREFOX_DIST/icons"
 
