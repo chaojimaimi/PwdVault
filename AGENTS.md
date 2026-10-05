@@ -2,10 +2,10 @@
 
 A secure, local-first password manager built with Tauri + React.
 
-**Last Updated**: 2026-09-18
+**Last Updated**: 2026-10-05
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.1.7
-**Current Version**: `v1.1.7` — 2026-09 audit fixes + Phase 0 hardening + Phase 1 key infrastructure (master password change / Touch ID / recovery key) + Phase 2-3 (soft delete, TOTP, cloud sync over WebDAV & Baidu Netdisk) + P3 quick-win batch (repo/doc hygiene, extension & frontend fixes, Rust cleanup)
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.1.9
+**Current Version**: `v1.1.9` — 2026-10 full-codebase audit fixes (D8 unlock interlock, fs capability recall, sync zeroize, extension false-success fix) + 2026-09 audit fixes + Phase 0-3 features (key infrastructure, soft delete/TOTP, cloud sync)
 **Current Branch**: `main`
 
 ---
@@ -13,6 +13,7 @@ A secure, local-first password manager built with Tauri + React.
 ## 1. Project Architecture & Key Files
 
 ### Tech Stack
+
 - **Frontend**: React 19 + TypeScript + Vite
 - **Backend**: Tauri v2 + Rust
 - **Database**: redb (pure Rust, ACID-compliant, embedded)
@@ -21,6 +22,7 @@ A secure, local-first password manager built with Tauri + React.
 - **CI/CD**: GitHub Actions (macOS + Windows builds)
 
 ### Directory Structure
+
 ```
 PwdVault/
 ├── src/                          # React frontend
@@ -132,6 +134,7 @@ PwdVault/
 ### v1.0.0 (2026-05-01) — Released
 
 **Completed: Phase G — v1.0 Release Preparation**
+
 - **G1** Firefox extension — MV3 adaptation with gecko-specific manifest, symlink to shared source
 - **G2** Test credential cleanup — verified no leaked credentials
 - **G3** Documentation update — CHANGELOG, AGENTS.md, README.md all current
@@ -143,6 +146,7 @@ PwdVault/
 ### v0.3.1 (2026-04-30)
 
 **Completed: Frontend Redesign + Security Features**
+
 - Light/Dark dual-theme system replacing Classic/Cyber/Hybrid
 - Modular CSS: `App.css` (1300+ lines) split into 6 files
 - New components: `BackHeader.tsx`, `Icons.tsx`, `StrengthMeter.tsx`, `UpdateNotification.tsx`
@@ -151,6 +155,7 @@ PwdVault/
 ### v0.3.0 (2026-04-17) — Released
 
 **Completed: Phase E — User Features**
+
 - **E1** Encrypted import/export — `.pvault` backup files with independent export password, AES-256-GCM + Argon2id
 - **E2** Fuzzy search — fuse.js weighted search across title/username/URL/tags
 - **E4** Settings screen — auto-lock timeout (1–60 min), default generator options, persisted to redb
@@ -162,6 +167,7 @@ PwdVault/
 ### v0.2.0 (2026-04-15)
 
 **Completed: Phase D — Project Identity**
+
 - **D1** Rewrote README.md
 - **D2** Brand icon verified across extension + Tauri
 - **D3** CI DMG packaging for macOS
@@ -177,23 +183,25 @@ PwdVault/
 - Password generator security fix (shuffle-guarantee algorithm + OsRng)
 
 ### v0.1.1 (2026-03-31)
+
 - Auto-lock (10 min timeout), tray menu state sync, browser extension create entry
 
 ### v0.1.0 Release (2026-03-27)
+
 - Initial release: Tauri v2 + React 5 screens, AES-256-GCM + Argon2id, redb, HTTP API, Chrome extension, CI/CD
 
-**Test Suite Summary** (counts from actual test output, 2026-09-18):
+**Test Suite Summary** (counts from actual test output, 2026-10-05):
 
-| Module | Tests | Command |
-|--------|-------|---------|
-| Rust tauri-app lib | 28 | `cd src-tauri && cargo test` |
-| Rust capability contract | 1 | (same run) |
-| Rust golden contract | 2 | (same run) |
-| Rust application crate | 135 | `cd src-tauri && cargo test --workspace` |
-| Rust infrastructure crate | 101 | (same run) |
-| Rust domain crate | 4 | (same run) |
-| Rust native-host | 19 | `cd extensions/native-host && cargo test` |
-| Frontend (total) | 237 (46 files) | `pnpm test` |
+| Module                    | Tests                                    | Command                                   |
+| ------------------------- | ---------------------------------------- | ----------------------------------------- |
+| Rust tauri-app lib        | 30                                       | `cd src-tauri && cargo test`              |
+| Rust capability contract  | 1                                        | (same run)                                |
+| Rust golden contract      | 2                                        | (same run)                                |
+| Rust application crate    | 148                                      | `cd src-tauri && cargo test --workspace`  |
+| Rust infrastructure crate | 109                                      | (same run)                                |
+| Rust domain crate         | 4                                        | (same run)                                |
+| Rust native-host          | 19                                       | `cd extensions/native-host && cargo test` |
+| Frontend (total)          | 243 (47 files, incl. 72 extension tests) | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -203,6 +211,7 @@ PwdVault/
 ## 3. Roadmap
 
 ### Phase G — v1.0 Release ✅ Completed
+
 - [x] **G1** Firefox extension (MV3, gecko manifest, shared source via symlink)
 - [x] **G2** Clean up test credentials from docs (verified clean)
 - [x] **G3** Update CHANGELOG + AGENTS.md
@@ -210,24 +219,28 @@ PwdVault/
 - [x] **G5** Tighten CSP in tauri.conf.json (null → restrictive policy)
 
 ### Phase D — Project Identity (v0.2.0) ✅ Completed
+
 - [x] **D1** Rewrite README.md with actual project info
 - [x] **D2** Design PwdVault brand icon (SVG lock+shield, generate all sizes)
 - [x] **D3** CI DMG packaging for macOS
 - [x] **D4** Version sync script (`scripts/bump-version.sh`)
 
 ### Phase E — User Features (v0.3.0) ✅ Completed
+
 - [x] **E1** Encrypted import/export (JSON backup/restore)
 - [x] **E2** Fuzzy search (`fuse.js`, threshold=0.3)
 - [x] **E3** Categories/folders (replaced by groups — implemented as `group_id` field)
 - [x] **E4** Settings screen (auto-lock timeout, default generator options, redb `settings` table)
 
 ### Phase F — Distribution & Security (partial)
-- [ ] **F1** macOS signing + notarization (requires Apple Developer account) — *skipped*
+
+- [ ] **F1** macOS signing + notarization (requires Apple Developer account) — _skipped_
 - [x] **F2** Update notification (checks GitHub Releases on startup)
-- [ ] **F3** Linux build (.deb + .AppImage) — *skipped*
+- [ ] **F3** Linux build (.deb + .AppImage) — _skipped_
 - [x] **F4** HTTP API rate limiting (5 failed unlocks → 60s lockout)
 
 ### Future (post-v1.0)
+
 - [ ] Biometric unlock (Touch ID / Windows Hello)
 - [ ] Secure notes
 - [ ] Breach monitoring (HIBP API)
@@ -239,13 +252,13 @@ PwdVault/
 
 ## 4. Important Decisions
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Database | redb | Pure Rust, no external deps, ACID-compliant |
-| Key storage | Memory only | Max security, key gone on power off |
+| Decision       | Choice                                                | Rationale                                                                   |
+| -------------- | ----------------------------------------------------- | --------------------------------------------------------------------------- |
+| Database       | redb                                                  | Pure Rust, no external deps, ACID-compliant                                 |
+| Key storage    | Memory only                                           | Max security, key gone on power off                                         |
 | Extension comm | Native Messaging → stdio host → HTTP API (port 17429) | Official browser API; host binary bridges stdio to the existing HTTP server |
-| Cloud sync | None (local-first) | Simpler, no server costs, max privacy |
-| System tray | Close-to-tray | Keeps HTTP server alive for extension |
+| Cloud sync     | None (local-first)                                    | Simpler, no server costs, max privacy                                       |
+| System tray    | Close-to-tray                                         | Keeps HTTP server alive for extension                                       |
 
 ---
 
@@ -288,10 +301,42 @@ git tag vX.Y.Z && git push origin main --tags
 - Database file locked exclusively while open
 - Clipboard auto-clears after 30 seconds
 - Key zeroized on vault lock or app quit
+- Password/Touch ID unlock serializes against the exclusive D8 windows and
+  re-validates the verification header before publishing keys (v1.1.9)
+- The webview holds no filesystem capability — backup/recovery-key file IO
+  is done by desktop Rust commands via native dialogs (v1.1.9)
+- Cloud-sync plaintext-domain structures zeroize on drop (v1.1.9)
+- Paired-extension vault operations count as activity for the auto-lock
+  timer (trusted endpoint); remote-activity decoupling is a v1.2 candidate
 
 ---
 
 ## 7. Session Log
+
+### 2026-10-05 (v1.1.9 — full-codebase audit + security fixes)
+
+Five-way subagent audit (security / silent failures / quality / static /
+dead code) with an independent second review, then a reviewed, staged
+implementation (`fix_impl_plan_v1.1.9.md`, plan-reviewer PASS after one
+revise round; four ds-worker work packages; independent code-reviewer
+APPROVE). Fixes shipped: **SEC-M1** unlock paths take the
+`exclusive_window` + re-validate the verification fingerprint
+(`complete_unlock`, covers biometric; interleave tests T1-T3);
+**SEC-M2** webview fs capability recalled — `export_vault_file` /
+`read_backup_file` / `enable_recovery(save_path)` desktop commands with
+native dialogs, atomic 0600 writes, 14 MiB cap, vault-dir exclusion
+(capability_contract reversed to assert removal); **SEC-M3** sync
+plaintext domain `derive(Zeroize, ZeroizeOnDrop)` + `decrypt_inner`
+clone-escape fix (E0509 handled via `mem::take`); **SF-P1** extension
+secret-fetch failures surface real errors on all fill/copy paths (no more
+empty-password "success"); SF-P2a-d silent-failure fixes (clipboard-clear
+notify-once, ErrorBoundary with Restart App, lock-failure toast, 0600
+credential creation); **CQ-P2a** shared `errorMessage` everywhere (raw
+JSON / enum-name errors gone); **CQ-P2b** import_vault staged split;
+SEC-L5 auto-lock semantics documented (implementation deferred to v1.2).
+Test baseline after: 294 Rust workspace + 19 native-host + 243 frontend
+(72 extension). Audit trail: `code_audit_2026-10-04.md` (§7-8 are the
+second-review conclusions), `code_audit_fix_plan_2026-10-04.md`.
 
 ### 2026-09-17 (v1.1.6 — Phase 1/2/3 landed)
 
@@ -330,10 +375,10 @@ latest stable (drop_non_drop + unused imports), over-cap modules split
 All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 169 frontend.
 
-
 ### 2026-09 (Security Audit + Phase 0 Hardening)
 
 **Three-way audit → verification → fixes** (backend / extension / desktop):
+
 - **Commits**: `a519ee1` (backend: integrity fail-open, init/port/blob paths),
   `43ae1d3` (desktop: auto-lock activity reporting, clipboard/lock/dialog
   hardening), `ad5cb61` (extension: deferred secret fetch, register-form
@@ -344,6 +389,7 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
   covered by new unit tests on both Rust and frontend sides.
 
 **Phase 0 hardening (this release candidate):**
+
 - **X1** Extension handshake errors now distinguish "cannot reach the app"
   (connection copy) from "protocol version mismatch" (upgrade copy), and
   surface the desktop-provided error message when the host responds.
@@ -368,19 +414,23 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 - **X7** AGENTS.md factual refresh (this document).
 
 ### 2026-05-01 (Phase G — v1.0.0 Release)
+
 **Tag**: `v1.0.0`
 
 **G5: CSP Hardening:**
+
 - Replaced `null` CSP in `tauri.conf.json` with restrictive policy
 - `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:17429`
 
 **G4: Security Checklist:**
+
 - `keystore.rs`: 4× `.unwrap()` → `.expect("keystore lock poisoned")`
 - `native_messaging.rs`: Added CORS wildcard security justification comment
 - `.gitignore`: Added `.env` and `.env.*`
 - `.github/workflows/release.yml`: Added `security-audit` job with `cargo audit`
 
 **G1: Firefox Extension:**
+
 - Created `extensions/firefox/manifest.json` with `browser_specific_settings.gecko`
 - Symlinks: `src → ../chrome/src/`, `icons → ../chrome/icons/`
 - Updated `build.sh` to package both Chrome and Firefox extensions
@@ -388,11 +438,13 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 - CI now builds both Chrome and Firefox extension artifacts
 
 **G3: Documentation:**
+
 - CHANGELOG.md: Added v0.3.1 entry (Light/Dark redesign, F2, F4, modular CSS)
 - AGENTS.md: Updated version, roadmap, directory structure, session log
 - README.md: Updated status to v1.0.0, added Firefox install section, updated roadmap
 
 ### 2026-04-30 (v0.3.1)
+
 - Frontend redesign: Light/Dark dual-theme system replacing Classic/Cyber/Hybrid
 - Modular CSS: App.css split into 6 files (themes, base, components, screens, vault, groups, settings)
 - F2: Update notification (ureq + semver version comparison)
@@ -401,9 +453,11 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 - Browser extension synced with Light/Dark theme system
 
 ### 2026-04-17 (Phase E — v0.3.0 Release)
+
 **Commit**: `a86edc6` · **Tag**: `v0.3.0` · **GitHub Release**: published
 
 **E1: Encrypted Import/Export:**
+
 - `export_vault` / `import_vault` Tauri commands + HTTP API endpoints
 - `.pvault` file format: AES-256-GCM encrypted JSON with Argon2id key derivation
 - Export password independent of master password (portable backups)
@@ -413,20 +467,24 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 - Browser extension: `exportVault` / `importVault` API wrappers
 
 **E2: Fuzzy Search:**
+
 - fuse.js weighted search: title (0.4), username (0.3), url (0.2), tags (0.1)
 - Consistent config between desktop app and browser extension
 
 **E4: Settings Screen:**
+
 - `SettingsScreen.tsx` — auto-lock timeout (1–60 min), default generator options
 - Settings persisted to redb `settings` table
 - Dynamic auto-lock reads timeout from settings
 - Backward compatible: pre-v0.3 vaults fallback to defaults
 
 **CI/CD:**
+
 - GitHub Actions v0.3.0 build: macOS DMG + app bundle, Windows exe, extension zip
 - All 4 jobs passed; GitHub Release published with artifacts
 
 ### 2026-04-16 (Browser Extension Fixes)
+
 **Commits**: `0c381e3`, `25e787c`
 
 - Fixed browser extension group display inconsistency with desktop app
@@ -435,23 +493,28 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 - Fixed tray menu Lock/Unlock state sync after vault lock
 
 ### 2026-04-01 (Phase A/B/C — Quality & Tests)
+
 **Commits**: `d748292`
 
 **Phase A (v0.1.2) — Bug Fixes:**
+
 - Fixed auto-lock race condition: `clear_key()` + activity reset now atomic under same mutex
 - Removed all `eprintln!("[DEBUG]...")` from production code
 
 **Phase B (v0.1.3) — Rust Test Coverage:**
+
 - Extracted `paths.rs` shared module (eliminated ~40 lines duplicate code)
 - Added 48 Rust tests covering crypto, database, lib.rs commands, and all 13 HTTP API endpoints
 - Replaced all `.unwrap()` with `.expect("descriptive message")` in lib.rs and native_messaging.rs
 - Unified `lock_vault` HTTP command to use `state.lock_vault()` atomic method
 
 **Phase C (v0.1.3) — Frontend Tests:**
+
 - Configured Vitest + Testing Library + jsdom
 - 17 frontend tests: passwordStrength calculator and vault API client
 
 **Phase D (v0.1.3) — Password Generator Security Fix:**
+
 - Fixed character type guarantee issue: implemented shuffle-guarantee algorithm ensuring all selected character types are included
 - Upgraded random number generation from thread_rng to OsRng for stronger entropy
 - Added 11 comprehensive password generator tests covering all scenarios
@@ -459,6 +522,7 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 - Created detailed technical analysis document (`password_generator_analysis.md`)
 
 **Phase E (v0.1.3) — Release Packaging:**
+
 - Fixed TypeScript test compilation error (added missing `tags` property)
 - Rebuilt macOS application bundle (3.5MB)
 - Rebuilt Chrome extension package (21KB)
@@ -466,11 +530,13 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 - Updated AGENTS.md with v0.1.3 release information
 
 **Technical Notes:**
+
 - Rust tests are parallel-safe (keystore is per-AppState, no global statics)
 - Tauri v2 `MenuItem<R: Runtime>` generic prevents direct storage; solved with closure type erasure (`Box<dyn Fn(&str) + Send + Sync>`)
 - Password generator now guarantees 100% coverage of selected character types using shuffle-guarantee algorithm
 
 ### 2026-03-26 (Phase 1 — Crypto & Core)
+
 **Duration**: Full day
 **Commits**: `c0b00c2`, `3010745`, `cabb999`
 
@@ -481,16 +547,19 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 - Pushed to GitHub private repo
 
 ### 2026-03-27 (Phase 2 — UI/UX & Release)
+
 **Duration**: Full day
 **Commits**: `555a6ae`, `7d06b04`, `1831119`, `ec2c9bc`
 **Branch**: `feature/phase1-crypto` → merged to `main`
 
 **Parallel Development (3 worktrees):**
+
 - Password strength indicator (`src/utils/passwordStrength.ts`)
 - Chrome Popup UI enhancement (search, show/hide, copy, URL)
 - Content script + clipboard integration (auto-fill prompt, MutationObserver, keyboard shortcuts)
 
 **Infrastructure:**
+
 - System tray with close-to-tray behavior
 - Fixed browser extension communication (native messaging → HTTP API)
 - Added missing HTTP API commands (`update_entry`, `remove_entry`, `get_entry_count`)
@@ -498,12 +567,14 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 - GitHub Release v0.1.0 with macOS/Windows installers + Chrome extension
 
 **Bugs Fixed:**
+
 1. Extension `background.js` used native messaging but desktop provides HTTP API — rewrote to use `fetch()`
 2. HTTP API missing 3 commands — added `update_entry`, `remove_entry`, `get_entry_count`
 3. macOS bundle identifier ended with `.app` — changed to `com.pwdvault.desktop`
 4. GitHub Actions CI failed — missing `pnpm/action-setup@v4` before `actions/setup-node@v4`
 
 **Build Outputs:**
+
 - macOS `.app`: 9.8 MB
 - Windows `.exe`: 2.3 MB
 - Chrome extension `.zip`: 20 KB
@@ -516,6 +587,7 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 ### 2026-04-14 (Phase D — Project Identity + Design System)
 
 **Phase D — Project Identity (v0.2.0):**
+
 - Created `scripts/bump-version.sh` — version sync across 6 files
 - Updated `.github/workflows/release.yml` — DMG packaging for macOS
 - Rewrote `README.md` (~120 lines) and created `LICENSE` (MIT)
@@ -523,12 +595,14 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 - Bumped all versions to v0.2.0
 
 **Bug Fixes (Groups + Delete):**
+
 - Fixed GroupSelector/GroupManager: replaced `prompt()`/`confirm()` with inline UI (Tauri WebView doesn't support browser native dialogs)
 - Fixed "Vault is already unlocked" error: added `groupManager` route in App.tsx + made `set_key()` idempotent
 - Fixed entries not showing after adding to groups: added `LegacyPasswordEntry` fallback deserialization for bincode v1 backward compatibility
 - Fixed delete button not working: created `DeleteConfirmModal` component replacing `confirm()`
 
 **Design System (/design-consultation):**
+
 - Competitive research: 1Password, Bitwarden, KeePassXC design analysis
 - Created three-theme design system documented in `DESIGN.md`:
   - **Classic** (default): Industrial Refined — cyan #0EA5E9, Plus Jakarta Sans
@@ -540,6 +614,7 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 ### 2026-04-15 (Design System Implementation + UX Polish)
 
 **Design System Applied (themes.css + App.css):**
+
 - Added type scale CSS variables: `--text-h1` (1.5rem) through `--text-micro` (0.6875rem) per DESIGN.md
 - Added spacing tokens: `--space-xs` (4px) through `--space-2xl` (32px) per DESIGN.md
 - Added `--icon-style` token per theme: solid (Classic), hollow (Cyber), glow (Hybrid)
@@ -549,6 +624,7 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 - Hybrid theme: radial gradient background (cyan top-left + rose bottom-right)
 
 **VaultScreen UX Redesign:**
+
 - Replaced `<select>` dropdown group filter with horizontal scrollable group tabs
 - Active tab: primary-dim background + primary color text + primary border
 - Search input with magnifying glass SVG icon
@@ -557,12 +633,14 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 - Removed all inline styles from VaultScreen component
 
 **ConfirmationModal & DeleteConfirmModal Redesign:**
+
 - Replaced all inline styles with CSS classes
 - Edit confirmation: icon header (pen icon in primary-dim circle), diff-style change list (~~old~~ → **new**), checkbox + Save/Cancel buttons
 - Delete confirmation: danger icon header (trash in danger-dim circle), message body, Cancel/Delete buttons
 - Consistent modal layout: header → content → footer
 
 **GroupManager Redesign:**
+
 - Card-based layout: each group as a card with folder icon, name, and entry count
 - Action buttons always visible with `background: var(--color-input)` + `border: 1px solid var(--color-border)`
 - Rename: 32px icon button, hover → primary color highlight
@@ -571,6 +649,7 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 - Header + button in top-right for creating groups (consistent with vault page pattern)
 
 **Release Artifacts:**
+
 - `PwdVault_0.2.0_aarch64.dmg` (3.6MB) — macOS DMG installer
 - `PwdVault-macOS-v0.2.0.zip` (3.5MB) — macOS .app bundle
 - `PwdVault-Extension-v0.2.0.zip` (20.8KB) — Chrome extension
@@ -581,20 +660,21 @@ All Rust files now ≤800 lines. Test baseline: 256 Rust + 19 native-host +
 
 代码开发任务必须主动根据情况择优调用以下插件工具，不需要用户提醒：
 
-| 阶段 | 推荐工具 |
-|------|----------|
+| 阶段 | 推荐工具                                 |
+| ---- | ---------------------------------------- |
 | 规划 | gstack `/plan-eng-review`、planner agent |
-| 编码 | superpowers 代码生成、ECC TDD 技能 |
-| 审查 | `code-reviewer` agent、gstack `/review` |
-| 安全 | `security-reviewer` agent、ECC 安全技能 |
-| 测试 | gstack `/qa`、`tdd-guide` agent |
-| 构建 | `build-error-resolver` agent |
+| 编码 | superpowers 代码生成、ECC TDD 技能       |
+| 审查 | `code-reviewer` agent、gstack `/review`  |
+| 安全 | `security-reviewer` agent、ECC 安全技能  |
+| 测试 | gstack `/qa`、`tdd-guide` agent          |
+| 构建 | `build-error-resolver` agent             |
 
 简单/单文件修改可酌情跳过，复杂多文件功能必须调用。
 
 ---
 
 ## Design System
+
 Always read DESIGN.md before making any visual or UI decisions.
 All font choices, colors, spacing, and aesthetic direction are defined there.
 Two themes available: Light (default), Dark. Automatically follows OS preference.
@@ -626,13 +706,13 @@ encrypted vault (redb)
 
 ### Key Files
 
-| File | Role |
-|------|------|
-| `extensions/native-host/src/main.rs` | Host binary: stdio↔HTTP bridge |
-| `extensions/chrome/src/background.js` | Extension: sendNativeMessage transport |
-| `src-tauri/crates/infrastructure/src/native_host_setup.rs` | Manifest generation + browser registration |
-| `src-tauri/src/lib.rs` `register_native_host()` | Auto-register on startup (chmod +x, read IDs from config) |
-| `extensions/chrome/scripts/install-native-host.sh` | Write extension IDs to config file |
+| File                                                       | Role                                                      |
+| ---------------------------------------------------------- | --------------------------------------------------------- |
+| `extensions/native-host/src/main.rs`                       | Host binary: stdio↔HTTP bridge                            |
+| `extensions/chrome/src/background.js`                      | Extension: sendNativeMessage transport                    |
+| `src-tauri/crates/infrastructure/src/native_host_setup.rs` | Manifest generation + browser registration                |
+| `src-tauri/src/lib.rs` `register_native_host()`            | Auto-register on startup (chmod +x, read IDs from config) |
+| `extensions/chrome/scripts/install-native-host.sh`         | Write extension IDs to config file                        |
 
 ### Setup for Development
 

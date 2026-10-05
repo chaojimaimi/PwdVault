@@ -58,6 +58,10 @@ ciphertext.
 
 The browser extension never talks to the cloud and never sees sync
 credentials — it is a client of the local vault on its own machine only.
+Vault operations from a paired extension count as user activity for the
+auto-lock timer (a paired extension is a trusted endpoint); file backups
+and recovery-key exports are written by the desktop app itself through
+native dialogs — the webview holds no filesystem permissions.
 
 ## Desktop App
 
@@ -159,7 +163,7 @@ cd extensions/native-host && cargo test --locked
 
 ## Project Status
 
-v1.1.7. See [CHANGELOG.md](CHANGELOG.md) for details.
+v1.1.9. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ### Roadmap
 
