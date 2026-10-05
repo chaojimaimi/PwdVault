@@ -4,8 +4,8 @@ A secure, local-first password manager built with Tauri + React.
 
 **Last Updated**: 2026-10-05
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.1.9
-**Current Version**: `v1.1.9` — 2026-10 full-codebase audit fixes (D8 unlock interlock, fs capability recall, sync zeroize, extension false-success fix) + 2026-09 audit fixes + Phase 0-3 features (key infrastructure, soft delete/TOTP, cloud sync)
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.2.0
+**Current Version**: `v1.2.0` — 2026-10 audit remediation complete (Low-tier hardening: auto-lock remote grace, sync config encryption, native-host token validation, OAuth callback hardening; P3 polish + dead-code cleanup) + v1.1.9 audit fixes + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -192,16 +192,16 @@ PwdVault/
 
 **Test Suite Summary** (counts from actual test output, 2026-10-05):
 
-| Module                    | Tests                                    | Command                                   |
-| ------------------------- | ---------------------------------------- | ----------------------------------------- |
-| Rust tauri-app lib        | 30                                       | `cd src-tauri && cargo test`              |
-| Rust capability contract  | 1                                        | (same run)                                |
-| Rust golden contract      | 2                                        | (same run)                                |
-| Rust application crate    | 148                                      | `cd src-tauri && cargo test --workspace`  |
-| Rust infrastructure crate | 109                                      | (same run)                                |
-| Rust domain crate         | 4                                        | (same run)                                |
-| Rust native-host          | 19                                       | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 243 (47 files, incl. 72 extension tests) | `pnpm test`                               |
+| Module                    | Tests                                          | Command                                   |
+| ------------------------- | ---------------------------------------------- | ----------------------------------------- |
+| Rust tauri-app lib        | 31                                             | `cd src-tauri && cargo test`              |
+| Rust capability contract  | 1                                              | (same run)                                |
+| Rust golden contract      | 2                                              | (same run)                                |
+| Rust application crate    | 159                                            | `cd src-tauri && cargo test --workspace`  |
+| Rust infrastructure crate | 108 (+1 ignored keychain SecItem smoke, CI 跑) | (same run)                                |
+| Rust domain crate         | 4                                              | (same run)                                |
+| Rust native-host          | 23                                             | `cd extensions/native-host && cargo test` |
+| Frontend (total)          | 253 (52 files, incl. 76 extension tests)       | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -306,12 +306,45 @@ git tag vX.Y.Z && git push origin main --tags
 - The webview holds no filesystem capability — backup/recovery-key file IO
   is done by desktop Rust commands via native dialogs (v1.1.9)
 - Cloud-sync plaintext-domain structures zeroize on drop (v1.1.9)
-- Paired-extension vault operations count as activity for the auto-lock
-  timer (trusted endpoint); remote-activity decoupling is a v1.2 candidate
+- Desktop input maintains the full auto-lock window; explicit vault
+  operations (including paired-extension calls) extend only a 120s grace —
+  unattended desktops lock even with a paired extension idle (v1.2.0)
+- Sync config/state rows are encrypted at rest with read-time legacy
+  migration and re-seal key rotation (v1.2.0)
 
 ---
 
 ## 7. Session Log
+
+### 2026-10-05 (v1.2.0 — audit remediation complete: Low hardening + cleanup)
+
+Same pipeline as v1.1.9 (plan → 3-round plan-reviewer PASS → 5 workers in
+2 waves → main-agent review + independent code-reviewer APPROVE with
+comments, 0 P0/P1/P2 → gates → release). ds-worker provider hit a quota
+limit mid-run; Wave 2 was re-dispatched to general-purpose workers with
+identical specs. Shipped: **SEC-L5** auto-lock remote-activity grace —
+desktop input keeps the full window, explicit vault ops (incl. paired
+extension) extend only 120s; `last_remote_activity` lives in
+`SessionInner::Unlocked`; 20 service touch sites → remote, 4 in-person
+`state.touch_activity` sites kept local with comments.
+**SEC-L2** sync_config/sync_state rows encrypted at rest (PVSYNC1 + AAD
+row binding), read-time legacy migration, and re-seal key rotation via
+the dual-read helper (reusing `parse_sync_row`, never bare unwrap —
+unmigrated plaintext rows survive password change; survival tests ×2
+with legacy fixtures). **SEC-L1** native-host 64-hex token whitelist;
+**SEC-L3** Baidu OAuth callback loop-discards invalid probes (error=
+denial still returns immediately); **SEC-L4** recovery key returned as
+`Zeroizing<String>`. SF-P3a-f silent-failure batch; CQ-P3a revoke
+service-layer delegation; CQ-P3b pair rate-limit single-mutex; CQ-P3d
+EntryScreen split (TotpSecretField + TagsEditor + pure detectChanges,
+752→686); fuse-options parity test (desktop↔popup); dead-code cleanup
+(schemas, 8 extension dead cases, unused deps serde_json/base64/uuid —
+Cargo.lock −3 lines); ST-1 (typecheck covers tsconfig.node.json;
+TS5069 not triggered on TS 5.8, composite kept); keychain SecItem CI
+smoke (ignored locally, real keychain on the macOS quality job — filter
+must use the full test path, substring + --exact silently matches 0).
+Test baseline after: 305 Rust (+1 ignored CI smoke) + 23 native-host +
+253 frontend (76 extension). Plan: `fix_impl_plan_v1.2.0.md` (R3).
 
 ### 2026-10-05 (v1.1.9 — full-codebase audit + security fixes)
 
