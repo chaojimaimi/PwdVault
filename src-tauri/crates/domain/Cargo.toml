@@ -1,6 +1,6 @@
 [package]
 name = "pwdvault-domain"
-version = "1.1.9"
+version = "1.2.0"
 edition = "2021"
 description = "PwdVault domain model — entities, DTOs, validation policy, error codes"
 license = "MIT"
@@ -11,8 +11,6 @@ path = "src/lib.rs"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-base64 = "0.22"
 zeroize = { version = "1", features = ["derive", "serde"] }
 thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }

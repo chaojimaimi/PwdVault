@@ -1,6 +1,6 @@
 [package]
 name = "pwdvault-application"
-version = "1.1.9"
+version = "1.2.0"
 edition = "2021"
 description = "PwdVault application layer — vault lifecycle, CRUD, backup, session use cases"
 license = "MIT"
@@ -35,7 +35,6 @@ redb = "2"
 # Utilities
 thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["v4"] }
 rand = "0.8"
 
 # WebDAV sync backend (P3.2). 3.4+ is required for

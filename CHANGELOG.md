@@ -4,6 +4,61 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+
+## [1.2.0] - 2026-10-06
+
+### Security
+
+- Auto-lock remote-activity grace (behavior change): desktop input keeps
+  the full auto-lock window, but explicit vault operations — including
+  every paired-extension call — now extend only a short 120-second grace.
+  An unattended unlocked desktop locks even if a paired extension sits
+  idle; active extension use stays alive for as long as it is actually
+  used.
+- Sync settings (server URL, username, remote dir, device id) are now
+  encrypted at rest with row-bound AAD. Legacy plaintext rows migrate on
+  first read, and master-password changes / recovery re-seals rotate the
+  row keys, so sync survives password changes. Note: after upgrading,
+  rolling back to v1.1.9 loses the stored sync configuration (reconnect
+  to restore).
+- The native messaging host validates the bearer token shape (64 hex)
+  before forwarding, closing a header-injection defense gap.
+- The Baidu OAuth callback listener now discards invalid probes
+  (no code / forged state) and keeps waiting instead of letting the
+  first request consume the pending authorization.
+- The one-time recovery key crosses IPC as a zeroizing string.
+
+### Fixed
+
+- Silent-failure batch: corrupt settings no longer silently reset the
+  auto-lock default; sync-credential deletion failures are logged; a
+  failed pairing-code event emit is logged; extension token/nonce save
+  failures warn, and a lost pairing session reports itself instead of
+  "Invalid or expired code"; the browser-fallback backup reader reports
+  read errors; the sync panel shows "Status unknown + Retry" on a failed
+  initial probe instead of a connect form.
+- Popup auto-fill now reports a failed secret fetch instead of doing
+  nothing.
+
+### Changed
+
+- Pair rate limiting is now race-free (single lock, same 10/min policy).
+- `revoke_extension_access` is delegated through the application service
+  layer by both the desktop and HTTP adapters.
+- EntryScreen split into TotpSecretField + TagsEditor components with a
+  pure change-detection function (no behavior change).
+
+### Internal
+
+- Dead-code cleanup: unused schema-version machinery, vault-store
+  helpers, extension message dead cases, orphan CSS classes, and the
+  unused serde_json/base64/uuid dependencies (Cargo.lock −3 entries).
+- `typecheck` now also covers tsconfig.node.json; the stale
+  `@ts-expect-error` in vite.config.ts is gone.
+- New keychain SecItem smoke test runs against the real login keychain
+  on the macOS CI job (ignored locally).
+- Fuse search options are covered by a desktop↔popup parity test.
+
 ## [1.1.9] - 2026-10-05
 
 ### Security
