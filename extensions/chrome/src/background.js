@@ -439,15 +439,24 @@ async function getEntry(id) {
 	// (password/notes/last_used_at). Fetch both and merge so callers keep
 	// getting the full entry shape they expect.
 	//
-	// Use allSettled so a secret-fetch failure (e.g. transient backend error)
-	// does not take down the meta fetch — the user still sees title/username/url,
-	// and password simply falls back to empty.
+	// allSettled keeps the two fetches independent: a meta failure (or a falsy
+	// meta — entry deleted between listing and fetching) still returns null.
+	// A secret failure must NOT fall back to an empty password — that fallback
+	// made autofill look successful with a blank credential (audit SF-P1), so
+	// it throws a typed error that the UI paths translate into an actionable
+	// "vault may be locked" message instead.
 	const [metaRes, secretRes] = await Promise.allSettled([
 		sendToApp("get_entry_meta", { id_param: id }),
 		sendToApp("get_entry_secret", { id_param: id }),
 	]);
 	if (metaRes.status !== "fulfilled" || !metaRes.value) return null;
-	const secret = secretRes.status === "fulfilled" ? secretRes.value : null;
+	if (secretRes.status === "rejected") {
+		const reason = secretRes.reason;
+		throw new Error(
+			"SECRET_FETCH_FAILED: " + (reason?.message || "secret fetch failed"),
+		);
+	}
+	const secret = secretRes.value;
 	return {
 		...metaRes.value,
 		password: secret ? secret.password : "",
@@ -559,7 +568,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 	// Wrap everything: a throw inside this listener would only surface as a
 	// silent unhandled rejection in the service worker console.
 	try {
-		if (info.menuItemId !== "pwdvault-fill" && info.menuItemId !== "pwdvault-generate") {
+		if (
+			info.menuItemId !== "pwdvault-fill" &&
+			info.menuItemId !== "pwdvault-generate"
+		) {
 			return;
 		}
 
@@ -587,6 +599,16 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 					notifyTab(tab.id, "Entry no longer available", "error");
 					return;
 				}
+				// SF-P1: never send an empty password — a blank AUTOFILL used to
+				// fill the form and still report success to the user.
+				if (!entry.password) {
+					notifyTab(
+						tab.id,
+						"Failed to fetch password (is the desktop app unlocked?)",
+						"error",
+					);
+					return;
+				}
 				chrome.tabs.sendMessage(tab.id, {
 					type: "AUTOFILL",
 					username: entry.username,
@@ -608,7 +630,17 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 		// M12: never silent — but the SW has no UI channel, so log and stop.
 		console.error("PwdVault: context-menu action failed:", error);
 		if (tab && tab.id) {
-			notifyTab(tab.id, "PwdVault action failed — see app logs", "error");
+			// SF-P1: getEntry throws the typed SECRET_FETCH_FAILED error when
+			// the secret fetch fails (e.g. the vault locked between the unlock
+			// check and the fetch) — give it the same actionable copy as the
+			// empty-password guard instead of the generic "see app logs".
+			notifyTab(
+				tab.id,
+				error?.message?.startsWith("SECRET_FETCH_FAILED")
+					? "Failed to fetch password (is the desktop app unlocked?)"
+					: "PwdVault action failed — see app logs",
+				"error",
+			);
 		}
 	}
 });
@@ -762,6 +794,18 @@ chrome.commands.onCommand.addListener(async (command) => {
 				const entries = await getEntriesForUrl(tab.url);
 				if (entries.length > 0) {
 					const entry = await getEntry(entries[0].id);
+					// SF-P1: guard before sending — a null entry used to crash on
+					// `entry.username` (TypeError silently swallowed by this catch)
+					// and an empty password filled a blank credential while still
+					// reporting success.
+					if (!entry || !entry.password) {
+						notifyTab(
+							tab.id,
+							"Failed to fetch password (is the desktop app unlocked?)",
+							"error",
+						);
+						return;
+					}
 					chrome.tabs.sendMessage(tab.id, {
 						type: "AUTOFILL",
 						username: entry.username,
@@ -773,6 +817,20 @@ chrome.commands.onCommand.addListener(async (command) => {
 				}
 			} catch (error) {
 				console.error("Autofill failed:", error);
+				// SF-P1: getEntry throws the typed SECRET_FETCH_FAILED error when
+				// the secret fetch fails (e.g. vault locked) — surface it on the
+				// page instead of staying console-only.
+				if (
+					tab &&
+					tab.id &&
+					error?.message?.startsWith("SECRET_FETCH_FAILED")
+				) {
+					notifyTab(
+						tab.id,
+						"Failed to fetch password (is the desktop app unlocked?)",
+						"error",
+					);
+				}
 			}
 		}
 	}

@@ -37,6 +37,7 @@ pub use super::state_io::{
     SYNC_STATE_BLOB_KEY,
 };
 
+use std::mem;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -220,7 +221,7 @@ pub fn sync_connect_with_backend(
     let pull = pull_or_bootstrap(state, backend, &paths, &container_password, &keys)?;
 
     // --- D8 exclusive window: merge remote into local. ---
-    let merged = run_merge_window(state, &mut keys, Some(&pull.snapshot))?;
+    let mut merged = run_merge_window(state, &mut keys, Some(&pull.snapshot))?;
 
     // --- Push when the merge added local content; then persist rows. ---
     let device_id = new_device_id();
@@ -254,7 +255,11 @@ pub fn sync_connect_with_backend(
             base_rev: pull.snapshot.rev,
         };
         update_manifest(&ctx, &device_id, pull.snapshot.rev, &pull.container_bytes);
-        (merged.entries, merged.groups, pull.snapshot.rev)
+        // ZeroizeOnDrop forbids partial moves out of `merged` (E0509):
+        // take the rows instead.
+        let entries = mem::take(&mut merged.entries);
+        let groups = mem::take(&mut merged.groups);
+        (entries, groups, pull.snapshot.rev)
     };
 
     let sync_state = SyncState {
@@ -340,7 +345,7 @@ pub fn sync_now_with_backend(
     };
 
     // --- D8 exclusive window: pull + merge + write-back + republish. ---
-    let (base_rev, etag, merged, need_upload) = match &basis {
+    let (base_rev, etag, mut merged, need_upload) = match &basis {
         RemoteBasis::Fresh { snapshot, etag } => {
             let merged = run_merge_window(state, &mut keys, Some(snapshot))?;
             {
@@ -383,7 +388,11 @@ pub fn sync_now_with_backend(
         )?;
         (outcome.entries, outcome.groups, outcome.rev)
     } else {
-        (merged.entries, merged.groups, base_rev)
+        // ZeroizeOnDrop forbids partial moves out of `merged` (E0509):
+        // take the rows instead.
+        let entries = mem::take(&mut merged.entries);
+        let groups = mem::take(&mut merged.groups);
+        (entries, groups, base_rev)
     };
 
     // --- Persist the new bookkeeping (digest-covered rows). ---

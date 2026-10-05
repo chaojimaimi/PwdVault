@@ -64,7 +64,10 @@ pub use shared::{
     RECOVERY_WRAP_BLOB_KEY, SYNC_CEK_BLOB_KEY,
 };
 
+// The fixture module is crate-visible so the sync window regression suite
+// (service::sync::tests_window) can reuse the weak-KDF vault + memory
+// credential-store fixtures for the biometric-vs-window test (WP-1 T3).
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 #[cfg(test)]
 mod tests_credentials;

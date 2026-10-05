@@ -16,6 +16,7 @@ import type {
 	ResourceStatus,
 } from "../types";
 import * as api from "../api/vault";
+import { errorMessage } from "../utils/errorMessage";
 import { useAuth } from "./AuthContext";
 
 // ---------------------------------------------------------------------------
@@ -161,7 +162,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 				} catch (error) {
 					dispatch({
 						type: "SET_ENTRIES_RESOURCE",
-						payload: { status: "error", error: formatError(error) },
+						payload: { status: "error", error: errorMessage(error, "Failed to load entries") },
 					});
 					throw error;
 				}
@@ -182,7 +183,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 				} catch (error) {
 					dispatch({
 						type: "SET_GROUPS_RESOURCE",
-						payload: { status: "error", error: formatError(error) },
+						payload: { status: "error", error: errorMessage(error, "Failed to load groups") },
 					});
 					throw error;
 				}
@@ -289,16 +290,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 	return (
 		<VaultContext.Provider value={value}>{children}</VaultContext.Provider>
 	);
-}
-
-function formatError(error: unknown): string {
-	if (error instanceof Error) return error.message;
-	if (typeof error === "string") return error;
-	try {
-		return JSON.stringify(error);
-	} catch {
-		return "Unknown error";
-	}
 }
 
 export function useVault() {

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth, useVault } from "../context/AppContext";
+import { exportVaultFile, readBackupFile } from "../api/vault";
 import { showToast } from "../utils/toast";
 import { BackHeader } from "../components/BackHeader";
 import { TrashIcon } from "../components/Icons";
@@ -51,33 +52,21 @@ export function ImportExportScreen() {
 		}
 
 		setExporting(true);
-		let backup: VaultBackup;
 		try {
-			backup = await actions.exportVault(exportPassword);
-		} catch (error) {
-			showToast(
-				`Backup generation failed: ${errorMessage(error, "Unknown backend error")}`,
-			);
-			setExporting(false);
-			return;
-		}
-
-		try {
-			const json = JSON.stringify(backup, null, 2);
-
 			if (isTauriEnvironment()) {
-				const { save } = await import("@tauri-apps/plugin-dialog");
-				const filePath = await save({
-					defaultPath: `pwdvault-backup-${new Date().toISOString().slice(0, 10)}.pvault`,
-					filters: [{ name: "PwdVault Backup", extensions: ["pvault"] }],
-				});
-				if (filePath) {
-					const { writeFile } = await import("@tauri-apps/plugin-fs");
-					const encoder = new TextEncoder();
-					await writeFile(filePath, encoder.encode(json));
-					showToast("Backup exported successfully");
+				// SEC-M2: the backend opens the native save dialog, serializes the
+				// encrypted container and writes it atomically. `null` means the
+				// user cancelled the dialog — not an error.
+				const savedPath = await exportVaultFile(exportPassword);
+				if (savedPath) {
+					const fileName = savedPath.split(/[\\/]/).pop() || "backup.pvault";
+					showToast(`Backup exported successfully: ${fileName}`);
 				}
 			} else {
+				// Browser fallback: generate the container here and download it
+				// as a Blob (no fs capability needed).
+				const backup = await actions.exportVault(exportPassword);
+				const json = JSON.stringify(backup, null, 2);
 				const blob = new Blob([json], { type: "application/json" });
 				const url = URL.createObjectURL(blob);
 				const a = document.createElement("a");
@@ -91,7 +80,7 @@ export function ImportExportScreen() {
 			setExportPassword("");
 			setExportConfirm("");
 		} catch (error) {
-			showToast(`Backup save failed: ${errorMessage(error, "Unknown file error")}`);
+			showToast(`Backup export failed: ${errorMessage(error, "Unknown file error")}`);
 		} finally {
 			setExporting(false);
 		}
@@ -100,29 +89,20 @@ export function ImportExportScreen() {
 	const handleSelectFile = async () => {
 		try {
 			if (isTauriEnvironment()) {
-				const { open } = await import("@tauri-apps/plugin-dialog");
-				const filePath = await open({
-					filters: [{ name: "PwdVault Backup", extensions: ["pvault"] }],
-					multiple: false,
-				});
-				if (filePath) {
-					const { readFile, stat } = await import("@tauri-apps/plugin-fs");
-					const info = await stat(filePath as string);
-					if (info.size > MAX_BACKUP_FILE_BYTES) {
-						showToast("Backup file is too large");
-						return;
-					}
-					const bytes = await readFile(filePath as string);
-					const text = new TextDecoder().decode(bytes);
-					const backup = JSON.parse(text) as VaultBackup;
+				// SEC-M2: the backend opens the native open dialog and pre-validates
+				// the file (size cap + envelope); `null` means the user cancelled.
+				const backup = await readBackupFile();
+				if (backup) {
+					// Double guard: the backend already checked the envelope, but the
+					// shape is still asserted before it reaches the import flow.
 					if (!isSupportedBackup(backup)) {
 						showToast("Unsupported backup version");
 						return;
 					}
 					setSelectedBackup(backup);
-					setSelectedFileName(
-						(filePath as string).split(/[\\/]/).pop() || "backup.pvault",
-					);
+					// The raw path never reaches the webview anymore, so the button
+					// cannot show the picked file name.
+					setSelectedFileName("Selected backup");
 				}
 			} else {
 				const input = document.createElement("input");

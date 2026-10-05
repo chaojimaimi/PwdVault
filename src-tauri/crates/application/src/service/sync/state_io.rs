@@ -340,15 +340,24 @@ pub(super) struct LocalRows {
 
 /// Decrypt one inner string field (bincode `EncryptedData` first, raw
 /// nonce||ciphertext fallback — same resilient path as backup export).
+///
+/// SEC-M3: the plaintext bytes are consumed straight into the `String` —
+/// the previous `plain.clone()` kept a second unmanaged copy alive past the
+/// `zeroize()` of the original. On a UTF-8 rejection the raw bytes are wiped
+/// before the error escapes.
 fn decrypt_inner(enc: &[u8; KEY_SIZE], blob: &[u8]) -> Result<String, VaultError> {
     let sealed: EncryptedData = bincode::deserialize(blob)
         .or_else(|_| EncryptedData::from_bytes(blob))
         .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
-    let mut plain = decrypt(enc, &sealed)?;
-    let text =
-        String::from_utf8(plain.clone()).map_err(|e| VaultError::DecryptionFailed(e.to_string()));
-    plain.zeroize();
-    text
+    match String::from_utf8(decrypt(enc, &sealed)?) {
+        Ok(text) => Ok(text),
+        Err(e) => {
+            let message = e.to_string();
+            let mut bytes = e.into_bytes();
+            bytes.zeroize();
+            Err(VaultError::DecryptionFailed(message))
+        }
+    }
 }
 
 /// Full local read (raw rows including tombstones — the merge input).

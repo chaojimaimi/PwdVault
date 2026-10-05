@@ -8,6 +8,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 use tempfile::TempDir;
 use zeroize::Zeroizing;
 
@@ -18,6 +19,16 @@ use super::tests_engine::{
 };
 use crate::{change_password, list_all_entries, AppState, VaultError};
 use pwdvault_infrastructure::database;
+
+/// Settle time for a spawned unlock thread. The unlock must pass the
+/// verification-capture point (the mutex clone at the top of
+/// `unlock_vault`/`unlock_biometric`) BEFORE the gated window's re-seal
+/// replaces the verification row — the capture happens microseconds after
+/// spawn (rate-limit check + clone), while derivation (weak test KDF) plus
+/// the pre-window verification chain finish in well under this budget, so
+/// after the settle the unlock is parked on `exclusive_window` (held by the
+/// changer) and the gate can be released deterministically. See T1.
+const UNLOCK_SETTLE_MS: u64 = 500;
 
 /// Ids + titles of the live entries of a device (test assertion helper).
 fn live_titles(state: &Arc<AppState>) -> Vec<String> {
@@ -248,6 +259,202 @@ fn lock_during_change_password_window_keeps_new_password_semantics() {
         database::integrity::verify_integrity(&db, &device_a.session.get_mac_key().unwrap())
             .unwrap()
     );
+}
+
+// ---------------------------------------------------------------------------
+// Case 6 (SEC-M1): unlock waits on the D8 window and re-checks the
+// verification fingerprint — a re-seal finishing in between is rejected
+// with VAULT_STATE_CHANGED instead of publishing stale keys.
+// ---------------------------------------------------------------------------
+
+/// Arm the reseal gate, start `change_password(current → new)` and wait
+/// until it has drained the session and parked inside its D8 window (the
+/// gate seam sits right after the drain, before the re-seal transaction).
+fn park_change_password(
+    state: &Arc<AppState>,
+    current: &str,
+    new: &str,
+) -> thread::JoinHandle<Result<(), VaultError>> {
+    state.reseal_window_gate.arm();
+    let changer_state = Arc::clone(state);
+    let current = Zeroizing::new(current.to_string());
+    let new = Zeroizing::new(new.to_string());
+    let changer = thread::spawn(move || change_password(&changer_state, current, new, None));
+    state.reseal_window_gate.wait_until_arrived();
+    changer
+}
+
+/// Join an unlock thread result and require the SEC-M1 window rejection:
+/// `VAULT_STATE_CHANGED` (one error site shared by the password and
+/// biometric paths).
+fn assert_vault_state_changed<T: std::fmt::Debug>(result: Result<T, VaultError>) {
+    match result {
+        Err(VaultError::InvalidInput { code, message }) => {
+            assert_eq!(code, "VAULT_STATE_CHANGED");
+            assert!(message.contains("retry unlock"), "{message}");
+        }
+        other => panic!("expected VAULT_STATE_CHANGED, got {other:?}"),
+    }
+}
+
+/// Write through an existing handle while the window is parked: the drained
+/// session refuses new leases with VaultLocked.
+fn assert_write_rejected_during_window(state: &Arc<AppState>) {
+    let write = crate::create_entry(
+        state,
+        crate::CreateEntryRequest {
+            title: "during-window".to_string(),
+            url: None,
+            username: "user".to_string(),
+            password: Zeroizing::new("pw".to_string()),
+            notes: None,
+            tags: vec![],
+            group_id: None,
+        },
+    );
+    assert!(matches!(write, Err(VaultError::VaultLocked)), "{write:?}");
+}
+
+/// Full AEAD read-back after the re-seal: the bulk read must return exactly
+/// the pre-window rows (count match + plaintext password verified per row)
+/// — no orphaned or half-re-sealed rows — and the live service view and
+/// session must agree.
+fn assert_rows_read_back(state: &Arc<AppState>, ids: &[String], before: &[String]) {
+    let db = crate::service::vault::get_db(state).unwrap();
+    let enc = state.session.get_enc_key().unwrap();
+    let entries = database::list_all_entries_bulk(&db, &enc, None).unwrap();
+    assert_eq!(entries.len(), ids.len());
+    for id in ids {
+        let entry = database::load_entry(&db, &enc, id, false)
+            .unwrap()
+            .expect("pre-window entry must survive the re-seal");
+        let sealed: pwdvault_infrastructure::crypto::EncryptedData =
+            bincode::deserialize(&entry.encrypted_password).unwrap();
+        let plain = pwdvault_infrastructure::crypto::decrypt(&enc, &sealed).unwrap();
+        assert_eq!(
+            String::from_utf8(plain).unwrap(),
+            format!("secret-{}", entry.title)
+        );
+    }
+    assert_eq!(live_titles(state), before);
+    assert!(state.is_unlocked());
+}
+
+/// The window's verification replacement strictly follows `gate.open()`;
+/// the unlock's capture strictly precedes it (UNLOCK_SETTLE_MS). Both sides
+/// of the ordering are therefore deterministic.
+#[test]
+fn unlock_vs_change_password() {
+    let (device_a, _dir) = test_state();
+
+    let changer = park_change_password(&device_a, TEST_PASSWORD, NEW_PASSWORD);
+    let unlocker = {
+        let state = Arc::clone(&device_a);
+        thread::spawn(move || {
+            crate::unlock_vault(&state, Zeroizing::new(TEST_PASSWORD.to_string()))
+        })
+    };
+    thread::sleep(Duration::from_millis(UNLOCK_SETTLE_MS));
+    device_a.reseal_window_gate.open();
+    changer.join().unwrap().unwrap();
+
+    // The raced unlock (old password, pre-change expectation) must be
+    // rejected by the window re-check — never published.
+    assert_vault_state_changed(unlocker.join().unwrap());
+
+    // No stale publish: the new password owns the vault, the old is dead.
+    device_a.lock_vault();
+    assert!(!crate::unlock_vault(&device_a, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap());
+    assert!(crate::unlock_vault(&device_a, Zeroizing::new(NEW_PASSWORD.to_string())).unwrap());
+    let db = crate::service::vault::get_db(&device_a).unwrap();
+    assert!(
+        database::integrity::verify_integrity(&db, &device_a.session.get_mac_key().unwrap())
+            .unwrap()
+    );
+}
+
+/// While the re-seal window parks: (a) a raced password unlock is rejected
+/// with VAULT_STATE_CHANGED, (b) a write through an existing handle is
+/// rejected with VaultLocked (the session is drained — no publish path
+/// exists inside the window at all). After the change, every row reads back
+/// under the NEW keys with the exact pre-window count and content: the
+/// orphan-row hazard (stale-key rows surviving the re-seal) is unreachable
+/// by construction, and this test pins that invariant.
+#[test]
+fn no_orphan_row_invariant() {
+    let (device_a, _dir) = test_state();
+    let mut ids = Vec::new();
+    for title in ["alpha", "beta", "gamma"] {
+        ids.push(create_entry_titled(&device_a, title));
+    }
+    let before = live_titles(&device_a);
+
+    let changer = park_change_password(&device_a, TEST_PASSWORD, NEW_PASSWORD);
+    let unlocker = {
+        let state = Arc::clone(&device_a);
+        thread::spawn(move || {
+            crate::unlock_vault(&state, Zeroizing::new(TEST_PASSWORD.to_string()))
+        })
+    };
+    // (b) write through an existing handle while parked: drained session.
+    assert_write_rejected_during_window(&device_a);
+    thread::sleep(Duration::from_millis(UNLOCK_SETTLE_MS));
+    device_a.reseal_window_gate.open();
+    changer.join().unwrap().unwrap();
+
+    // (a) the raced unlock was rejected (see `unlock_vs_change_password`).
+    assert_vault_state_changed(unlocker.join().unwrap());
+
+    // (c) full AEAD read-back: exactly the pre-window rows, all decryptable
+    // under the NEW enc key, no orphans and no "during-window" row.
+    assert_rows_read_back(&device_a, &ids, &before);
+}
+
+/// Same interlock for the Touch ID unlock path (SEC-M1 T3): the expectation
+/// is captured before the credential-store read, and a re-seal completing
+/// while the "prompt" is answered makes `complete_unlock` reject the stale
+/// keys. Uses the security fixtures (weak KDF, memory credential store),
+/// promoted to `pub(crate)` for this suite.
+#[test]
+fn biometric_unlock_vs_window() {
+    use crate::service::security::tests::{
+        create_test_vault, NEW_PASSWORD as BIO_NEW_PASSWORD, TEST_PASSWORD as BIO_TEST_PASSWORD,
+    };
+
+    let vault = create_test_vault(2, 1);
+    assert!(
+        crate::unlock_vault(&vault.state, Zeroizing::new(BIO_TEST_PASSWORD.to_string())).unwrap()
+    );
+    crate::enable_biometric(
+        &vault.state,
+        Zeroizing::new(BIO_TEST_PASSWORD.to_string()),
+        vault.store.as_ref(),
+    )
+    .unwrap();
+
+    let changer = park_change_password(&vault.state, BIO_TEST_PASSWORD, BIO_NEW_PASSWORD);
+    let bio_unlocker = {
+        let state = Arc::clone(&vault.state);
+        let store = Arc::clone(&vault.store);
+        thread::spawn(move || crate::unlock_biometric(&state, store.as_ref()))
+    };
+    thread::sleep(Duration::from_millis(UNLOCK_SETTLE_MS));
+    vault.state.reseal_window_gate.open();
+    changer.join().unwrap().unwrap();
+
+    assert_vault_state_changed(bio_unlocker.join().unwrap());
+    // A state-change rejection is transparent: no failed attempt recorded.
+    assert_eq!(*vault.state.failed_unlock_attempts.lock().unwrap(), 0);
+
+    // The disk belongs to the new password; the re-wrapped bio blob still
+    // opens the vault with the SAME keychain item.
+    vault.state.lock_vault();
+    assert!(
+        !crate::unlock_vault(&vault.state, Zeroizing::new(BIO_TEST_PASSWORD.to_string())).unwrap()
+    );
+    crate::unlock_biometric(&vault.state, vault.store.as_ref()).unwrap();
+    assert!(vault.state.is_unlocked());
+    assert!(vault.state.session.cached_wrap_key().is_some());
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import type { CreateEntryRequest, UpdateEntryRequest, EntrySecretResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, Group, BiometricStatus, SyncConfig, SyncStatusResponse, TotpCodeResponse, BaiduAuthStart } from '../types';
+import type { CreateEntryRequest, UpdateEntryRequest, EntrySecretResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, Group, BiometricStatus, RecoveryEnableResult, SyncConfig, SyncStatusResponse, TotpCodeResponse, BaiduAuthStart } from '../types';
 import { isTauriEnvironment } from '../utils/environment';
 
 // Unified invoke function that works in both Tauri and browser environments
@@ -131,6 +131,20 @@ export async function importVault(backup: VaultBackup, importPassword: string): 
   return invoke('import_vault', { backup, importPassword });
 }
 
+// SEC-M2 (v1.1.9): file IO for backup/restore moved into desktop commands —
+// the webview no longer holds any fs capability. A `null` result means the
+// user cancelled the native dialog (not an error).
+
+/** Native save dialog + backend write (pretty JSON, atomic 0600). */
+export async function exportVaultFile(exportPassword: string): Promise<string | null> {
+  return invoke('export_vault_file', { exportPassword });
+}
+
+/** Native open dialog + backend read (size cap + envelope pre-validation). */
+export async function readBackupFile(): Promise<VaultBackup | null> {
+  return invoke('read_backup_file');
+}
+
 // Security operations (Phase 1) — Tauri-IPC only (D6, touch_activity
 // precedent). Password arguments use camelCase keys; Tauri v2 maps them onto
 // the snake_case parameters of the Rust commands (same convention as
@@ -168,9 +182,19 @@ export async function recoveryStatus(): Promise<boolean> {
   return invoke('recovery_status');
 }
 
-/** One-time plaintext recovery key (base64url, 43 chars). */
-export async function enableRecovery(password: string): Promise<string> {
-  return invoke('enable_recovery', { password });
+/**
+ * One-time plaintext recovery key (base64url, 43 chars). With `savePath`
+ * (frontend save dialog) the backend writes the key file itself — the key
+ * never crosses IPC a second time (SEC-M2).
+ */
+export async function enableRecovery(
+  password: string,
+  savePath?: string | null,
+): Promise<RecoveryEnableResult> {
+  return invoke('enable_recovery', {
+    password,
+    savePath: savePath ?? null,
+  });
 }
 
 export async function disableRecovery(currentPassword: string): Promise<void> {

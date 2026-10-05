@@ -105,6 +105,14 @@ export interface BiometricStatus {
   enabled: boolean;
 }
 
+// SEC-M2 (v1.1.9): mirrors pwdvault_application::EnableRecoveryResult
+// (serde camelCase — `fileSaved`), returned by `enable_recovery`.
+export interface RecoveryEnableResult {
+  key: string;
+  /** True when the backend also wrote the recovery-key file. */
+  fileSaved: boolean;
+}
+
 // Phase 2 TOTP: mirrors pwdvault_domain::TotpCodeResponse (serde field
 // names — the backend serializes snake_case, no camelCase rewrite).
 export interface TotpCodeResponse {

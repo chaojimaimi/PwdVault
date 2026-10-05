@@ -1,10 +1,16 @@
 import { render, fireEvent, screen, waitFor } from "@testing-library/react";
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 const showToast = vi.fn();
 
 vi.mock("../../utils/toast", () => ({ showToast }));
 vi.mock("../../utils/clipboard", () => ({ copyWithTimeout: vi.fn() }));
+
+const saveDialog = vi.fn();
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+	save: (...args: unknown[]) => saveDialog(...args),
+}));
 
 const biometricStatus = vi.fn();
 const recoveryStatus = vi.fn();
@@ -28,6 +34,11 @@ beforeEach(() => {
 	vi.clearAllMocks();
 	biometricStatus.mockResolvedValue({ available: false, enabled: false });
 	recoveryStatus.mockResolvedValue(false);
+});
+
+afterEach(() => {
+	// The Tauri probe flag set inside individual tests must not leak.
+	Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
 });
 
 async function renderSection() {
@@ -159,7 +170,10 @@ describe("SecuritySettingsSection Touch ID", () => {
 describe("SecuritySettingsSection recovery key", () => {
 	it("shows the one-time key in a dialog closable only after acknowledgement", async () => {
 		recoveryStatus.mockResolvedValueOnce(false).mockResolvedValue(true);
-		enableRecovery.mockResolvedValue("recovery-key-43-chars");
+		enableRecovery.mockResolvedValue({
+			key: "recovery-key-43-chars",
+			fileSaved: false,
+		});
 		await renderSection();
 
 		fireEvent.click(
@@ -181,5 +195,64 @@ describe("SecuritySettingsSection recovery key", () => {
 		expect(screen.queryByText("recovery-key-43-chars")).not.toBeInTheDocument();
 		// Status refresh: the section now shows the enabled state.
 		expect(await screen.findByText("Enabled")).toBeInTheDocument();
+	});
+
+	it("passes no save path without the checkbox (legacy display-only flow)", async () => {
+		recoveryStatus.mockResolvedValueOnce(false).mockResolvedValue(true);
+		enableRecovery.mockResolvedValue({
+			key: "recovery-key-43-chars",
+			fileSaved: false,
+		});
+		await renderSection();
+
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Enable Recovery Key" }),
+		);
+		fireEvent.change(screen.getByLabelText("Master password"), {
+			target: { value: "master-password" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Generate Recovery Key" }));
+
+		await waitFor(() =>
+			expect(enableRecovery).toHaveBeenCalledWith("master-password", null),
+		);
+		expect(saveDialog).not.toHaveBeenCalled();
+		expect(showToast).toHaveBeenCalledWith("Recovery key generated");
+	});
+
+	it("picks a destination first and reports the saved file with the checkbox", async () => {
+		// The save-dialog branch is gated on the Tauri runtime probe
+		// (isTauriEnvironment); simulate the injected internals (same pattern
+		// as utils/__tests__/clipboard.test.ts).
+		Object.defineProperty(window, "__TAURI_INTERNALS__", {
+			value: {},
+			configurable: true,
+		});
+		saveDialog.mockResolvedValue("/tmp/pwdvault-recovery-key.txt");
+		recoveryStatus.mockResolvedValueOnce(false).mockResolvedValue(true);
+		enableRecovery.mockResolvedValue({
+			key: "recovery-key-43-chars",
+			fileSaved: true,
+		});
+		await renderSection();
+
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Enable Recovery Key" }),
+		);
+		fireEvent.change(screen.getByLabelText("Master password"), {
+			target: { value: "master-password" },
+		});
+		fireEvent.click(screen.getByLabelText("Save to file"));
+		fireEvent.click(screen.getByRole("button", { name: "Generate Recovery Key" }));
+
+		await waitFor(() =>
+			expect(enableRecovery).toHaveBeenCalledWith(
+				"master-password",
+				"/tmp/pwdvault-recovery-key.txt",
+			),
+		);
+		expect(showToast).toHaveBeenCalledWith(
+			"Recovery key generated and saved to file",
+		);
 	});
 });

@@ -188,14 +188,33 @@ pub fn export_vault(
     Ok(backup)
 }
 
-pub fn import_vault(
-    state: &Arc<AppState>,
-    backup: VaultBackup,
-    import_password: Zeroizing<String>,
-) -> Result<ImportResult, VaultError> {
-    pwdvault_domain::validation::import_password(import_password.as_str())?;
-    let lease = state.lease()?;
+/// Maximum .pvault file size accepted by [`parse_backup_file_bytes`] —
+/// mirrors the frontend constant `MAX_BACKUP_FILE_BYTES`
+/// (src/screens/ImportExportScreen.tsx).
+pub const MAX_BACKUP_FILE_BYTES: usize = 14 * 1024 * 1024;
 
+/// Parse and pre-validate a raw .pvault file (SEC-M2: the webview no longer
+/// reads backup files itself — the `read_backup_file` IPC command feeds the
+/// bytes here). Enforces the file-size cap, the JSON shape, and the envelope
+/// version/magic rules; the full cryptographic validation still happens in
+/// [`import_vault`] at restore time.
+pub fn parse_backup_file_bytes(bytes: &[u8]) -> Result<VaultBackup, VaultError> {
+    if bytes.len() > MAX_BACKUP_FILE_BYTES {
+        return Err(VaultError::InvalidInput {
+            code: "BACKUP_TOO_LARGE".into(),
+            message: "Backup file is too large".into(),
+        });
+    }
+    let backup: VaultBackup = serde_json::from_slice(bytes)
+        .map_err(|e| VaultError::InvalidBackup(format!("Invalid backup file: {}", e)))?;
+    validate_backup_envelope(&backup)?;
+    Ok(backup)
+}
+
+/// Stage 1 of the import pipeline (and the pre-flight check behind
+/// `parse_backup_file_bytes`): version support, v2 header names, and
+/// resource limits — no decoding and no KDF work.
+fn validate_backup_envelope(backup: &VaultBackup) -> Result<(), VaultError> {
     if !matches!(backup.version, BACKUP_VERSION_V1 | BACKUP_VERSION_V2) {
         return Err(VaultError::InvalidBackup(
             "Unsupported backup version".to_string(),
@@ -219,7 +238,20 @@ pub fn import_vault(
             "Backup exceeds resource limits".to_string(),
         ));
     }
+    Ok(())
+}
 
+/// Stage 2 output: the decoded envelope fields, ready for key derivation.
+struct DecodedBackup {
+    salt: [u8; 16],
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+    params: crypto::kdf::AdaptiveParams,
+}
+
+/// Stage 2: decode the base64 envelope fields and enforce the KDF policy
+/// (structural `validate` + the X6 import floor) BEFORE any key derivation.
+fn decode_and_check_kdf(backup: &VaultBackup) -> Result<DecodedBackup, VaultError> {
     // Decode salt and nonce from base64
     let b64 = base64::engine::general_purpose::STANDARD;
 
@@ -244,7 +276,6 @@ pub fn import_vault(
         ));
     }
 
-    // Derive key from import password with stored KDF params
     let salt_array: [u8; 16] = salt
         .try_into()
         .map_err(|_| VaultError::InvalidBackup("Invalid salt".to_string()))?;
@@ -263,39 +294,56 @@ pub fn import_vault(
     if !crypto::kdf::KdfPolicy::meets_import_floor(&params) {
         return Err(VaultError::WeakKdfParams);
     }
-    let (mut import_key, _params) =
-        crypto::kdf::derive_key_with_params(import_password.as_str(), &salt_array, &params)?;
+    Ok(DecodedBackup {
+        salt: salt_array,
+        nonce: nonce_bytes,
+        ciphertext,
+        params,
+    })
+}
+
+/// Stage 3: derive the import key from the stored KDF params. Consumes
+/// `import_password` (moved through the pipeline): the Zeroizing buffer
+/// stays alive until derivation completes and is wiped on drop at the end of
+/// this function — it never escapes it.
+fn derive_import_key(
+    import_password: Zeroizing<String>,
+    salt: [u8; 16],
+    params: &crypto::kdf::AdaptiveParams,
+) -> Result<[u8; 32], VaultError> {
+    let (import_key, _params) =
+        crypto::kdf::derive_key_with_params(import_password.as_str(), &salt, params)?;
 
     // `import_password` is Zeroizing<String>; wiped on drop here.
+    Ok(import_key)
+}
 
-    // Decrypt payload
+/// Stage 4: decrypt the payload (v2 binds the envelope as AAD; v1 is plain
+/// AEAD). An authentication failure reports as `InvalidPassword`.
+fn decrypt_backup_payload(
+    backup: &VaultBackup,
+    import_key: &[u8; 32],
+    nonce_bytes: Vec<u8>,
+    ciphertext: Vec<u8>,
+) -> Result<Vec<u8>, VaultError> {
     let encrypted_data = EncryptedData {
         nonce: nonce_bytes,
         ciphertext,
     };
-    let mut payload_bytes = if backup.version == BACKUP_VERSION_V2 {
-        let aad = backup_v2_aad(&backup)?;
-        decrypt_with_aad(&import_key, &encrypted_data, &aad)
+    if backup.version == BACKUP_VERSION_V2 {
+        let aad = backup_v2_aad(backup)?;
+        decrypt_with_aad(import_key, &encrypted_data, &aad)
     } else {
-        decrypt(&import_key, &encrypted_data)
+        decrypt(import_key, &encrypted_data)
     }
-    .map_err(|_| VaultError::InvalidPassword)?;
+    .map_err(|_| VaultError::InvalidPassword)
+}
 
-    // Zeroize the import key now that decryption is done.
-    import_key.zeroize();
-
-    // Parse payload — validate before any destructive operations
-    let payload: BackupPayload = serde_json::from_slice(&payload_bytes)
-        .map_err(|e| VaultError::InvalidBackup(format!("Invalid payload: {}", e)))?;
-
-    // Zeroize decrypted payload bytes
-    payload_bytes.zeroize();
-    pwdvault_domain::validation::backup_payload(&payload)?;
-
-    let db = get_db(state)?;
-    let key = lease.enc_key()?;
-
-    // Pre-validate and prepare groups (generate new IDs to avoid conflicts)
+/// Stage 5a: re-ID the payload groups (new IDs avoid conflicts with the
+/// live vault) and return the old→new group-id map for the entry remap.
+fn remap_import_groups(
+    payload: &BackupPayload,
+) -> (Vec<Group>, std::collections::HashMap<String, String>) {
     let mut group_id_map: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
     let mut new_groups = Vec::new();
@@ -304,8 +352,16 @@ pub fn import_vault(
         group_id_map.insert(g.id.clone(), new_group.id.clone());
         new_groups.push(new_group);
     }
+    (new_groups, group_id_map)
+}
 
-    // Pre-validate and encrypt all entries before any destructive operations
+/// Stage 5b: re-encrypt every entry under the current master key, mapping
+/// group references through the old→new ID map.
+fn encrypt_import_entries(
+    payload: &BackupPayload,
+    group_id_map: &std::collections::HashMap<String, String>,
+    key: &[u8; 32],
+) -> Result<Vec<PasswordEntry>, VaultError> {
     let mut new_entries = Vec::new();
     for export_entry in &payload.entries {
         let mut entry = PasswordEntry::new(
@@ -341,13 +397,66 @@ pub fn import_vault(
 
         new_entries.push(entry);
     }
+    Ok(new_entries)
+}
 
-    // All validation and encryption succeeded — now perform database mutations
-    // atomically. Pre-seal (encrypt) all records BEFORE opening the write
-    // transaction so that a seal failure rolls back cleanly without leaving
-    // the database half-cleared. The entire clear+insert cycle runs in ONE
-    // redb write transaction: if any operation fails, the transaction is
-    // aborted and the vault remains untouched.
+/// Stage 5: pre-validate and pre-encrypt every row BEFORE any destructive
+/// operations — a validation or encryption failure must leave the database
+/// untouched. Returns the re-IDed groups and the entries re-encrypted under
+/// the current master key.
+fn prepare_import_rows(
+    payload: &BackupPayload,
+    key: &[u8; 32],
+) -> Result<(Vec<Group>, Vec<PasswordEntry>), VaultError> {
+    let (new_groups, group_id_map) = remap_import_groups(payload);
+    let new_entries = encrypt_import_entries(payload, &group_id_map, key)?;
+    Ok((new_groups, new_entries))
+}
+
+pub fn import_vault(
+    state: &Arc<AppState>,
+    backup: VaultBackup,
+    import_password: Zeroizing<String>,
+) -> Result<ImportResult, VaultError> {
+    pwdvault_domain::validation::import_password(import_password.as_str())?;
+    let lease = state.lease()?;
+
+    // Stages 1-2: hostile-input fast path — envelope and KDF policy checks
+    // run before any key derivation or database access (X6).
+    validate_backup_envelope(&backup)?;
+    let decoded = decode_and_check_kdf(&backup)?;
+
+    // Stage 3: derive the import key.
+    let mut import_key = derive_import_key(import_password, decoded.salt, &decoded.params)?;
+
+    // Stage 4: decrypt the payload.
+    let mut payload_bytes =
+        decrypt_backup_payload(&backup, &import_key, decoded.nonce, decoded.ciphertext)?;
+
+    // Zeroize the import key now that decryption is done.
+    import_key.zeroize();
+
+    // Parse payload — validate before any destructive operations
+    let payload: BackupPayload = serde_json::from_slice(&payload_bytes)
+        .map_err(|e| VaultError::InvalidBackup(format!("Invalid payload: {}", e)))?;
+
+    // Zeroize decrypted payload bytes
+    payload_bytes.zeroize();
+    pwdvault_domain::validation::backup_payload(&payload)?;
+
+    let db = get_db(state)?;
+    let key = lease.enc_key()?;
+
+    // Stage 5: pre-validate and pre-encrypt all rows before any destructive
+    // operations.
+    let (new_groups, new_entries) = prepare_import_rows(&payload, key)?;
+
+    // Stage 6 — all validation and encryption succeeded — now perform
+    // database mutations atomically. Pre-seal (encrypt) all records BEFORE
+    // opening the write transaction so that a seal failure rolls back cleanly
+    // without leaving the database half-cleared. The entire clear+insert
+    // cycle runs in ONE redb write transaction: if any operation fails, the
+    // transaction is aborted and the vault remains untouched.
     let mut sealed_groups: Vec<(String, Vec<u8>)> = Vec::with_capacity(new_groups.len());
     for g in &new_groups {
         let blob = database::group_codec::seal_group(g, key)?;
@@ -413,357 +522,5 @@ pub fn import_vault(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use pwdvault_infrastructure::crypto::kdf::AdaptiveParams;
-    use pwdvault_infrastructure::database::Settings;
-    use tempfile::TempDir;
-
-    const TEST_PASSWORD: &str = "backup-test-password";
-
-    fn unlocked_state_with_entries<F>(build_entries: F) -> (Arc<AppState>, TempDir, Vec<String>)
-    where
-        F: FnOnce(&[u8; 32]) -> Vec<PasswordEntry>,
-    {
-        let dir = TempDir::new().unwrap();
-        let db = Arc::new(database::init_database(dir.path().join("backup.db")).unwrap());
-        let salt = [0x41; 16];
-        let params = AdaptiveParams {
-            m_cost: 16384,
-            t_cost: 1,
-            p_cost: 1,
-        };
-        let (master_key, _) =
-            crypto::kdf::derive_key_with_params(TEST_PASSWORD, &salt, &params).unwrap();
-        let verification = crypto::create_verification_header(&master_key, salt, params).unwrap();
-        let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &salt);
-        let entries = build_entries(&enc_key);
-        let entry_ids = entries.iter().map(|entry| entry.id.clone()).collect();
-
-        database::vault_store::VaultStore::new(&db)
-            .write(&mac_key, |txn| {
-                database::vault_store::save_verification_data_in_txn(txn, &verification)?;
-                pwdvault_infrastructure::vault_header::save_header_in_txn(
-                    txn,
-                    &pwdvault_infrastructure::vault_header::VaultHeader::new_initial(),
-                    &enc_key,
-                )?;
-                database::vault_store::save_settings_in_txn(txn, &Settings::default())?;
-                for entry in &entries {
-                    database::vault_store::save_entry_in_txn(txn, &enc_key, entry)?;
-                }
-                Ok(())
-            })
-            .unwrap();
-
-        let state = Arc::new(AppState::default());
-        *state.database.lock().unwrap() = Some(db);
-        *state.verification_data.lock().unwrap() = Some(verification);
-        state.session.unlock(enc_key, mac_key);
-        (state, dir, entry_ids)
-    }
-
-    fn unlocked_state() -> (Arc<AppState>, TempDir) {
-        let (state, dir, _) = unlocked_state_with_entries(|enc_key| {
-            let mut entry = PasswordEntry::new("Backup entry".into(), None, "backup-user".into());
-            let encrypted_password = crypto::encrypt(enc_key, b"backup-secret").unwrap();
-            entry.encrypted_password = bincode::serialize(&encrypted_password).unwrap();
-            vec![entry]
-        });
-        (state, dir)
-    }
-
-    #[test]
-    fn v2_export_import_round_trip() {
-        let (state, _dir) = unlocked_state();
-        let backup = export_vault(&state, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
-        assert_eq!(backup.version, BACKUP_VERSION_V2);
-        assert_eq!(backup.magic.as_deref(), Some(BACKUP_MAGIC));
-        let result =
-            import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
-        assert_eq!(result.entries_imported, 1);
-    }
-
-    #[test]
-    fn export_supports_raw_historical_secrets_and_empty_passwords() {
-        let (state, _dir, _) = unlocked_state_with_entries(|enc_key| {
-            let mut raw =
-                PasswordEntry::new("Historical raw entry".into(), None, "legacy-user".into());
-            raw.encrypted_password = crypto::encrypt(enc_key, b"legacy-secret")
-                .unwrap()
-                .to_bytes();
-            raw.encrypted_notes = Some(
-                crypto::encrypt(enc_key, b"legacy-notes")
-                    .unwrap()
-                    .to_bytes(),
-            );
-
-            let mut empty =
-                PasswordEntry::new("Historical empty entry".into(), None, "empty-user".into());
-            empty.encrypted_password = Vec::new();
-            empty.encrypted_notes = Some(Vec::new());
-            vec![raw, empty]
-        });
-
-        let backup = export_vault(&state, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
-        let result =
-            import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
-        assert_eq!(result.entries_imported, 2);
-
-        let entries = crate::service::list_all_entries(&state).unwrap();
-        let raw_id = entries
-            .iter()
-            .find(|entry| entry.title == "Historical raw entry")
-            .unwrap()
-            .id
-            .clone();
-        let empty_id = entries
-            .iter()
-            .find(|entry| entry.title == "Historical empty entry")
-            .unwrap()
-            .id
-            .clone();
-
-        let raw = crate::service::get_entry_secret(&state, raw_id).unwrap();
-        assert_eq!(raw.password.as_str(), "legacy-secret");
-        assert_eq!(
-            raw.notes.as_deref().map(String::as_str),
-            Some("legacy-notes")
-        );
-
-        let empty = crate::service::get_entry_secret(&state, empty_id).unwrap();
-        assert_eq!(empty.password.as_str(), "");
-        assert!(empty.notes.is_none());
-    }
-
-    #[test]
-    fn export_normalizes_historical_empty_urls() {
-        let (state, _dir, _) = unlocked_state_with_entries(|enc_key| {
-            let mut empty_url = PasswordEntry::new(
-                "Historical empty URL".into(),
-                Some("   ".into()),
-                "legacy-user".into(),
-            );
-            let encrypted_password = crypto::encrypt(enc_key, b"legacy-secret").unwrap();
-            empty_url.encrypted_password = bincode::serialize(&encrypted_password).unwrap();
-            vec![empty_url]
-        });
-
-        let backup = export_vault(&state, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
-        let result =
-            import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
-        assert_eq!(result.entries_imported, 1);
-
-        let entries = crate::service::list_all_entries(&state).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].url, None);
-    }
-
-    /// P2.2 + P3.6 item 1: export excludes tombstoned entries and groups,
-    /// and normalizes dangling group references (cascade-free group removal)
-    /// to "ungrouped" so the payload stays referentially valid.
-    #[test]
-    fn export_excludes_tombstones_and_normalizes_dangling_groups() {
-        let (state, _dir) = unlocked_state();
-        let db = crate::service::vault::get_db(&state).unwrap();
-        let enc_key = state.session.get_enc_key().unwrap();
-        let mac_key = state.session.get_mac_key().unwrap();
-
-        let live_group = database::Group::new("Live".into());
-        let mut dead_group = database::Group::new("Dead".into());
-        dead_group.deleted_at = Some(1_700_000_000);
-
-        let mut live = PasswordEntry::new("Live entry".into(), None, "user".into());
-        live.encrypted_password =
-            bincode::serialize(&crypto::encrypt(&enc_key, b"pw").unwrap()).unwrap();
-        live.group_id = Some(live_group.id.clone());
-
-        let mut dangling = PasswordEntry::new("Dangling entry".into(), None, "user".into());
-        dangling.encrypted_password =
-            bincode::serialize(&crypto::encrypt(&enc_key, b"pw").unwrap()).unwrap();
-        // References the tombstoned group: cascade clearing is gone (P2.2).
-        dangling.group_id = Some(dead_group.id.clone());
-
-        let mut dead = PasswordEntry::new("Dead entry".into(), None, "user".into());
-        dead.encrypted_password =
-            bincode::serialize(&crypto::encrypt(&enc_key, b"pw").unwrap()).unwrap();
-        dead.deleted_at = Some(1_700_000_100);
-
-        database::vault_store::VaultStore::new(&db)
-            .write(&mac_key, |txn| {
-                database::vault_store::save_group_in_txn(txn, &enc_key, &live_group)?;
-                database::vault_store::save_group_in_txn(txn, &enc_key, &dead_group)?;
-                database::vault_store::save_entry_in_txn(txn, &enc_key, &live)?;
-                database::vault_store::save_entry_in_txn(txn, &enc_key, &dangling)?;
-                database::vault_store::save_entry_in_txn(txn, &enc_key, &dead)?;
-                Ok(())
-            })
-            .unwrap();
-
-        // Export validation would fail without tombstone exclusion + dangling
-        // reference normalization; the round trip proves both. The fixture's
-        // own "Backup entry" adds a third live entry.
-        let backup = export_vault(&state, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
-        let result =
-            import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
-        assert_eq!(result.entries_imported, 3);
-        assert_eq!(result.groups_imported, 1);
-
-        let entries = crate::service::list_all_entries(&state).unwrap();
-        assert!(entries.iter().all(|entry| entry.title != "Dead entry"));
-        let dangling_entry = entries
-            .iter()
-            .find(|entry| entry.title == "Dangling entry")
-            .unwrap();
-        assert_eq!(dangling_entry.group_id, None);
-    }
-
-    #[test]
-    fn v1_fixture_remains_importable() {
-        let (state, _dir) = unlocked_state();
-        let (json, password) = crate::fixtures::create_backup_v1(2);
-        let backup: VaultBackup = serde_json::from_str(&json).unwrap();
-        let result = import_vault(&state, backup, Zeroizing::new(password.to_string())).unwrap();
-        assert_eq!(result.entries_imported, 2);
-    }
-
-    #[test]
-    fn v2_header_nonce_and_ciphertext_tampering_fail() {
-        let (state, _dir) = unlocked_state();
-        let backup = export_vault(&state, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
-
-        let mut header = backup.clone();
-        header.created_at += 1;
-        assert!(import_vault(&state, header, Zeroizing::new(TEST_PASSWORD.to_string())).is_err());
-
-        let mut nonce = backup.clone();
-        nonce.nonce.replace_range(
-            ..1,
-            if nonce.nonce.starts_with('A') {
-                "B"
-            } else {
-                "A"
-            },
-        );
-        assert!(import_vault(&state, nonce, Zeroizing::new(TEST_PASSWORD.to_string())).is_err());
-
-        let mut ciphertext = backup;
-        ciphertext.data.replace_range(
-            ..1,
-            if ciphertext.data.starts_with('A') {
-                "B"
-            } else {
-                "A"
-            },
-        );
-        assert!(import_vault(
-            &state,
-            ciphertext,
-            Zeroizing::new(TEST_PASSWORD.to_string())
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn invalid_kdf_and_oversized_backup_rejected_before_work() {
-        let (state, _dir) = unlocked_state();
-        let mut backup = export_vault(&state, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
-        backup.kdf_memory = u32::MAX;
-        let start = std::time::Instant::now();
-        assert!(import_vault(
-            &state,
-            backup.clone(),
-            Zeroizing::new(TEST_PASSWORD.to_string())
-        )
-        .is_err());
-        assert!(start.elapsed().as_millis() < 50);
-
-        backup.data = "A".repeat(
-            pwdvault_domain::validation::MAX_BACKUP_DECODED_BYTES
-                .saturating_mul(4)
-                .div_ceil(3)
-                .saturating_add(5),
-        );
-        assert!(import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).is_err());
-    }
-
-    /// X6 helper: build a minimal VALID backup-v1 envelope whose KDF params
-    /// are fixed explicitly (v1 has no AAD, so the params are freely chosen
-    /// without breaking the ciphertext). Used to probe the import floor.
-    fn v1_backup_with_params(params: AdaptiveParams) -> VaultBackup {
-        let payload = BackupPayload {
-            entries: vec![],
-            groups: vec![],
-            settings: Settings::default(),
-        };
-        let payload_json = serde_json::to_vec(&payload).unwrap();
-        let salt = [0x42u8; 16];
-        let (key, _) = crypto::kdf::derive_key_with_params(TEST_PASSWORD, &salt, &params).unwrap();
-        let encrypted = crypto::encrypt(&key, &payload_json).unwrap();
-        let b64 = base64::engine::general_purpose::STANDARD;
-        VaultBackup {
-            version: BACKUP_VERSION_V1,
-            created_at: 0,
-            magic: None,
-            kdf_name: None,
-            cipher_name: None,
-            salt: b64.encode(salt),
-            kdf_memory: params.m_cost,
-            kdf_iterations: params.t_cost,
-            kdf_parallelism: params.p_cost,
-            nonce: b64.encode(&encrypted.nonce),
-            data: b64.encode(&encrypted.ciphertext),
-        }
-    }
-
-    /// X6: a backup embedded with params exactly at the import floor
-    /// (19456 KiB / t=2) is accepted.
-    #[test]
-    fn import_accepts_backup_exactly_at_kdf_floor() {
-        let (state, _dir) = unlocked_state();
-        let backup = v1_backup_with_params(AdaptiveParams {
-            m_cost: crypto::kdf::KdfPolicy::IMPORT_MIN_MEMORY_KIB,
-            t_cost: crypto::kdf::KdfPolicy::IMPORT_MIN_ITERATIONS,
-            p_cost: 1,
-        });
-        let result =
-            import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
-        assert_eq!(result.entries_imported, 0);
-    }
-
-    /// X6: params one step below the floor on either axis (19455 KiB, or the
-    /// legacy t=1 shape) are rejected with the dedicated error — without ever
-    /// reaching key derivation.
-    #[test]
-    fn import_rejects_backup_below_kdf_floor() {
-        let (state, _dir) = unlocked_state();
-
-        let weak_memory = v1_backup_with_params(AdaptiveParams {
-            m_cost: crypto::kdf::KdfPolicy::IMPORT_MIN_MEMORY_KIB - 1,
-            t_cost: crypto::kdf::KdfPolicy::IMPORT_MIN_ITERATIONS,
-            p_cost: 1,
-        });
-        assert!(matches!(
-            import_vault(
-                &state,
-                weak_memory,
-                Zeroizing::new(TEST_PASSWORD.to_string())
-            ),
-            Err(VaultError::WeakKdfParams)
-        ));
-
-        let weak_iterations = v1_backup_with_params(AdaptiveParams {
-            m_cost: crypto::kdf::KdfPolicy::IMPORT_MIN_MEMORY_KIB,
-            t_cost: crypto::kdf::KdfPolicy::IMPORT_MIN_ITERATIONS - 1,
-            p_cost: 1,
-        });
-        assert!(matches!(
-            import_vault(
-                &state,
-                weak_iterations,
-                Zeroizing::new(TEST_PASSWORD.to_string())
-            ),
-            Err(VaultError::WeakKdfParams)
-        ));
-    }
-}
+#[path = "backup_tests.rs"]
+mod tests;

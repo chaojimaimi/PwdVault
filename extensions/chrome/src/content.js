@@ -28,7 +28,7 @@ function entryMatchesPageUrl(entryUrl, pageUrl) {
 // copied predicate above calls it. Keep in sync with sender-auth.js.
 function normalizedDomain(rawUrl) {
   try {
-    return new URL(rawUrl).hostname.toLowerCase().replace(/^www\./, "");
+    return new URL(rawUrl).hostname.toLowerCase().replace(/^www\./, '');
   } catch {
     return null;
   }
@@ -335,6 +335,15 @@ function normalizedDomain(rawUrl) {
 	}
 
 	function autofillLogin(username, password) {
+		// SF-P1 defense in depth: an empty password must never reach the form.
+		// The background and popup guard their own paths, but a future caller
+		// that forgets would otherwise fill a blank credential and still get
+		// the "filled successfully" toast.
+		if (!password) {
+			showNotification("No password received — fill cancelled", "error");
+			return false;
+		}
+
 		const loginForm = findLoginForm();
 
 		if (!loginForm) {
@@ -381,6 +390,9 @@ function normalizedDomain(rawUrl) {
 	// timer so the 30s window restarts from the most recent copy instead of an
 	// old timer wiping the fresh value early.
 	let activeClearTimer = null;
+	// SF-P2a: most sites deny the timer-context clipboard read, so the
+	// auto-clear failure is the common case — notify once per page, not per copy.
+	let clipboardClearFailureNotified = false;
 
 	async function digestText(text) {
 		const bytes = new TextEncoder().encode(text);
@@ -404,8 +416,21 @@ function normalizedDomain(rawUrl) {
 					if ((await digestText(current)) === expectedDigest) {
 						await navigator.clipboard.writeText("");
 					}
-				} catch {
-					// Clipboard access denied or text already changed
+				} catch (e) {
+					// Clipboard access denied or text already changed. SF-P2a: a
+					// failed auto-clear must not be invisible — warn and tell the
+					// user to clear manually (showNotification is hoisted in this
+					// IIFE and safe from a timer callback). The digest guard
+					// above keeps "already changed" silent; only real failures
+					// notify, and just once (see clipboardClearFailureNotified).
+					console.warn("clipboard auto-clear failed", e);
+					if (!clipboardClearFailureNotified) {
+						clipboardClearFailureNotified = true;
+						showNotification(
+							"Clipboard auto-clear failed — please clear it manually",
+							"error",
+						);
+					}
 				}
 			}, timeoutMs);
 

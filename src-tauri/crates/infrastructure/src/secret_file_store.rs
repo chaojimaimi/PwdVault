@@ -82,7 +82,29 @@ impl FileSecretStore {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("cannot create credential dir: {e}"))?;
         let temp = tempfile_in(parent)?;
-        std::fs::write(&temp, &bytes).map_err(|e| format!("cannot write credential file: {e}"))?;
+        #[cfg(unix)]
+        {
+            // Exclusive create with 0600 up front (SF-P2d): the store bytes
+            // never touch disk under a wider mode, even for an instant (the
+            // previous fs::write created the temp with 0666&~umask).
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&temp)
+                .map_err(|e| format!("cannot write credential file: {e}"))?;
+            file.write_all(&bytes)
+                .map_err(|e| format!("cannot write credential file: {e}"))?;
+        }
+        #[cfg(not(unix))]
+        {
+            // Windows keeps the plain write: values are DPAPI-protected at
+            // rest, so the file mode carries no additional secrecy here.
+            std::fs::write(&temp, &bytes)
+                .map_err(|e| format!("cannot write credential file: {e}"))?;
+        }
         restrict_permissions(&temp);
         std::fs::rename(&temp, &self.path)
             .map_err(|e| format!("cannot persist credential file: {e}"))?;
@@ -163,7 +185,14 @@ fn restrict_permissions(path: &std::path::Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        if let Err(error) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+            // Best effort, but never silent: a credential file left with a
+            // wider mode must be visible in the logs.
+            tracing::warn!(
+                "could not restrict permissions to 0600 on {}: {error}",
+                path.display()
+            );
+        }
     }
     #[cfg(not(unix))]
     {

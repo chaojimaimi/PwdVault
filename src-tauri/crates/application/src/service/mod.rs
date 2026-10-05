@@ -3,6 +3,7 @@
 pub mod backup;
 pub mod entries;
 pub mod groups;
+pub mod recovery_file;
 pub mod security;
 pub mod settings;
 pub mod sync;
@@ -10,12 +11,13 @@ pub mod totp;
 pub mod utils;
 pub mod vault;
 
-pub use backup::{export_vault, import_vault};
+pub use backup::{export_vault, import_vault, parse_backup_file_bytes};
 pub use entries::{
     create_entry, get_entry_count, get_entry_meta, get_entry_secret, list_all_entries,
     remove_entry, update_entry,
 };
 pub use groups::{create_group, list_all_groups, remove_group, update_group};
+pub use recovery_file::{enable_recovery_with_file, EnableRecoveryResult};
 pub use security::{
     biometric_status, change_password, complete_unlock, derive_master_for_unlock,
     disable_biometric, disable_recovery, enable_biometric, enable_recovery, recover_vault,

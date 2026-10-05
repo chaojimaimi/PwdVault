@@ -120,7 +120,14 @@ fn load_extension_ids() -> native_host_setup::ExtensionIds {
         return ids;
     };
     let config_path = parent.join("native-host.json");
-    let _ = paths::secure_file(&config_path);
+    // SF-P2d: best effort, but never silent — the native-host.json config
+    // file must not stay readable by other accounts.
+    if let Err(error) = paths::secure_file(&config_path) {
+        tracing::warn!(
+            "could not tighten permissions on the native-host.json config file: {}",
+            error
+        );
+    }
     let Some(value) = std::fs::read_to_string(&config_path)
         .ok()
         .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
@@ -328,6 +335,10 @@ pub fn run() {
             commands::revoke_extension_access,
             commands::export_vault,
             commands::import_vault,
+            // SEC-M2 (v1.1.9): native save/open dialogs + backup file IO in
+            // Rust — the webview needs no fs capability for backup flows.
+            commands::export_vault_file,
+            commands::read_backup_file,
             // Phase 1 security operations — Tauri IPC only (D6).
             commands::change_password,
             commands::biometric_status,

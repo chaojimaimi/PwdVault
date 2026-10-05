@@ -230,8 +230,10 @@ pub fn unlock_vault(
     // published yet.
     let (enc_key, mac_key) = verify_master_and_integrity(state, &master_key)?;
 
-    // Steps 8-9: publish + side effects — THE LAST STEP.
-    complete_unlock(state, enc_key, mac_key)?;
+    // Steps 8-9: publish + side effects — THE LAST STEP. The verification
+    // clone captured above (before the Argon2 pass) is the unlock's
+    // expectation for the SEC-M1 window re-check.
+    complete_unlock(state, enc_key, mac_key, &verification_data)?;
 
     Ok(true)
 }

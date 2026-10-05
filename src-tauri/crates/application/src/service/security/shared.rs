@@ -174,14 +174,51 @@ pub fn verify_master_and_integrity(
     Ok((enc_key, mac_key))
 }
 
+/// Field-level equality for [`AdaptiveParams`] (the upstream struct does not
+/// derive `PartialEq`; deriving it here is out of WP-1's file scope).
+fn params_equal(a: &crypto::kdf::AdaptiveParams, b: &crypto::kdf::AdaptiveParams) -> bool {
+    a.m_cost == b.m_cost && a.t_cost == b.t_cost && a.p_cost == b.p_cost
+}
+
 /// Publish verified keys and run the unlock side effects unconditionally
 /// (steps 8-9 — the plain unlock path). See [`complete_unlock_if`] for the
 /// gated form used inside D8 windows.
+///
+/// # D8 interlock (v1.1.9 SEC-M1 — dual defense)
+///
+/// `expected` MUST be the verification data the caller captured BEFORE its
+/// key derivation (the Argon2 pass). This function takes the
+/// `exclusive_window` mutex (so it serializes against every D8 window:
+/// change-password, recovery re-seal, sync merge) and re-checks that the
+/// vault's verification row still matches it: a re-seal that completed in
+/// between rotated the row (`derive_new_keys` generates a fresh random salt
+/// on every password change), and publishing our stale subkeys over the new
+/// row would mix key generations on a live vault.
+///
+/// ⛔ NEVER call this function while already holding `exclusive_window`
+/// (the D8 window paths call `complete_unlock_if` / `session.unlock_if`
+/// directly — that is what keeps the lock graph acyclic). Lock order:
+/// `exclusive_window` → database → session internals, matching the D8 block
+/// in `service/security/mod.rs`, `state.rs` and `engine.rs`.
 pub fn complete_unlock(
     state: &Arc<AppState>,
     enc_key: SecretKey,
     mac_key: SecretKey,
+    expected: &VerificationData,
 ) -> Result<(), VaultError> {
+    let _window = state
+        .exclusive_window
+        .lock()
+        .expect("exclusive window lock poisoned");
+    let current = current_verification(state)?;
+    if current.salt != expected.salt || !params_equal(&current.params, &expected.params) {
+        return Err(VaultError::InvalidInput {
+            code: "VAULT_STATE_CHANGED".to_string(),
+            message: "Vault state changed (password change / recovery / sync in progress); \
+                      retry unlock"
+                .to_string(),
+        });
+    }
     complete_unlock_if(state, enc_key, mac_key, |_| true).map(|_| ())
 }
 

@@ -40,10 +40,12 @@ mod tests_webdav;
 mod tests_window;
 
 use std::collections::HashMap;
+use std::mem;
 
 use pwdvault_domain::validation::normalize_url;
 use pwdvault_infrastructure::crypto::{encrypt, KEY_SIZE};
 use pwdvault_infrastructure::database::PasswordEntry;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::VaultError;
 
@@ -60,7 +62,13 @@ pub use merge::{
 /// only inside the encrypted container (the E2E boundary — cloud storage only
 /// ever sees ciphertext) or transiently in memory during a merge. It is never
 /// written to redb or disk in this form.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+///
+/// SEC-M3: the whole plaintext domain derives `Zeroize`/`ZeroizeOnDrop`, so
+/// dropped snapshots/entries wipe their fields. CONSEQUENTLY: never debug-log
+/// a value of these types (`Debug` would print the plaintext and defeat the
+/// zeroization boundary), and never partially move a field out of them
+/// (E0509) — take fields with `mem::take` instead.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct SyncEntry {
     pub id: String,
     pub title: String,
@@ -83,7 +91,7 @@ pub struct SyncEntry {
 }
 
 /// One group in sync (plaintext-domain) form (D2).
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct SyncGroup {
     pub id: String,
     pub name: String,
@@ -93,7 +101,7 @@ pub struct SyncGroup {
 }
 
 /// The full plaintext snapshot carried inside a container (D2).
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct SyncSnapshot {
     pub rev: u64,
     pub device_id: String,
@@ -105,7 +113,7 @@ pub struct SyncSnapshot {
 /// Decrypted inner fields of one local entry, supplied by the caller (the
 /// engine owns the session key — the conversion helpers below never touch key
 /// material or the database).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
 pub struct SyncSecrets {
     pub password: String,
     pub notes: Option<String>,
@@ -152,27 +160,39 @@ pub fn entries_to_sync(
 /// state survives the write-back. URLs are normalized on the way in, and a
 /// `Some("")` TOTP secret means "cleared" (matching update_entry semantics).
 pub fn sync_to_entry(
-    entry: SyncEntry,
+    mut entry: SyncEntry,
     enc_key: &[u8; KEY_SIZE],
 ) -> Result<PasswordEntry, VaultError> {
-    let mut sealed = PasswordEntry::new(entry.title, normalize_url(entry.url), entry.username);
-    sealed.id = entry.id;
+    // `SyncEntry` is ZeroizeOnDrop — partial moves are forbidden (E0509).
+    // Take each owned field instead: the values flow on exactly as before
+    // and the emptied shell is wiped when `entry` drops.
+    let id = mem::take(&mut entry.id);
+    let title = mem::take(&mut entry.title);
+    let url = normalize_url(mem::take(&mut entry.url));
+    let username = mem::take(&mut entry.username);
+    let notes = mem::take(&mut entry.notes);
+    let totp_secret = mem::take(&mut entry.totp_secret);
+    let tags = mem::take(&mut entry.tags);
+    let group_id = mem::take(&mut entry.group_id);
+
+    let mut sealed = PasswordEntry::new(title, url, username);
+    sealed.id = id;
     let encrypted_password = encrypt(
         enc_key,
         entry.password.as_deref().unwrap_or_default().as_bytes(),
     )?;
     sealed.encrypted_password = bincode::serialize(&encrypted_password)
         .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
-    sealed.encrypted_notes = match entry.notes {
+    sealed.encrypted_notes = match notes {
         Some(notes) => Some(seal_inner(enc_key, &notes)?),
         None => None,
     };
-    sealed.encrypted_totp_secret = match entry.totp_secret {
+    sealed.encrypted_totp_secret = match totp_secret {
         Some(secret) if !secret.is_empty() => Some(seal_inner(enc_key, &secret)?),
         _ => None,
     };
-    sealed.tags = entry.tags;
-    sealed.group_id = entry.group_id;
+    sealed.tags = tags;
+    sealed.group_id = group_id;
     sealed.created_at = entry.created_at;
     sealed.updated_at = entry.updated_at;
     sealed.deleted_at = entry.deleted_at;
@@ -284,5 +304,27 @@ mod tests {
         raw.url = Some("  https://example.com/login  ".to_string());
         let synced = entries_to_sync(&[raw], &HashMap::new());
         assert_eq!(synced[0].url.as_deref(), Some("https://example.com/login"));
+    }
+
+    /// SEC-M3: the plaintext domain is explicitly scrubbable — `zeroize()`
+    /// empties every field (the same wipe runs automatically on drop via
+    /// `ZeroizeOnDrop`).
+    #[test]
+    fn zeroize_scrubs_plaintext_entry() {
+        let mut entry = sync_entry("scrub");
+        assert_eq!(entry.password.as_deref(), Some("s3cret"));
+        entry.zeroize();
+        assert_eq!(entry.id, "");
+        assert_eq!(entry.title, "");
+        assert_eq!(entry.url, None);
+        assert_eq!(entry.username, "");
+        assert_eq!(entry.password, None);
+        assert_eq!(entry.notes, None);
+        assert_eq!(entry.totp_secret, None);
+        assert!(entry.tags.is_empty());
+        assert_eq!(entry.group_id, None);
+        assert_eq!(entry.created_at, 0);
+        assert_eq!(entry.updated_at, 0);
+        assert_eq!(entry.deleted_at, None);
     }
 }

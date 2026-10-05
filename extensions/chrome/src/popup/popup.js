@@ -269,9 +269,7 @@ class PopupApp {
 		// sender-auth.js; an empty entryUrl (generic entry) passes.
 		const entryUrl = entry.url || "";
 		if (tab.url && !entryMatchesPageUrl(entryUrl, tab.url)) {
-			this.showToast(
-				"Entry domain does not match this page — fill cancelled",
-			);
+			this.showToast("Entry domain does not match this page — fill cancelled");
 			return;
 		}
 
@@ -1417,13 +1415,18 @@ class PopupApp {
 					}
 					case "copy-password": {
 						const details = await this.getEntryDetails(btn.dataset.id);
-						if (details && details.password) {
-							await this.copyToClipboard(
-								details.password,
-								"Password copied!",
-								true,
-							);
+						// SF-P1: an empty password or a failed fetch used to be a
+						// silent no-op — tell the user the secret is unavailable
+						// instead (showToast takes only a message, no severity).
+						if (!details?.password) {
+							this.showToast("Failed to fetch password");
+							break;
 						}
+						await this.copyToClipboard(
+							details.password,
+							"Password copied!",
+							true,
+						);
 						break;
 					}
 					case "toggle-password":
@@ -1442,13 +1445,17 @@ class PopupApp {
 						break;
 					case "copy-both":
 						const details = await this.getEntryDetails(btn.dataset.id);
-						if (details && details.password) {
-							await this.copyToClipboard(
-								details.password,
-								"Password copied!",
-								true,
-							);
+						// SF-P1: same silent no-op as copy-password — surface the
+						// failure (empty string counts as failed too).
+						if (!details?.password) {
+							this.showToast("Failed to fetch password");
+							break;
 						}
+						await this.copyToClipboard(
+							details.password,
+							"Password copied!",
+							true,
+						);
 						break;
 				}
 			};

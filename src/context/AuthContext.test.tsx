@@ -69,12 +69,15 @@ describe('AuthProvider unlock error contract', () => {
 
 	it('keeps the backend error when unlock rejects (RateLimited path)', async () => {
 		// Rate limiting rejects with the serialized VaultError — the catch
-		// branch writes it, and "Invalid password" must not override it.
+		// branch renders it through errorMessage (CQ-P2a), and "Invalid
+		// password" must not override it.
 		unlockVault.mockRejectedValue({ RateLimited: { retry_after_secs: 42 } });
 		await renderAndUnlock();
 
 		expect(unlockResult).toBe(false);
-		expect(screen.getByTestId('error')).toHaveTextContent('RateLimited');
+		expect(screen.getByTestId('error')).toHaveTextContent(
+			'Too many attempts — retry in 42s',
+		);
 		expect(screen.getByTestId('error')).not.toHaveTextContent(
 			'Invalid password',
 		);

@@ -3,13 +3,8 @@ import { check, type Update, type DownloadEvent } from '@tauri-apps/plugin-updat
 import type { Settings, ResourceStatus } from '../types';
 import { DEFAULT_SETTINGS } from '../types';
 import * as api from '../api/vault';
+import { errorMessage } from '../utils/errorMessage';
 import { useAuth } from './AuthContext';
-
-function formatError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string') return error;
-  try { return JSON.stringify(error); } catch { return 'Unknown error'; }
-}
 
 // ---------------------------------------------------------------------------
 // State
@@ -148,7 +143,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         }
       })
       .catch((error) => {
-        if (!cancelled) dispatch({ type: 'SET_RESOURCE', payload: { status: 'error', error: formatError(error) } });
+        if (!cancelled) dispatch({ type: 'SET_RESOURCE', payload: { status: 'error', error: errorMessage(error, 'Failed to load settings') } });
       });
     return () => { cancelled = true; };
   }, [authState.isUnlocked]);
@@ -161,7 +156,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'SET_SETTINGS', payload: settings });
         dispatch({ type: 'SET_RESOURCE', payload: { status: 'success' } });
       } catch (error) {
-        dispatch({ type: 'SET_RESOURCE', payload: { status: 'error', error: formatError(error) } });
+        dispatch({ type: 'SET_RESOURCE', payload: { status: 'error', error: errorMessage(error, 'Failed to load settings') } });
         throw error;
       }
     },
@@ -236,6 +231,3 @@ export function useSettings() {
   if (!ctx) throw new Error('useSettings must be used within SettingsProvider');
   return ctx;
 }
-
-// Re-export for convenience
-export { formatError };

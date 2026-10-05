@@ -6,6 +6,7 @@
 //! I/O and runs strictly OUTSIDE the D8 exclusive window (the window never
 //! stretches over a request, including the ≤3 conflict retries).
 
+use std::mem;
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
@@ -153,14 +154,18 @@ pub(super) fn publish_snapshot(
                             entries: entries.clone(),
                             groups: groups.clone(),
                         };
-                        let merged = merge_snapshots(&our_view, &remote_snapshot);
+                        let mut merged = merge_snapshots(&our_view, &remote_snapshot);
                         if !merged.changed {
                             // The remote already carries our content — no
                             // upload needed (anti-echo), just bookkeeping.
+                            // ZeroizeOnDrop forbids partial moves (E0509):
+                            // take the merged rows out instead.
+                            let entries = mem::take(&mut merged.entries);
+                            let groups = mem::take(&mut merged.groups);
                             return Ok(PublishOutcome {
                                 rev: remote_snapshot.rev,
-                                entries: merged.entries,
-                                groups: merged.groups,
+                                entries,
+                                groups,
                             });
                         }
                         let (kdf, wrapped_cek) = read_envelope(&fresh).map_err(container_error)?;
@@ -170,8 +175,8 @@ pub(super) fn publish_snapshot(
                         };
                         ctx.etag = remote_stat.etag;
                         ctx.base_rev = remote_snapshot.rev;
-                        entries = merged.entries;
-                        groups = merged.groups;
+                        entries = mem::take(&mut merged.entries);
+                        groups = mem::take(&mut merged.groups);
                     }
                     None => {
                         // Container vanished remotely — recreate it.

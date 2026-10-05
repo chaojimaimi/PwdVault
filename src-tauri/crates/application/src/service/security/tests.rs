@@ -16,21 +16,22 @@ use zeroize::Zeroizing;
 
 use super::super::vault::{get_db, lock_vault, unlock_vault};
 
-pub(super) const TEST_PASSWORD: &str = "phase-one-test-password";
-pub(super) const NEW_PASSWORD: &str = "a-brand-new-password!";
+pub(crate) const TEST_PASSWORD: &str = "phase-one-test-password";
+pub(crate) const NEW_PASSWORD: &str = "a-brand-new-password!";
 const TEST_SALT: [u8; 16] = [0x41; 16];
 
-pub(super) struct TestVault {
-    pub(super) state: Arc<AppState>,
-    pub(super) store: Arc<MemorySecretStore>,
+pub(crate) struct TestVault {
+    pub(crate) state: Arc<AppState>,
+    pub(crate) store: Arc<MemorySecretStore>,
     _dir: TempDir,
     entry_ids: Vec<String>,
     group_ids: Vec<String>,
 }
 
 /// Same pattern as vault.rs `create_modern_vault`, plus a group and a
-/// `MemorySecretStore` wired into state.
-pub(super) fn create_test_vault(entry_count: usize, group_count: usize) -> TestVault {
+/// `MemorySecretStore` wired into state. `pub(crate)`: also reused by the
+/// sync window regression suite (WP-1 T3).
+pub(crate) fn create_test_vault(entry_count: usize, group_count: usize) -> TestVault {
     let dir = TempDir::new().unwrap();
     let db = Arc::new(database::init_database(dir.path().join("security.db")).unwrap());
     let params = AdaptiveParams {

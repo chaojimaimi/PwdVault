@@ -31,25 +31,10 @@ type BusyOp =
 	| "bio-disable"
 	| "recovery-enable"
 	| "recovery-disable"
-	| "recovery-export"
 	| null;
 
 function isTauriEnvironment(): boolean {
 	return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
-
-function recoveryKeyFileContent(key: string): string {
-	return [
-		"PwdVault Recovery Key",
-		`Generated: ${new Date().toISOString().slice(0, 10)}`,
-		"",
-		"Keep this file somewhere safe. It is the only way to recover your",
-		"vault if you forget your master password. Anyone holding this key",
-		"can unlock your vault.",
-		"",
-		key,
-		"",
-	].join("\n");
 }
 
 export function SecuritySettingsSection() {
@@ -73,6 +58,7 @@ export function SecuritySettingsSection() {
 	// Recovery key
 	const [showRecoveryEnable, setShowRecoveryEnable] = useState(false);
 	const [recoveryPassword, setRecoveryPassword] = useState("");
+	const [saveKeyToFile, setSaveKeyToFile] = useState(false);
 	const [generatedKey, setGeneratedKey] = useState<string | null>(null);
 	const [keyStoredAck, setKeyStoredAck] = useState(false);
 	const [showRecoveryDisable, setShowRecoveryDisable] = useState(false);
@@ -182,13 +168,35 @@ export function SecuritySettingsSection() {
 		setBusy("recovery-enable");
 		setRecoveryError(null);
 		try {
-			const key = await enableRecovery(recoveryPassword);
+			// SEC-M2: with "Save to file" checked, the frontend only picks the
+			// destination path; the key file is written by the backend command
+			// (atomic, 0600) so the key never crosses IPC a second time.
+			let savePath: string | null = null;
+			if (saveKeyToFile && isTauriEnvironment()) {
+				const { save } = await import("@tauri-apps/plugin-dialog");
+				const filePath = await save({
+					defaultPath: "pwdvault-recovery-key.txt",
+					filters: [{ name: "Text", extensions: ["txt"] }],
+				});
+				if (!filePath) {
+					// Cancelled dialog: abort without consuming the password.
+					return;
+				}
+				savePath = filePath;
+			}
+			const result = await enableRecovery(recoveryPassword, savePath);
 			setRecoveryPassword("");
 			setShowRecoveryEnable(false);
+			setSaveKeyToFile(false);
 			// The key is shown exactly once, inside a dialog the user can only
 			// dismiss after acknowledging it is stored.
-			setGeneratedKey(key);
+			setGeneratedKey(result.key);
 			setKeyStoredAck(false);
+			showToast(
+				result.fileSaved
+					? "Recovery key generated and saved to file"
+					: "Recovery key generated",
+			);
 		} catch (error) {
 			setRecoveryError(errorMessage(error, "Failed to enable recovery key"));
 		} finally {
@@ -220,43 +228,6 @@ export function SecuritySettingsSection() {
 			showToast("Recovery key copied (clears in 30 seconds)");
 		} catch {
 			showToast("Failed to copy recovery key");
-		}
-	};
-
-	const handleExportKey = async () => {
-		if (!generatedKey || busy) return;
-		setBusy("recovery-export");
-		try {
-			if (isTauriEnvironment()) {
-				const { save } = await import("@tauri-apps/plugin-dialog");
-				const filePath = await save({
-					defaultPath: "pwdvault-recovery-key.txt",
-					filters: [{ name: "Text", extensions: ["txt"] }],
-				});
-				if (filePath) {
-					const { writeFile } = await import("@tauri-apps/plugin-fs");
-					await writeFile(
-						filePath,
-						new TextEncoder().encode(recoveryKeyFileContent(generatedKey)),
-					);
-					showToast("Recovery key exported");
-				}
-			} else {
-				const blob = new Blob([recoveryKeyFileContent(generatedKey)], {
-					type: "text/plain",
-				});
-				const url = URL.createObjectURL(blob);
-				const a = document.createElement("a");
-				a.href = url;
-				a.download = "pwdvault-recovery-key.txt";
-				a.click();
-				URL.revokeObjectURL(url);
-				showToast("Recovery key exported");
-			}
-		} catch (error) {
-			showToast(errorMessage(error, "Failed to export recovery key"));
-		} finally {
-			setBusy(null);
 		}
 	};
 
@@ -491,17 +462,28 @@ export function SecuritySettingsSection() {
 					</>
 				) : showRecoveryEnable ? (
 					<div className="security-inline-form">
-						<label htmlFor="security-recovery-password">Master password</label>
+					<label htmlFor="security-recovery-password">Master password</label>
+					<input
+						id="security-recovery-password"
+						type="password"
+						className="input-field"
+						placeholder="Confirm master password"
+						value={recoveryPassword}
+						onChange={(e) => setRecoveryPassword(e.target.value)}
+						autoComplete="current-password"
+					/>
+					{/* SEC-M2: the key file is written by the backend when this is
+					    checked; unchecked keeps the legacy display-only flow. */}
+					<label className="confirm-checkbox">
 						<input
-							id="security-recovery-password"
-							type="password"
-							className="input-field"
-							placeholder="Confirm master password"
-							value={recoveryPassword}
-							onChange={(e) => setRecoveryPassword(e.target.value)}
-							autoComplete="current-password"
+							type="checkbox"
+							className="checkbox"
+							checked={saveKeyToFile}
+							onChange={(e) => setSaveKeyToFile(e.target.checked)}
 						/>
-						{recoveryError && (
+						Save to file
+					</label>
+					{recoveryError && (
 							<p className="error-message" role="alert">
 								{recoveryError}
 							</p>
@@ -549,7 +531,8 @@ export function SecuritySettingsSection() {
 				)}
 			</div>
 
-			{/* One-time recovery key display: Copy / Export .txt, closable only
+			{/* One-time recovery key display: Copy only (SEC-M2 — file export
+			    happens via "Save to file" at generation time), closable only
 			    after the "I have safely stored it" acknowledgement. */}
 			<AccessibleDialog
 				isOpen={generatedKey !== null}
@@ -596,14 +579,6 @@ export function SecuritySettingsSection() {
 							onClick={() => void handleCopyKey()}
 						>
 							Copy
-						</button>
-						<button
-							type="button"
-							className="btn btn-secondary btn-sm"
-							onClick={() => void handleExportKey()}
-							disabled={busy !== null}
-						>
-							{busy === "recovery-export" ? "Exporting..." : "Export .txt"}
 						</button>
 					</div>
 					<label className="confirm-checkbox">

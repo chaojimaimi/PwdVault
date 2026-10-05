@@ -75,6 +75,10 @@ fn tauri_ipc_commands() -> HashSet<&'static str> {
         "revoke_extension_access",
         "export_vault",
         "import_vault",
+        // SEC-M2 (v1.1.9): backup file IO behind native dialogs — desktop
+        // UI only, never reachable from the browser extension.
+        "export_vault_file",
+        "read_backup_file",
         // Phase 1 security operations — desktop-only (D6): they drive the
         // local credential store / touch the session state machine and must
         // never be reachable from the browser extension.
@@ -185,9 +189,11 @@ fn adapter_only_commands_are_documented() {
             &"disable_recovery",
             &"enable_biometric",
             &"enable_recovery",
+            &"export_vault_file",
             &"get_entry_meta",
             &"is_vault_initialized",
             &"is_vault_unlocked",
+            &"read_backup_file",
             &"recover_vault",
             &"recovery_status",
             &"sync_connect",

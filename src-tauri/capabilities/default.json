@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window. Permission boundary note (M11): clipboard-manager:allow-read-text deliberately grants the main webview persistent clipboard READ access (including while the vault is locked). This is an explicit minimal-privilege expansion required by the clipboard auto-clear digest guard; it is accepted because the CSP is 'self'-only (no remote content can invoke the bridge) and src/utils/clipboard.ts only clears after verifying a SHA-256 digest match.",
+  "description": "Capability for the main window. Permission boundary note (M11): clipboard-manager:allow-read-text deliberately grants the main webview persistent clipboard READ access (including while the vault is locked). This is an explicit minimal-privilege expansion required by the clipboard auto-clear digest guard; it is accepted because the CSP is 'self'-only (no remote content can invoke the bridge) and src/utils/clipboard.ts only clears after verifying a SHA-256 digest match. M12 (v1.1.9, audit SEC-M2): the static $HOME/$TEMP/$Volumes fs write/read/stat grants were revoked — all backup/restore and recovery-key file IO goes through dedicated desktop commands (export_vault_file, read_backup_file, enable_recovery), so the webview holds no path-based fs capability beyond fs:default.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -10,42 +10,6 @@
     "updater:default",
     "process:allow-restart",
     "clipboard-manager:allow-write-text",
-    "clipboard-manager:allow-read-text",
-    {
-      "identifier": "fs:allow-write-file",
-      "allow": [
-        { "path": "$HOME/**" },
-        { "path": "/Volumes/**" },
-        { "path": "$TEMP/**" }
-      ],
-      "deny": [
-        { "path": "$HOME/Library/Application Support/com.pwdvault.app/**" },
-        { "path": "$LOCALDATA/PwdVault/**" }
-      ]
-    },
-    {
-      "identifier": "fs:allow-read-file",
-      "allow": [
-        { "path": "$HOME/**" },
-        { "path": "/Volumes/**" },
-        { "path": "$TEMP/**" }
-      ],
-      "deny": [
-        { "path": "$HOME/Library/Application Support/com.pwdvault.app/**" },
-        { "path": "$LOCALDATA/PwdVault/**" }
-      ]
-    },
-    {
-      "identifier": "fs:allow-stat",
-      "allow": [
-        { "path": "$HOME/**" },
-        { "path": "/Volumes/**" },
-        { "path": "$TEMP/**" }
-      ],
-      "deny": [
-        { "path": "$HOME/Library/Application Support/com.pwdvault.app/**" },
-        { "path": "$LOCALDATA/PwdVault/**" }
-      ]
-    }
+    "clipboard-manager:allow-read-text"
   ]
 }

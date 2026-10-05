@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tauri::State;
 use zeroize::Zeroizing;
 
-use pwdvault_application::{self as app, AppState, VaultError};
+use pwdvault_application::{self as app, AppState, EnableRecoveryResult, VaultError};
 use pwdvault_domain::{CreateEntryRequest, UpdateEntryRequest};
 
 pub type AppHandle = Arc<AppState>;
@@ -242,6 +242,155 @@ pub async fn import_vault(
 }
 
 // ---------------------------------------------------------------------------
+// Backup file IO (SEC-M2, v1.1.9) — native save/open dialogs and filesystem
+// access move into Rust so the webview needs no fs capability. The plugin's
+// blocking dialog variants must never run on the main thread, so every
+// dialog call happens inside spawn_blocking (§5.6.2).
+// ---------------------------------------------------------------------------
+
+/// SEC-M2: export the unlocked vault through a native save dialog and write
+/// the .pvault container from Rust (pretty JSON, atomic 0600 write). A
+/// cancelled dialog is `Ok(None)` — the frontend treats that as "no file
+/// chosen", not as an error.
+#[tauri::command]
+pub async fn export_vault_file(
+    app: tauri::AppHandle,
+    export_password: Zeroizing<String>,
+    state: State<'_, AppHandle>,
+) -> Result<Option<String>, VaultError> {
+    let state = state.inner().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        export_vault_file_blocking(&app, export_password, &state)
+    })
+    .await
+    .map_err(|e| VaultError::InternalError(format!("export file task join error: {}", e)))?;
+    match &result {
+        Ok(Some(_)) => tracing::info!("vault backup export written to file"),
+        Ok(None) => tracing::info!("vault backup export cancelled by user"),
+        Err(error) => tracing::error!(error = ?error, "vault backup file export failed"),
+    }
+    result
+}
+
+/// Blocking half of `export_vault_file` (runs on the spawn_blocking pool).
+fn export_vault_file_blocking(
+    app: &tauri::AppHandle,
+    export_password: Zeroizing<String>,
+    state: &AppHandle,
+) -> Result<Option<String>, VaultError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let Some(file_path) = app
+        .dialog()
+        .file()
+        .add_filter("PwdVault Backup", &["pvault"])
+        .set_file_name(backup_default_file_name())
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|error| VaultError::InvalidInput {
+            code: "PATH_INVALID".into(),
+            message: format!("the selected file path is not usable: {error}"),
+        })?;
+
+    let backup = app::export_vault(state, export_password)?;
+    let json = serde_json::to_string_pretty(&backup)
+        .map_err(|e| VaultError::InternalError(e.to_string()))?;
+    pwdvault_infrastructure::paths::write_file_atomic_0600(&path, json.as_bytes()).map_err(
+        |error| VaultError::InvalidInput {
+            code: "BACKUP_WRITE_FAILED".into(),
+            message: format!("cannot write the backup file: {error}"),
+        },
+    )?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// SEC-M2: pick a .pvault backup with the native open dialog and read +
+/// pre-validate it in Rust (14 MiB cap, JSON shape, envelope version/magic —
+/// the full cryptographic validation still happens in `import_vault`).
+/// Cancelled dialog is `Ok(None)`.
+#[tauri::command]
+pub async fn read_backup_file(
+    app: tauri::AppHandle,
+    // Frozen contract keeps the state parameter; the parse itself is
+    // stateless (all vault-dependent validation runs in import_vault).
+    _state: State<'_, AppHandle>,
+) -> Result<Option<pwdvault_domain::VaultBackup>, VaultError> {
+    let result = tauri::async_runtime::spawn_blocking(move || read_backup_file_blocking(&app))
+        .await
+        .map_err(|e| VaultError::InternalError(format!("read backup task join error: {}", e)))?;
+    match &result {
+        Ok(Some(_)) => tracing::info!("backup file selected and pre-validated"),
+        Ok(None) => tracing::info!("backup file selection cancelled by user"),
+        Err(error) => tracing::error!(error = ?error, "backup file read failed"),
+    }
+    result
+}
+
+/// Blocking half of `read_backup_file` (runs on the spawn_blocking pool).
+fn read_backup_file_blocking(
+    app: &tauri::AppHandle,
+) -> Result<Option<pwdvault_domain::VaultBackup>, VaultError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let Some(file_path) = app
+        .dialog()
+        .file()
+        .add_filter("PwdVault Backup", &["pvault"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|error| VaultError::InvalidInput {
+            code: "PATH_INVALID".into(),
+            message: format!("the selected file path is not usable: {error}"),
+        })?;
+    let bytes = std::fs::read(&path).map_err(|error| VaultError::InvalidInput {
+        code: "BACKUP_READ_FAILED".into(),
+        message: format!("cannot read the backup file: {error}"),
+    })?;
+    app::parse_backup_file_bytes(&bytes).map(Some)
+}
+
+/// Default export file name, mirroring the webview's
+/// `pwdvault-backup-${new Date().toISOString().slice(0, 10)}.pvault`.
+fn backup_default_file_name() -> String {
+    format!("pwdvault-backup-{}.pvault", utc_today_string())
+}
+
+/// UTC date as YYYY-MM-DD — the std-only equivalent of the webview's
+/// `new Date().toISOString().slice(0, 10)` (this crate has no chrono
+/// dependency; the algorithm below is Howard Hinnant's civil_from_days).
+fn utc_today_string() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let (year, month, day) = civil_from_days((secs / 86_400) as i64);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+/// Days since 1970-01-01 → (year, month, day) in the proleptic Gregorian
+/// calendar (Howard Hinnant's civil_from_days, public domain).
+fn civil_from_days(days_since_epoch: i64) -> (i64, u32, u32) {
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64; // [0, 146096]
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+    (if month <= 2 { y + 1 } else { y }, month, day)
+}
+
+// ---------------------------------------------------------------------------
 // Security operations (Phase 1) — Tauri-IPC only (D6, touch_activity precedent)
 // ---------------------------------------------------------------------------
 
@@ -303,15 +452,22 @@ pub fn recovery_status(state: State<'_, AppHandle>) -> Result<bool, VaultError> 
     app::recovery_status(state.inner())
 }
 
+/// SEC-M2: generate the recovery key; with `save_path` (frontend save
+/// dialog) the key file is validated and written by Rust (0600, atomic). A
+/// failed write is an error — never a silent partial success. IPC-only
+/// change (no HTTP dispatcher route), signature frozen in fix plan §3.1.
 #[tauri::command]
 pub async fn enable_recovery(
     password: Zeroizing<String>,
+    save_path: Option<String>,
     state: State<'_, AppHandle>,
-) -> Result<String, VaultError> {
+) -> Result<EnableRecoveryResult, VaultError> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || app::enable_recovery(&state, password))
-        .await
-        .map_err(|e| VaultError::InternalError(format!("enable recovery task join error: {}", e)))?
+    tauri::async_runtime::spawn_blocking(move || {
+        app::enable_recovery_with_file(&state, password, save_path)
+    })
+    .await
+    .map_err(|e| VaultError::InternalError(format!("enable recovery task join error: {}", e)))?
 }
 
 #[tauri::command]
@@ -417,6 +573,29 @@ mod tests {
     use super::*;
     use pwdvault_infrastructure::crypto;
     use tauri::Manager;
+
+    /// The std-only civil_from_days used for the default export file name
+    /// must agree with known UTC dates.
+    #[test]
+    fn civil_from_days_known_dates() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(11_017), (2000, 3, 1));
+        assert_eq!(civil_from_days(19_358), (2023, 1, 1));
+        assert_eq!(civil_from_days(19_723), (2024, 1, 1));
+    }
+
+    /// utc_today_string renders the same shape as the webview's
+    /// `new Date().toISOString().slice(0, 10)`.
+    #[test]
+    fn utc_today_string_is_iso_date_shape() {
+        let today = utc_today_string();
+        assert_eq!(today.len(), 10, "YYYY-MM-DD: {today}");
+        assert_eq!(&today[4..5], "-");
+        assert_eq!(&today[7..8], "-");
+        assert!(today[..4].chars().all(|c| c.is_ascii_digit()));
+        assert!(today[5..7].chars().all(|c| c.is_ascii_digit()));
+        assert!(today[8..10].chars().all(|c| c.is_ascii_digit()));
+    }
 
     /// A1: the `touch_activity` command must delegate to
     /// `AppState::touch_activity` so pure-local user input advances the

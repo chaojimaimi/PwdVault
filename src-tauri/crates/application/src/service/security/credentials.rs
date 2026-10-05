@@ -124,6 +124,13 @@ pub fn unlock_biometric(state: &Arc<AppState>, store: &dyn SecretStore) -> Resul
         message: "Touch ID unlock is not enabled for this vault".to_string(),
     })?;
 
+    // Step 2.5 (SEC-M1): capture the verification data BEFORE the Touch ID
+    // prompt — it is the unlock's expectation for the window re-check in
+    // `complete_unlock`. A password change / recovery / sync re-seal that
+    // runs while the user answers the prompt rotates this row, and the
+    // stale keys derived from the old row must never be published.
+    let expected = current_verification(state)?;
+
     // Step 3: Touch ID prompt happens here.
     let wrap_key_bytes = store.get(BIO_WRAP_ACCOUNT).map_err(|e| match e {
         SecretStoreError::NotFound => VaultError::BiometricUnavailable,
@@ -153,8 +160,9 @@ pub fn unlock_biometric(state: &Arc<AppState>, store: &dyn SecretStore) -> Resul
         }
     };
 
-    // Step 6: publish + side effects.
-    complete_unlock(state, enc_key, mac_key)?;
+    // Step 6: publish + side effects (re-checks the captured expectation
+    // under the exclusive window — SEC-M1).
+    complete_unlock(state, enc_key, mac_key, &expected)?;
 
     // Step 7: cache the wrap key in THIS session only (D5).
     state.session.set_wrap_key(SecretKey::new(wrap_key));

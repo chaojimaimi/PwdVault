@@ -20,6 +20,8 @@
 
 use std::collections::BTreeMap;
 
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
 use super::container::{entry_fingerprint, group_fingerprint};
 use super::{SyncEntry, SyncGroup, SyncSnapshot};
 
@@ -31,7 +33,12 @@ use super::{SyncEntry, SyncGroup, SyncSnapshot};
 /// carries the merged content, so uploading would only echo it back (D3
 /// anti-echo rule). Envelope fields (rev / device_id / generated_at) are
 /// ignored by the comparison.
-#[derive(Debug)]
+///
+/// SEC-M3: defined in this file (mod.rs only re-exports it) and part of the
+/// plaintext domain — dropped merges wipe their `SyncEntry`/`SyncGroup`
+/// contents. Never debug-log it, and take fields with `mem::take` instead of
+/// moving them out.
+#[derive(Debug, Zeroize, ZeroizeOnDrop)]
 pub struct MergedSnapshot {
     pub entries: Vec<SyncEntry>,
     pub groups: Vec<SyncGroup>,

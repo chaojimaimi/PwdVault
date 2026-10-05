@@ -9,6 +9,13 @@ describe("errorMessage", () => {
 		);
 	});
 
+	it("passes serialized unit-variant strings through unchanged (CQ-P2a)", () => {
+		expect(errorMessage("VaultLocked", "fallback")).toBe("VaultLocked");
+		expect(errorMessage("IntegrityCheckFailed", "fallback")).toBe(
+			"IntegrityCheckFailed",
+		);
+	});
+
 	it("reads serialized Rust error enum payloads", () => {
 		expect(
 			errorMessage(
