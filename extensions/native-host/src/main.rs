@@ -130,6 +130,24 @@ fn main() {
             }
         }
 
+        // SEC-L1 (v1.2.0, defence in depth): the body's auth_token is
+        // interpolated into the HTTP `Authorization` header. Restrict it to
+        // the exact 64-hex shape the desktop app's `auth.rs` generates so a
+        // malformed or hostile token cannot smuggle CR/LF (or whole header
+        // lines) into the forwarded request. Same policy as the command
+        // whitelist above: protocol error response, host killed.
+        if let Some(token) = extract_auth_header(&msg) {
+            if !is_valid_token(&token) {
+                let _ = send_error(
+                    &mut out,
+                    extract_id(&msg).unwrap_or(0),
+                    "Invalid auth token",
+                );
+                msg.fill(0);
+                std::process::exit(1);
+            }
+        }
+
         let mut response = match forward_to_server(&msg, &caller) {
             Ok(body) => body,
             Err(e) => {
@@ -401,9 +419,19 @@ fn is_valid_command(command: &str) -> bool {
     command.chars().all(|c| c.is_ascii_lowercase() || c == '_')
 }
 
+/// Validate a Bearer token before it is lifted into the HTTP `Authorization`
+/// header (SEC-L1, v1.2.0). Desktop-app tokens are always exactly 64 hex
+/// chars (`auth.rs generate_token`), so anything else — wrong length, or
+/// CR/LF/space/other non-hex bytes that could forge header lines — is
+/// rejected before the request is forwarded.
+fn is_valid_token(token: &str) -> bool {
+    token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 /// Extract the `auth_token` field the extension carries in the body (since NM
 /// has no HTTP headers). Returns `None` when absent (e.g. for the `pair`
-/// command). The caller lifts this into an `Authorization: Bearer` header.
+/// command). The caller validates the shape with [`is_valid_token`] and lifts
+/// it into an `Authorization: Bearer` header.
 fn extract_auth_header(payload: &[u8]) -> Option<String> {
     let value = serde_json::from_slice::<serde_json::Value>(payload).ok()?;
     value.get("auth_token")?.as_str().map(str::to_owned)
@@ -467,6 +495,47 @@ mod tests {
     fn extract_auth_header_missing_returns_none() {
         let payload = br#"{"id":1,"command":"pair"}"#;
         assert_eq!(extract_auth_header(payload), None);
+    }
+
+    /// SEC-L1: the token whitelist accepts exactly the desktop app's token
+    /// shape — 64 hex characters.
+    #[test]
+    fn token_whitelist_accepts_64_hex() {
+        assert!(is_valid_token(&"0123456789abcdef".repeat(4)));
+        assert!(is_valid_token(&"a".repeat(64)));
+    }
+
+    /// SEC-L1: a token carrying CRLF (header-injection shape) is rejected
+    /// even at the correct length.
+    #[test]
+    fn token_with_crlf_fails_the_whitelist() {
+        let mut token = "0".repeat(62);
+        token.push_str("\r\n");
+        assert_eq!(token.len(), 64);
+        assert!(!is_valid_token(&token));
+    }
+
+    /// SEC-L1: length is part of the whitelist — 63/65 chars and empty all
+    /// fail.
+    #[test]
+    fn token_with_wrong_length_fails_the_whitelist() {
+        assert!(!is_valid_token(&"a".repeat(63)));
+        assert!(!is_valid_token(&"a".repeat(65)));
+        assert!(!is_valid_token(""));
+    }
+
+    /// SEC-L1: non-hex characters fail, including a full 64-char token with
+    /// a single smuggled byte.
+    #[test]
+    fn token_with_non_hex_characters_fails_the_whitelist() {
+        let mut token = vec![b'0'; 64];
+        token[0] = b'z';
+        let token = String::from_utf8(token).unwrap();
+        assert!(!is_valid_token(&token));
+
+        let mut smuggle = "0".repeat(60);
+        smuggle.push_str("\r\nX:1");
+        assert!(!is_valid_token(&smuggle));
     }
 
     #[test]
