@@ -32,6 +32,14 @@ use pwdvault_infrastructure::keychain::{SecretStore, SYNC_BAIDU_TOKEN_ACCOUNT};
 const OAUTH_CALLBACK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// Loopback interface the OAuth listener binds.
 const CALLBACK_HOST: &str = "127.0.0.1";
+/// Prefix of the denial reason [`callback_page_for`] builds when the
+/// redirect carried a Baidu `error=` condition (kept in one place so the
+/// wait loop can recognize a real denial without duplicating the wording).
+const DENIED_BY_BAIDU_PREFIX: &str = "authorization was denied by Baidu";
+/// Page served to DISCARDED callbacks (SEC-L3): probes without a code or
+/// redirects whose state echo does not match the parked expectation.
+const INVALID_CALLBACK_PAGE: &str = "<html><body><h3>PwdVault</h3><p>Invalid authorization \
+     callback — please restart the connection from PwdVault.</p></body></html>";
 
 /// Baidu token pair + expiry, stored as JSON in the non-interactive
 /// credential store under `sync-baidu-token`. Zeroized on drop.
@@ -153,7 +161,7 @@ pub fn baidu_start_auth(_state: &Arc<AppState>) -> Result<BaiduAuthStart, VaultE
     });
     let auth_url = build_auth_url(BAIDU_APP_KEY, BAIDU_REDIRECT_URI, OAUTH_API_BASE, &state);
     std::thread::spawn(move || {
-        let outcome = wait_for_callback(&server, OAUTH_CALLBACK_TIMEOUT);
+        let outcome = wait_for_callback(&server, OAUTH_CALLBACK_TIMEOUT, &state);
         // Fill the parked authorization IN PLACE — the expected_state that
         // start_auth parked must survive for the completion validation. (A
         // cleared slot means the flow was already consumed or restarted;
@@ -312,10 +320,23 @@ pub(crate) fn token_request(oauth_base: &str, query: &str) -> Result<BaiduTokens
     })
 }
 
-/// Wait (blocking) for exactly one browser callback on the loopback server;
-/// serve a small completion page and hand back the authorization code (or a
+/// Wait (blocking) for the browser callback on the loopback server; serve a
+/// small completion page and hand back the authorization code (or a
 /// human-readable failure reason). Bounded by `timeout`.
-pub(crate) fn wait_for_callback(server: &tiny_http::Server, timeout: Duration) -> CallbackOutcome {
+///
+/// SEC-L3: the port accepts ANY loopback connection, so the first request
+/// can be garbage (a scanner probe, or a redirect from a stale tab whose
+/// state echo does not match `expected_state`). Such requests are answered
+/// with an error page and DISCARDED — the listener keeps waiting for the
+/// genuine redirect (code + matching state echo, P2-2) until the total
+/// timeout. A Baidu `error=` redirect is a genuine answer from the real
+/// flow (the user denied the grant; no second redirect will come), so it
+/// terminates the wait immediately.
+pub(crate) fn wait_for_callback(
+    server: &tiny_http::Server,
+    timeout: Duration,
+    expected_state: &str,
+) -> CallbackOutcome {
     let deadline = Instant::now() + timeout;
     loop {
         let now = Instant::now();
@@ -326,10 +347,21 @@ pub(crate) fn wait_for_callback(server: &tiny_http::Server, timeout: Duration) -
             Ok(Some(request)) => {
                 let url = request.url().to_string();
                 let (outcome, page) = callback_page_for(&url);
-                let status = if outcome.is_ok() { 200 } else { 400 };
-                let response = tiny_http::Response::from_string(page).with_status_code(status);
+                let echoed_valid =
+                    matches!(&outcome, Ok(grant) if grant.state.as_deref() == Some(expected_state));
+                let denied =
+                    matches!(&outcome, Err(reason) if reason.starts_with(DENIED_BY_BAIDU_PREFIX));
+                if echoed_valid || denied {
+                    let status = if outcome.is_ok() { 200 } else { 400 };
+                    let response = tiny_http::Response::from_string(page).with_status_code(status);
+                    let _ = request.respond(response);
+                    return outcome;
+                }
+                // Discarded: answer and keep waiting for the real callback.
+                let response =
+                    tiny_http::Response::from_string(INVALID_CALLBACK_PAGE).with_status_code(400);
                 let _ = request.respond(response);
-                return outcome;
+                continue;
             }
             // Poll again; the deadline check above terminates us.
             Ok(None) => continue,
@@ -356,7 +388,7 @@ pub(crate) fn callback_page_for(url: &str) -> (CallbackOutcome, String) {
     }
     if let Some(error) = error {
         (
-            Err(format!("authorization was denied by Baidu ({error})")),
+            Err(format!("{DENIED_BY_BAIDU_PREFIX} ({error})")),
             "<html><body><h3>PwdVault</h3><p>Authorization failed — you can close this tab \
              and try again from PwdVault.</p></body></html>"
                 .to_string(),

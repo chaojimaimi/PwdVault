@@ -5,7 +5,8 @@ import { copyWithTimeout } from "../utils/clipboard";
 import { showToast } from "../utils/toast";
 import { BackHeader } from "../components/BackHeader";
 import { StrengthMeter } from "../components/StrengthMeter";
-import { TotpCode } from "../components/TotpCode";
+import { TagsEditor } from "../components/TagsEditor";
+import { TotpSecretField } from "../components/TotpSecretField";
 import {
 	EyeIcon,
 	EyeOffIcon,
@@ -22,6 +23,96 @@ import type {
 	EntrySummary,
 	UpdateEntryRequest,
 } from "../types";
+
+/**
+ * Pure diff between the saved entry and the current form, for the save
+ * confirmation modal. Every "changed" flag is passed in explicitly (secrets
+ * are fetched on demand, so password/notes/TOTP edits are tracked outside
+ * `current`); `totpChanged` implements the TOTP tri-state (untouched / cleared / set).
+ */
+function detectChanges(
+	originalMeta: EntrySummary,
+	originalSecret: { password: string; notes: string } | null,
+	current: CreateEntryRequest,
+	passwordChanged: boolean,
+	notesChanged: boolean,
+	totpChanged: boolean,
+): ChangeItem[] {
+	const changes: ChangeItem[] = [];
+	if (originalMeta.title !== current.title) {
+		changes.push({
+			fieldId: "title",
+			label: "Title",
+			oldValue: originalMeta.title,
+			newValue: current.title,
+			valueType: "text",
+		});
+	}
+	if ((originalMeta.url || "") !== (current.url || "")) {
+		changes.push({
+			fieldId: "url",
+			label: "URL",
+			oldValue: originalMeta.url || "",
+			newValue: current.url || "",
+			valueType: "text",
+		});
+	}
+	if (originalMeta.username !== current.username) {
+		changes.push({
+			fieldId: "username",
+			label: "Username",
+			oldValue: originalMeta.username,
+			newValue: current.username,
+			valueType: "text",
+		});
+	}
+	if (passwordChanged) {
+		changes.push({
+			fieldId: "password",
+			label: "Password",
+			valueType: "password",
+		});
+	}
+	if (notesChanged) {
+		const originalNotes = originalSecret?.notes ?? "";
+		changes.push({
+			fieldId: "notes",
+			label: "Notes",
+			oldValue: originalNotes.slice(0, 200),
+			newValue: (current.notes || "").slice(0, 200),
+			valueType: "notes",
+		});
+	}
+	const origTags = originalMeta.tags || [];
+	const added = current.tags.filter((t) => !origTags.includes(t));
+	const removed = origTags.filter((t) => !current.tags.includes(t));
+	if (added.length || removed.length) {
+		changes.push({
+			fieldId: "tags",
+			label: "Tags",
+			oldValue: removed.join(", "),
+			newValue: added.join(", "),
+			valueType: "tags",
+		});
+	}
+	if ((originalMeta.group_id || null) !== (current.group_id || null)) {
+		changes.push({
+			fieldId: "group_id",
+			label: "Group",
+			oldValue: originalMeta.group_id || "",
+			newValue: current.group_id || "",
+			valueType: "text",
+		});
+	}
+	if (totpChanged) {
+		changes.push({
+			fieldId: "totp_secret",
+			label: "TOTP Secret",
+			valueType: "password",
+		});
+	}
+	return changes;
+}
 
 export function EntryScreen() {
 	const { actions: authActions } = useAuth();
@@ -48,22 +139,18 @@ export function EntryScreen() {
 	const [passwordChanged, setPasswordChanged] = useState(false);
 	const [notesLoaded, setNotesLoaded] = useState(false);
 	const [notesChanged, setNotesChanged] = useState(false);
-	// TOTP tri-state (same update semantics as update_notes): untouched (no
-	// totp_secret in the patch), cleared ("" in the field), or set. Only
-	// shown while editing — create_entry has no TOTP field in the backend
-	// contract (CreateEntryRequest), so new entries add TOTP via a second edit.
+	// TOTP tri-state bookkeeping (untouched / cleared / set — same update
+	// semantics as update_notes); the field itself renders in TotpSecretField.
 	const [totpSecret, setTotpSecret] = useState("");
 	const [totpChanged, setTotpChanged] = useState(false);
 	// TOTP secrets are paste-only (no on-demand fetch like the password
 	// field), so the toggle is a plain visibility switch that never exposes
 	// the value by default.
 	const [showTotpSecret, setShowTotpSecret] = useState(false);
-	const isOtpauthUri = totpSecret.trim().startsWith("otpauth://");
 	const [secretLoading, setSecretLoading] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [tagInput, setTagInput] = useState("");
 	const [showGenerator, setShowGenerator] = useState(false);
 	const [generatedPassword, setGeneratedPassword] = useState("");
 	const [showConfirmation, setShowConfirmation] = useState(false);
@@ -196,6 +283,7 @@ export function EntryScreen() {
 			formData,
 			passwordChanged,
 			notesChanged,
+			totpChanged,
 		);
 		if (changes.length === 0) {
 			leaveEntry();
@@ -237,89 +325,6 @@ export function EntryScreen() {
 		}
 	};
 
-	function detectChanges(
-		originalMeta: EntrySummary,
-		originalSecret: { password: string; notes: string } | null,
-		current: CreateEntryRequest,
-		passwordChanged: boolean,
-		notesChanged: boolean,
-	): ChangeItem[] {
-		const changes: ChangeItem[] = [];
-		if (originalMeta.title !== current.title) {
-			changes.push({
-				fieldId: "title",
-				label: "Title",
-				oldValue: originalMeta.title,
-				newValue: current.title,
-				valueType: "text",
-			});
-		}
-		if ((originalMeta.url || "") !== (current.url || "")) {
-			changes.push({
-				fieldId: "url",
-				label: "URL",
-				oldValue: originalMeta.url || "",
-				newValue: current.url || "",
-				valueType: "text",
-			});
-		}
-		if (originalMeta.username !== current.username) {
-			changes.push({
-				fieldId: "username",
-				label: "Username",
-				oldValue: originalMeta.username,
-				newValue: current.username,
-				valueType: "text",
-			});
-		}
-		if (passwordChanged) {
-			changes.push({
-				fieldId: "password",
-				label: "Password",
-				valueType: "password",
-			});
-		}
-		if (notesChanged) {
-			const originalNotes = originalSecret?.notes ?? "";
-			changes.push({
-				fieldId: "notes",
-				label: "Notes",
-				oldValue: originalNotes.slice(0, 200),
-				newValue: (current.notes || "").slice(0, 200),
-				valueType: "notes",
-			});
-		}
-		const origTags = originalMeta.tags || [];
-		const added = current.tags.filter((t) => !origTags.includes(t));
-		const removed = origTags.filter((t) => !current.tags.includes(t));
-		if (added.length || removed.length) {
-			changes.push({
-				fieldId: "tags",
-				label: "Tags",
-				oldValue: removed.join(", "),
-				newValue: added.join(", "),
-				valueType: "tags",
-			});
-		}
-		if ((originalMeta.group_id || null) !== (current.group_id || null)) {
-			changes.push({
-				fieldId: "group_id",
-				label: "Group",
-				oldValue: originalMeta.group_id || "",
-				newValue: current.group_id || "",
-				valueType: "text",
-			});
-		}
-		if (totpChanged) {
-			changes.push({
-				fieldId: "totp_secret",
-				label: "TOTP Secret",
-				valueType: "password",
-			});
-		}
-		return changes;
-	}
-
 	const onConfirmSave = async () => {
 		if (!pendingChanges || !state.selectedEntry) return;
 		setIsSavingConfirmed(true);
@@ -333,17 +338,6 @@ export function EntryScreen() {
 		} finally {
 			setIsSavingConfirmed(false);
 		}
-	};
-
-	const handleAddTag = () => {
-		if (tagInput.trim() && !formData.tags.includes(tagInput.trim())) {
-			setFormData({ ...formData, tags: [...formData.tags, tagInput.trim()] });
-			setTagInput("");
-		}
-	};
-
-	const handleRemoveTag = (tag: string) => {
-		setFormData({ ...formData, tags: formData.tags.filter((t) => t !== tag) });
 	};
 
 	const handleGeneratePassword = async () => {
@@ -538,47 +532,18 @@ export function EntryScreen() {
 				</div>
 
 				{/* TOTP (Phase 2): edit mode only — the backend create request
-				    carries no TOTP field, so new entries add it via a second edit.
-				    The live code view renders once the saved entry has a secret
-				    (TotpCode hides itself while the backend reports none). */}
+				    carries no TOTP field, so new entries add it via a second edit. */}
 				{isEditing && state.selectedEntry && (
-					<div className="form-group">
-						<TotpCode entryId={state.selectedEntry.id} />
-						<label htmlFor="entry-totp">TOTP Secret</label>
-						<div className="password-field">
-							<input
-								id="entry-totp"
-								type={showTotpSecret ? "text" : "password"}
-								className="form-input"
-								value={totpSecret}
-								onChange={(e) => {
-									setTotpSecret(e.target.value);
-									setTotpChanged(true);
-								}}
-								placeholder="Unchanged"
-								autoComplete="off"
-								spellCheck={false}
-							/>
-							<button
-								type="button"
-								onClick={() => setShowTotpSecret((s) => !s)}
-								aria-label={showTotpSecret ? "Hide TOTP secret" : "Show TOTP secret"}
-							>
-								{showTotpSecret ? <EyeOffIcon /> : <EyeIcon />}
-							</button>
-						</div>
-						{isOtpauthUri ? (
-							<p className="totp-hint totp-hint-active" role="status">
-								otpauth:// URI detected — it will be saved as-is and the code
-								parameters parsed automatically.
-							</p>
-						) : (
-							<p className="totp-hint">
-								Paste a base32 secret or a full otpauth:// URI. Clearing this
-								field and saving removes the TOTP secret.
-							</p>
-						)}
-					</div>
+					<TotpSecretField
+						entryId={state.selectedEntry.id}
+						value={totpSecret}
+						visible={showTotpSecret}
+						onChangeValue={(v) => {
+							setTotpSecret(v);
+							setTotpChanged(true);
+						}}
+						onToggleVisible={() => setShowTotpSecret((s) => !s)}
+					/>
 				)}
 
 				<div className="form-group">
@@ -617,41 +582,10 @@ export function EntryScreen() {
 						value={formData.group_id || null}
 						onChange={(id) => setFormData({ ...formData, group_id: id })}
 					/>
-
-					<label htmlFor="tag-input" className="tag-label">
-						Tags
-					</label>
-					<div className="entry-tags">
-						{formData.tags.map((tag) => (
-							<button
-								key={tag}
-								className="tag"
-								type="button"
-								onClick={() => handleRemoveTag(tag)}
-								aria-label={`Remove tag ${tag}`}
-							>
-								{tag} ×
-							</button>
-						))}
-					</div>
-					<div className="tag-input-row">
-						<input
-							id="tag-input"
-							type="text"
-							className="form-input"
-							value={tagInput}
-							onChange={(e) => setTagInput(e.target.value)}
-							onKeyDown={(e) => e.key === "Enter" && handleAddTag()}
-							placeholder="Add tag..."
-						/>
-						<button
-							className="btn btn-secondary"
-							onClick={handleAddTag}
-							type="button"
-						>
-							Add
-						</button>
-					</div>
+					<TagsEditor
+						value={formData.tags}
+						onChange={(tags) => setFormData({ ...formData, tags })}
+					/>
 				</div>
 			</div>
 

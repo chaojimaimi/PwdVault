@@ -158,6 +158,19 @@ jobs:
         working-directory: extensions/native-host
         run: cargo test --locked
 
+      # WP-E (v1.2.0): real-Keychain smoke on the macOS runner — exercises
+      # the legacy login keychain SecItem path (the only one an unsigned
+      # cargo test binary can use; the data-protection keychain needs the
+      # application-identifier entitlement, -34018). Ignored by default
+      # because it touches the real keychain; driven explicitly here.
+      # The filter is the FULL test path — libtest's --exact does not
+      # substring-match.
+      - name: Keychain SecItem smoke test (macOS only)
+        working-directory: src-tauri
+        run: >-
+          cargo test --locked -p pwdvault-infrastructure
+          keychain::macos::tests::keychain_secitem_smoke -- --ignored --exact
+
   # Build the exact Windows host shape used by the release. This catches
   # loader-time failures (notably a missing VC++ Redistributable) that cannot
   # be observed by the macOS/Linux unit-test jobs.

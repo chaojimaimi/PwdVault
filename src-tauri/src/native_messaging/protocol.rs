@@ -119,42 +119,33 @@ pub(super) fn error_response(id: u32, error: String) -> NativeResponse {
 
 /// Check rate limit for pair endpoint (max 10 requests per minute)
 pub(super) fn enforce_pair_rate_limit(state: &AppState) -> Result<(), String> {
+    // CQ-P3b: the window check, reset, limit check, and increment all run
+    // under ONE lock on the combined `(count, window_start)` cell. The old
+    // two-mutex split let a concurrent request interleave a window reset
+    // between another request's limit check and increment (its zeroing could
+    // erase accepted requests and let the burst exceed the limit); with a
+    // single critical section the sequence is atomic and the former
+    // "re-lock while holding the guard" deadlock concern no longer exists.
+    let mut window = state
+        .pair_rate_limit
+        .lock()
+        .expect("pair rate limit lock poisoned");
     let now = std::time::Instant::now();
-    // Determine whether to reset the counter. We read
-    // pair_last_reset in its own short-lived scope so its guard is
-    // dropped before we write it back — re-locking a Mutex while
-    // still holding it would deadlock.
-    let needs_reset = {
-        let last_reset = state
-            .pair_last_reset
-            .lock()
-            .expect("pair reset lock poisoned");
-        match last_reset.as_ref() {
-            Some(t) => now.duration_since(*t).as_secs() > 60,
-            None => true,
-        }
+    let needs_reset = match window.1 {
+        Some(t) => now.duration_since(t).as_secs() > 60,
+        None => true,
     };
     if needs_reset {
-        *state
-            .pair_last_reset
-            .lock()
-            .expect("pair reset lock poisoned") = Some(now);
-    }
-
-    let mut pair_count = state
-        .pair_request_count
-        .lock()
-        .expect("pair count lock poisoned");
-    if needs_reset {
-        *pair_count = 0;
+        window.1 = Some(now);
+        window.0 = 0;
     }
 
     // Rate limit: max MAX_PAIR_REQUESTS_PER_MIN pair requests per minute
-    if *pair_count >= constants::MAX_PAIR_REQUESTS_PER_MIN {
+    if window.0 >= constants::MAX_PAIR_REQUESTS_PER_MIN {
         return Err("Too many pair requests. Please try again later.".to_string());
     }
 
-    *pair_count += 1;
+    window.0 += 1;
 
     Ok(())
 }
@@ -260,4 +251,53 @@ pub(super) fn handle_connection(
     };
 
     let _ = write_http_response(&mut stream, 200, &response);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::enforce_pair_rate_limit;
+    use pwdvault_application::AppState;
+    use pwdvault_domain::constants;
+
+    /// CQ-P3b: a concurrent same-window burst must accept exactly the
+    /// per-minute budget. With the old two-mutex split, a reset racing
+    /// between another request's limit check and increment could zero the
+    /// counter mid-burst and over-accept; the single-lock cell keeps the
+    /// count exact.
+    #[test]
+    fn pair_rate_limit_concurrent_burst_counts_exactly() {
+        let state = Arc::new(AppState::default());
+
+        let threads: Vec<_> = (0..4)
+            .map(|_| {
+                let state = Arc::clone(&state);
+                std::thread::spawn(move || {
+                    (0..50)
+                        .filter(|_| enforce_pair_rate_limit(&state).is_ok())
+                        .count()
+                })
+            })
+            .collect();
+
+        let accepted: usize = threads
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .sum();
+        assert_eq!(
+            accepted as u32,
+            constants::MAX_PAIR_REQUESTS_PER_MIN,
+            "exactly the per-minute budget may pass one window"
+        );
+
+        // The surviving window state reflects the accepted burst and stays
+        // put.
+        let window = state
+            .pair_rate_limit
+            .lock()
+            .expect("pair rate limit lock poisoned");
+        assert_eq!(window.0, constants::MAX_PAIR_REQUESTS_PER_MIN);
+        assert!(window.1.is_some(), "the burst must have opened the window");
+    }
 }

@@ -40,15 +40,6 @@ pub fn get_db_path() -> PathBuf {
     base_dir.join("vault.db")
 }
 
-/// Ensure the database directory exists, returning the db path
-pub fn ensure_db_dir() -> Result<PathBuf, std::io::Error> {
-    let db_path = get_db_path();
-    if let Some(parent) = db_path.parent() {
-        secure_dir(parent)?;
-    }
-    Ok(db_path)
-}
-
 /// Get the directory used for persistent log files.
 pub fn log_dir() -> PathBuf {
     let base = get_db_path()

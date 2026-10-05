@@ -261,7 +261,13 @@ class PopupApp {
 		});
 		if (!tab) return;
 		const fullEntry = await this.getEntryDetails(entry.id);
-		if (!fullEntry || !fullEntry.password) return;
+		if (!fullEntry || !fullEntry.password) {
+			// Fetch failed or the entry has no stored password — say so instead
+			// of closing the popup as if nothing happened (same copy pattern as
+			// the copy button's failure toast).
+			this.showToast("Failed to fetch password");
+			return;
+		}
 
 		// Local pre-check: never put secrets on the wire for a page this entry
 		// cannot belong to. If tab.url is unavailable (rare), defer to the

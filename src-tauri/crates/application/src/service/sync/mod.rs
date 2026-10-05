@@ -35,6 +35,8 @@ mod tests_connect;
 #[cfg(test)]
 mod tests_engine;
 #[cfg(test)]
+mod tests_state_io;
+#[cfg(test)]
 mod tests_webdav;
 #[cfg(test)]
 mod tests_window;

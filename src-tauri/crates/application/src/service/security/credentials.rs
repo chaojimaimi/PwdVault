@@ -79,7 +79,7 @@ pub fn enable_biometric(
         Ok(())
     })?;
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
     Ok(())
 }
 
@@ -101,7 +101,7 @@ pub fn disable_biometric(state: &Arc<AppState>, store: &dyn SecretStore) -> Resu
         tracing::warn!("keychain delete of bio wrap key failed: {}", e);
     }
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
     Ok(())
 }
 
@@ -211,7 +211,7 @@ pub fn enable_recovery(
         Ok(())
     })?;
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
     Ok(recovery_key)
 }
 
@@ -235,6 +235,6 @@ pub fn disable_recovery(
         Ok(())
     })?;
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
     Ok(())
 }

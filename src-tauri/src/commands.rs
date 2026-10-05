@@ -201,11 +201,14 @@ pub fn update_settings(
     app::update_settings(state.inner(), settings)
 }
 
+/// CQ-P3a: delegate to the shared application service so the desktop IPC
+/// path and the extension HTTP dispatcher run the identical revocation
+/// sequence (and any failure surfaces as a VaultError instead of being
+/// invisible behind an unconditional `true`).
 #[tauri::command]
-pub fn revoke_extension_access() -> bool {
-    pwdvault_infrastructure::auth::revoke_extension_access();
-    pwdvault_infrastructure::pairing::cancel_all_sessions();
-    true
+pub fn revoke_extension_access(state: State<'_, AppHandle>) -> Result<bool, VaultError> {
+    app::revoke_extension_access(state.inner())?;
+    Ok(true)
 }
 
 // ---------------------------------------------------------------------------

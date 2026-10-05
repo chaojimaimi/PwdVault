@@ -121,18 +121,6 @@ pub fn save_header_in_txn(
     Ok(())
 }
 
-/// Check whether the vault has integrity protection enabled (header present
-/// with integrity_required=true). This is used by the unlock flow to decide
-/// whether missing/unknown digest versions should fail-closed.
-pub fn is_integrity_required(header: Option<&VaultHeader>) -> bool {
-    header.is_some_and(|h| h.integrity_required)
-}
-
-/// Check whether the stored digest version is known/compatible.
-pub fn is_digest_version_known(header: Option<&VaultHeader>) -> bool {
-    header.is_some_and(|h| h.digest_algorithm_version <= HEADER_DIGEST_VERSION)
-}
-
 pub fn is_supported(header: &VaultHeader) -> bool {
     header.vault_format_version <= VAULT_FORMAT_VERSION
         && header.schema_version <= HEADER_SCHEMA_VERSION
@@ -172,13 +160,6 @@ mod tests {
             sealed[0] ^= 0xFF;
         }
         assert!(VaultHeader::open(&sealed, &TEST_KEY).is_err());
-    }
-
-    #[test]
-    fn test_is_integrity_required() {
-        assert!(!is_integrity_required(None));
-        let h = VaultHeader::new_initial();
-        assert!(is_integrity_required(Some(&h)));
     }
 
     /// B4: an oversized header blob must be refused before bincode runs.

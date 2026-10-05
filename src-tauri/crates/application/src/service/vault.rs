@@ -187,6 +187,9 @@ fn init_vault_at(
         .expect("verification lock poisoned") = Some(verification_data);
     state.session.unlock(enc_key, mac_key);
 
+    // local touch: in-person desktop path (v1.2.0 SEC-L5 remote-grace
+    // policy) — creating a vault requires the user at the keyboard, so the
+    // full window applies.
     state.touch_activity();
     state.update_lock_menu("Lock Vault");
 
@@ -414,9 +417,18 @@ pub fn setup_vault(state: &Arc<AppState>) -> Result<bool, VaultError> {
             .verification_data
             .lock()
             .expect("verification lock poisoned") = Some(data);
-        // Load auto-lock timeout from settings
-        if let Ok(settings) = load_settings(&db) {
-            *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
+        // Load auto-lock timeout from settings (SF-P3a: a settings-row
+        // failure must not silently keep the default — say so in the log;
+        // behavior is unchanged, the default timeout still applies).
+        match load_settings(&db) {
+            Ok(settings) => {
+                *state.auto_lock_secs.lock().expect("timeout lock poisoned") =
+                    settings.auto_lock_secs;
+            }
+            Err(error) => tracing::warn!(
+                "could not load settings for the auto-lock timeout, keeping the default: {}",
+                error
+            ),
         }
         return Ok(true);
     }

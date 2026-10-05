@@ -73,3 +73,5 @@ __pycache__/
 .vscode/
 src-tauri/icons-backup/
 .zcode/
+# TypeScript build info (composite incremental artifacts)
+*.tsbuildinfo

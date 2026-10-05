@@ -12,7 +12,6 @@ use super::{DatabaseError, ENTRIES_TABLE, GROUPS_TABLE, SETTINGS_TABLE, VAULT_TA
 pub const META_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 pub const DB_DIGEST_KEY: &str = "db_digest";
 pub const DB_DIGEST_VERSION_KEY: &str = "db_digest_version";
-const SCHEMA_VERSION_KEY: &str = "schema_version";
 
 /// Schema versions
 pub const SCHEMA_VERSION_LATEST: u32 = 1;
@@ -37,33 +36,6 @@ pub const SCHEMA_VERSION_LATEST: u32 = 1;
 const DB_DIGEST_VERSION: u32 = 4;
 
 type HmacSha256 = Hmac<Sha256>;
-
-/// Read the current schema version from meta (returns 0 if missing).
-pub fn get_schema_version(db: &Database) -> Result<u32, DatabaseError> {
-    let txn = db.begin_read()?;
-    let table = txn.open_table(META_TABLE)?;
-    let value = table
-        .get(SCHEMA_VERSION_KEY)?
-        .map(|v| {
-            let bytes = v.value();
-            let mut buf = [0u8; 4];
-            buf.copy_from_slice(&bytes[..4.min(bytes.len())]);
-            u32::from_le_bytes(buf)
-        })
-        .unwrap_or(0);
-    Ok(value)
-}
-
-/// Set the schema version in meta.
-pub fn set_schema_version(db: &Database, version: u32) -> Result<(), DatabaseError> {
-    let txn = db.begin_write()?;
-    {
-        let mut table = txn.open_table(META_TABLE)?;
-        table.insert(SCHEMA_VERSION_KEY, version.to_le_bytes().as_slice())?;
-    }
-    txn.commit()?;
-    Ok(())
-}
 
 /// Compute a deterministic HMAC over all user-data tables (entries, groups,
 /// settings, verification). Covers every table that holds vault data so that

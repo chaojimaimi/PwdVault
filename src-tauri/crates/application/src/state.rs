@@ -110,9 +110,12 @@ pub struct AppState {
     pub failed_unlock_attempts: Mutex<u32>,
     /// Timestamp when lockout expires (None = not locked out).
     pub lockout_until: Mutex<Option<Instant>>,
-    /// Rate limiting for pair endpoint (requests per minute).
-    pub pair_request_count: Mutex<u32>,
-    pub pair_last_reset: Mutex<Option<Instant>>,
+    /// Rate limiting for pair endpoint (requests per minute): a single
+    /// `(count, window_start)` cell (CQ-P3b). One mutex covers the whole
+    /// check-reset-count-increment sequence so two requests can never
+    /// interleave a window reset between another request's check and
+    /// increment — the old two-mutex split allowed exactly that.
+    pub pair_rate_limit: Mutex<(u32, Option<Instant>)>,
     /// Phase 1: platform credential store for the biometric wrap key
     /// (macOS Keychain; `UnavailableSecretStore` stub elsewhere). Tests
     /// replace this field with a `MemorySecretStore` — commands need no
@@ -204,8 +207,7 @@ impl Default for AppState {
             auto_lock_secs: Mutex::new(AUTO_LOCK_SECS),
             failed_unlock_attempts: Mutex::new(0),
             lockout_until: Mutex::new(None),
-            pair_request_count: Mutex::new(0),
-            pair_last_reset: Mutex::new(None),
+            pair_rate_limit: Mutex::new((0, None)),
             secret_store: platform_default(),
             sync_secret_store: platform_sync_default(),
             exclusive_window: Mutex::new(()),

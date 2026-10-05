@@ -48,11 +48,9 @@ pub(super) fn execute_command(
             ],
         })),
 
-        "revoke_extension_access" => {
-            auth::revoke_extension_access();
-            pwdvault_infrastructure::pairing::cancel_all_sessions();
-            Ok(serde_json::json!(true))
-        }
+        "revoke_extension_access" => service::revoke_extension_access(&state)
+            .map(|()| serde_json::json!(true))
+            .map_err(vault_error_to_message),
 
         // Extension pairing — returns API token (no auth required, origin checked in handle_request)
         // Rate limited to prevent token enumeration attacks
@@ -61,9 +59,13 @@ pub(super) fn execute_command(
             enforce_pair_rate_limit(&state)?;
 
             let challenge = pwdvault_infrastructure::pairing::create_session(caller);
-            // Notify desktop UI to display the pairing code.
+            // Notify desktop UI to display the pairing code. SF-P3c: an emit
+            // failure must not stay silent — the pairing would stall with no
+            // code shown anywhere and no trace of why.
             if let Some(handle) = app_handle {
-                let _ = handle.emit("pair-request", &challenge.code);
+                if let Err(error) = handle.emit("pair-request", &challenge.code) {
+                    tracing::error!("could not surface the pair-request code: {}", error);
+                }
             }
             Ok(serde_json::json!({
                 "pending": true,

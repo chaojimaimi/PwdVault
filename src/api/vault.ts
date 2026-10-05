@@ -24,10 +24,6 @@ export async function isVaultInitialized(): Promise<boolean> {
   return invoke('is_vault_initialized');
 }
 
-export async function isVaultUnlocked(): Promise<boolean> {
-  return invoke('is_vault_unlocked');
-}
-
 export async function initVault(password: string): Promise<void> {
   return invoke('init_vault', { password });
 }
@@ -83,10 +79,6 @@ export async function updateEntry(id: string, request: UpdateEntryRequest): Prom
 
 export async function removeEntry(id: string): Promise<boolean> {
   return invoke('remove_entry', { id });
-}
-
-export async function getEntryCount(): Promise<number> {
-  return invoke('get_entry_count');
 }
 
 // Group Management

@@ -61,7 +61,7 @@ pub fn create_entry(
         Ok(())
     })?;
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
 
     Ok(entry.into())
 }
@@ -77,7 +77,7 @@ pub fn get_entry_meta(state: &Arc<AppState>, id: String) -> Result<EntrySummary,
         return Err(VaultError::EntryNotFound);
     }
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
 
     Ok(entry.into())
 }
@@ -140,7 +140,7 @@ pub fn get_entry_secret(
     // secret read. last_used_at is now only returned from the in-memory
     // entry without being written back.
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
 
     Ok(EntrySecretResponse {
         password,
@@ -163,7 +163,7 @@ pub fn list_all_entries(state: &Arc<AppState>) -> Result<Vec<EntrySummary>, Vaul
         .collect::<Vec<_>>();
     let summaries: Vec<EntrySummary> = entries.into_iter().map(Into::into).collect();
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
 
     Ok(summaries)
 }
@@ -247,7 +247,7 @@ pub fn update_entry<R: Into<UpdateEntryRequest>>(
         Ok(())
     })?;
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
 
     Ok(entry.into())
 }
@@ -279,7 +279,7 @@ pub fn remove_entry(state: &Arc<AppState>, id: String) -> Result<bool, VaultErro
         Ok(())
     })?;
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
 
     Ok(true)
 }
@@ -297,7 +297,7 @@ pub fn get_entry_count(state: &Arc<AppState>) -> Result<usize, VaultError> {
         .filter(|entry| entry.deleted_at.is_none())
         .count();
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
 
     Ok(count)
 }

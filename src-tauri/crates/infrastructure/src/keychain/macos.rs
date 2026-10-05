@@ -22,6 +22,7 @@ use security_framework_sys::item::{
     kSecReturnData, kSecUseDataProtectionKeychain, kSecValueData,
 };
 use security_framework_sys::keychain_item::{SecItemAdd, SecItemCopyMatching, SecItemDelete};
+use zeroize::Zeroize;
 
 // The accessibility attribute KEY is ABI-stable (SecBase.h) but not
 // re-exported by security-framework-sys (only the VALUE constants are).
@@ -337,15 +338,21 @@ impl SecretStore for MacSecretStore {
         // on which mode wrote it (NotFound falls through to the legacy
         // keychain). Mode routing — and any biometric gate — happens
         // AFTER the raw bytes are in hand.
-        let raw = with_keychain_fallback(true, |use_dp| copy_item_data(account, use_dp))?;
+        let mut raw = with_keychain_fallback(true, |use_dp| copy_item_data(account, use_dp))?;
         let (mode, payload) = split_mode(&raw)?;
         match mode {
             // The SecItemCopyMatching above already popped the system
             // Touch ID prompt and blocked until the user answered.
             BioMode::DpAcl => Ok(payload.to_vec()),
-            // No ACL on this item: run the explicit in-process gate.
+            // No ACL on this item: run the explicit in-process gate. On a
+            // gate failure the fetched payload is wiped before the error
+            // returns — a cancelled/locked-out prompt must not leave the
+            // secret bytes lingering in the failed call's memory.
             BioMode::LegacyGate => {
-                gate_with_biometrics()?;
+                if let Err(err) = gate_with_biometrics() {
+                    raw.zeroize();
+                    return Err(err);
+                }
                 Ok(payload.to_vec())
             }
         }

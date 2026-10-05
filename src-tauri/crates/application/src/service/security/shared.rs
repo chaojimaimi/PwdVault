@@ -6,6 +6,7 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 use zeroize::Zeroizing;
 
+use crate::service::sync::state_io;
 use crate::{AppState, VaultError};
 use pwdvault_infrastructure::crypto::{
     self, create_verification_header, recovery_wrap_key, unwrap_secret, wrap_secret, SecretKey,
@@ -249,6 +250,9 @@ pub fn complete_unlock_if(
     // Step 9: side effects — only on the publish-success branch.
     reset_rate_limit(state);
     *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
+    // local touch: in-person desktop path (v1.2.0 SEC-L5 remote-grace policy)
+    // — a successful unlock proves the user is present, so the full window
+    // applies instead of the short remote grace.
     state.touch_activity();
     state.update_lock_menu("Lock Vault");
     Ok(true)
@@ -353,6 +357,11 @@ fn reencrypt_entry_inner(
 /// change_password and recover_vault rotate it for free. An unwrap failure
 /// aborts the whole re-seal BEFORE the transaction opens (fail-closed, same
 /// strategy as the inner entry fields).
+///
+/// SEC-L2 inheritance: the sealed `sync_config` / `sync_state` rows rotate
+/// the same way, but through the DUAL-READ re-seal helper
+/// ([`state_io::reseal_sync_row`]) — they may still be v1.1.x plaintext
+/// JSON, which a bare unwrap would reject (see the rotation block below).
 pub(super) fn reseal_vault(
     db: &Arc<redb::Database>,
     old_enc: &SecretKey,
@@ -390,6 +399,32 @@ pub(super) fn reseal_vault(
             key: SYNC_CEK_BLOB_KEY,
             blob: wrap_secret(new_enc.as_ref(), &cek, WRAP_AAD_SYNC)?,
         });
+    }
+
+    // SEC-L2 rotation: the sync config/state rows are sealed under the
+    // session enc subkey, so they rotate with the re-seal too. MUST go
+    // through the dual-read re-seal helper — unlike `sync_cek` above (always
+    // ciphertext, so its bare unwrap is correct), these two rows may still
+    // be v1.1.x PLAINTEXT JSON: a user who upgraded but never opened the
+    // sync settings never triggered the read-time migration, and a bare
+    // unwrap would abort the whole re-seal and make change_password
+    // unavailable for that user. Both parse formats failing still aborts
+    // (corrupt row, fail-closed).
+    for row_key in [
+        state_io::SYNC_CONFIG_BLOB_KEY,
+        state_io::SYNC_STATE_BLOB_KEY,
+    ] {
+        if let Some(blob) = vault_store::load_blob(db, row_key)? {
+            rewraps.push(BlobRewrite::Write {
+                key: row_key,
+                blob: state_io::reseal_sync_row(
+                    old_enc.as_ref(),
+                    new_enc.as_ref(),
+                    row_key,
+                    &blob,
+                )?,
+            });
+        }
     }
 
     // Header: keep version/integrity flags, re-seal under the new key.

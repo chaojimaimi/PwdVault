@@ -1311,11 +1311,6 @@ function normalizedDomain(rawUrl) {
 				sendResponse({ success: true });
 				break;
 
-			case "SHOW_POPUP":
-				showOverlay();
-				sendResponse({ success: true });
-				break;
-
 			case "VAULT_LOCKED":
 				cachedEntries = null;
 				hideOverlay();

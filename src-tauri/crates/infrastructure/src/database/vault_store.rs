@@ -87,13 +87,6 @@ pub fn save_entry_in_txn(
     Ok(())
 }
 
-/// Delete an entry within an existing write transaction.
-pub fn delete_entry_in_txn(txn: &WriteTransaction, id: &str) -> Result<bool, DatabaseError> {
-    let mut table = txn.open_table(ENTRIES_TABLE)?;
-    let existed = table.remove(id)?.is_some();
-    Ok(existed)
-}
-
 /// Save a group within an existing write transaction.
 pub fn save_group_in_txn(
     txn: &WriteTransaction,
@@ -104,13 +97,6 @@ pub fn save_group_in_txn(
     let mut table = txn.open_table(GROUPS_TABLE)?;
     table.insert(group.id.as_str(), encoded.as_slice())?;
     Ok(())
-}
-
-/// Delete a group within an existing write transaction.
-pub fn delete_group_in_txn(txn: &WriteTransaction, id: &str) -> Result<bool, DatabaseError> {
-    let mut table = txn.open_table(GROUPS_TABLE)?;
-    let existed = table.remove(id)?.is_some();
-    Ok(existed)
 }
 
 /// Save settings within an existing write transaction.
@@ -213,10 +199,12 @@ mod tests {
         // Verify entry exists
         assert_eq!(super::super::count_entries(&db).unwrap(), 1);
 
-        // Delete entry + refresh digest in one transaction
+        // Delete entry + refresh digest in one transaction. Direct table
+        // remove, mirroring the production service-layer delete path.
         store
             .write(&TEST_MAC_KEY, |txn| {
-                delete_entry_in_txn(txn, &entry_id)?;
+                let mut table = txn.open_table(ENTRIES_TABLE)?;
+                table.remove(entry_id.as_str())?;
                 Ok(())
             })
             .unwrap();

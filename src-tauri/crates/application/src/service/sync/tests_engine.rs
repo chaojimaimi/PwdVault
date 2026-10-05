@@ -608,11 +608,16 @@ fn change_password_after_sync_window_does_not_let_stale_keys_write() {
     // upload phase entirely and never reach the gate.
     let _alpha = create_entry_titled(&device_a, "local-only-a");
 
-    // Snapshot the on-disk sync_state row: the guarded save must NOT touch
-    // it (still the connect-era row after the run).
-    let state_row_before = vault_store::load_blob(&get_db(&device_a), "sync_state")
-        .unwrap()
-        .expect("sync_state row exists after connect");
+    // Snapshot the connect-era bookkeeping VALUES: the guarded save must NOT
+    // overwrite them. (SEC-L2: raw byte-identity no longer holds as the
+    // assertion — the concurrent change_password legitimately re-seals the
+    // row under the new keys mid-test — so pin the values and prove below
+    // that the surviving row decrypts under the NEW session key.)
+    let state_before = {
+        let enc: [u8; 32] = device_a.session.get_enc_key().unwrap();
+        let mac: [u8; 32] = device_a.session.get_mac_key().unwrap();
+        super::state_io::load_sync_state(&get_db(&device_a), &enc, &mac).unwrap()
+    };
 
     // Gate A's container upload (the cycle's first upload) — exactly between
     // the D8 window's republish and save_sync_rows.
@@ -641,11 +646,17 @@ fn change_password_after_sync_window_does_not_let_stale_keys_write() {
     // The cycle still succeeds — the save was skipped, not failed.
     syncer.join().unwrap().unwrap();
 
-    // The bookkeeping row was NOT rewritten with the stale keys.
-    let state_row_after = vault_store::load_blob(&get_db(&device_a), "sync_state")
-        .unwrap()
-        .expect("sync_state row survives");
-    assert_eq!(state_row_after, state_row_before);
+    // The bookkeeping row was NOT rewritten with the stale keys: it still
+    // decrypts under the NEW session key to the connect-era values. A
+    // stale-keyed save would have left OLD-key ciphertext (unreadable here)
+    // and bumped the rev bookkeeping.
+    let state_after = {
+        let enc: [u8; 32] = device_a.session.get_enc_key().unwrap();
+        let mac: [u8; 32] = device_a.session.get_mac_key().unwrap();
+        super::state_io::load_sync_state(&get_db(&device_a), &enc, &mac).unwrap()
+    };
+    assert_eq!(state_after.device_id, state_before.device_id);
+    assert_eq!(state_after.remote_rev, state_before.remote_rev);
 
     // The NEW password unlocks and the digest verifies under the NEW keys.
     // Without the guard, the save would have refreshed the digest with the

@@ -87,7 +87,7 @@ pub fn totp_code(state: &Arc<AppState>, id: String) -> Result<TotpCodeResponse, 
     let code = generate_code(&secret, algo, digits, period, now);
     let seconds_remaining = i64::from(period) - now.rem_euclid(i64::from(period));
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
 
     Ok(TotpCodeResponse {
         code,

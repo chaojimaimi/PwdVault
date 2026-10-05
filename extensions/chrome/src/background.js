@@ -46,7 +46,7 @@ function savePendingPairNonce(nonce) {
 	pendingPairNonce = nonce || null;
 	void pairNonceStoragePromise
 		.then((storage) => storage.save(nonce))
-		.catch(() => {});
+		.catch((e) => console.warn("pairing nonce save failed", e));
 }
 
 async function restorePendingPairNonce() {
@@ -67,7 +67,7 @@ function saveToken(token) {
 	apiToken = token;
 	void tokenStoragePromise
 		.then((storage) => storage.save(token))
-		.catch(() => {});
+		.catch((e) => console.warn("token save failed", e));
 }
 
 async function restoreToken() {
@@ -199,7 +199,13 @@ async function pairWithApp() {
 // code" from "cannot reach the desktop app" instead of always blaming the code.
 async function pairConfirm(code) {
 	const nonce = await restorePendingPairNonce();
-	if (!nonce) return false;
+	if (!nonce) {
+		// No persisted nonce means the pairing session cannot be resumed —
+		// leave a coherent error instead of a bare failure the popup would
+		// misreport as a wrong code.
+		lastConnectionError = "Pairing session lost — restart pairing";
+		return false;
+	}
 	// Clear the sticky error first: a stale "cannot reach the app" from an
 	// earlier attempt must not masquerade as this attempt's outcome.
 	lastConnectionError = null;
@@ -359,10 +365,6 @@ async function isVaultUnlocked() {
 	return sendToApp("is_vault_unlocked");
 }
 
-async function initVault(password) {
-	return sendToApp("init_vault", { password });
-}
-
 async function unlockVault(password) {
 	return sendToApp("unlock_vault", { password });
 }
@@ -402,32 +404,8 @@ async function getGroups() {
 	return sendToApp("list_all_groups");
 }
 
-async function createGroup(name) {
-	return sendToApp("create_group", { name });
-}
-
-async function updateGroup(id, name) {
-	return sendToApp("update_group", { id_param: id, name });
-}
-
-async function deleteGroup(id) {
-	return sendToApp("remove_group", { id_param: id });
-}
-
 async function getSettings() {
 	return sendToApp("get_settings");
-}
-
-async function updateSettings(settings) {
-	return sendToApp("update_settings", { settings });
-}
-
-async function exportVault(exportPassword) {
-	return sendToApp("export_vault", { export_password: exportPassword });
-}
-
-async function importVault(backup, importPassword) {
-	return sendToApp("import_vault", { backup, import_password: importPassword });
 }
 
 async function getEntries() {
@@ -669,9 +647,6 @@ async function handleMessage(message, sender) {
 				error: lastConnectionError,
 			};
 
-		case "INIT_VAULT":
-			return initVault(message.password);
-
 		case "UNLOCK_VAULT":
 			return unlockVault(message.password);
 
@@ -702,26 +677,8 @@ async function handleMessage(message, sender) {
 		case "GET_GROUPS":
 			return getGroups();
 
-		case "CREATE_GROUP":
-			return createGroup(message.name);
-
-		case "UPDATE_GROUP":
-			return updateGroup(message.id, message.name);
-
-		case "DELETE_GROUP":
-			return deleteGroup(message.id);
-
 		case "GET_SETTINGS":
 			return getSettings();
-
-		case "UPDATE_SETTINGS":
-			return updateSettings(message.settings);
-
-		case "EXPORT_VAULT":
-			return exportVault(message.exportPassword);
-
-		case "IMPORT_VAULT":
-			return importVault(message.backup, message.importPassword);
 
 		case "AUTOFILL":
 			// Dead code (verified 2026-09): every AUTOFILL sender targets the
@@ -743,9 +700,6 @@ async function handleMessage(message, sender) {
 				});
 			}
 			return { success: true };
-
-		case "CONNECT":
-			return { status: await checkConnection(), error: lastConnectionError };
 
 		case "START_PAIRING":
 			const pairResult = await startPairing();
@@ -868,6 +822,6 @@ chrome.runtime.onStartup.addListener(() => {
 // Service worker startup (including restarts after being killed by Chrome
 // for idleness): restore the token before serving any popup requests.
 // restoreToken is async but we don't await here — the popup will retry
-// CONNECT and checkConnection will handle the not-yet-restored case.
+// GET_STATUS and checkConnection will handle the not-yet-restored case.
 setupContextMenu();
 restoreToken();

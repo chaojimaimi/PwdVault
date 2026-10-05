@@ -8,7 +8,7 @@ pub fn get_settings(state: &Arc<AppState>) -> Result<Settings, VaultError> {
     let lease = state.lease()?;
     let db = get_db(state)?;
     let settings = load_settings(&db)?;
-    lease.touch_activity();
+    lease.touch_remote_activity();
     Ok(settings)
 }
 
@@ -27,6 +27,6 @@ pub fn update_settings(state: &Arc<AppState>, settings: Settings) -> Result<Sett
 
     // Apply auto-lock timeout immediately
     *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
-    lease.touch_activity();
+    lease.touch_remote_activity();
     Ok(settings)
 }

@@ -52,7 +52,9 @@ use crate::service::vault::get_db;
 use crate::{AppState, VaultError};
 use pwdvault_infrastructure::crypto::{unwrap_secret, KEY_SIZE, WRAP_AAD_SYNC};
 use pwdvault_infrastructure::database::vault_store::{self, VaultStore};
-use pwdvault_infrastructure::keychain::{SYNC_BAIDU_TOKEN_ACCOUNT, SYNC_WEBDAV_PASSWORD_ACCOUNT};
+use pwdvault_infrastructure::keychain::{
+    SecretStoreError, SYNC_BAIDU_TOKEN_ACCOUNT, SYNC_WEBDAV_PASSWORD_ACCOUNT,
+};
 
 use super::publish::{
     fetch_manifest, publish_snapshot, pull_or_bootstrap, update_manifest, PublishContext,
@@ -131,6 +133,9 @@ fn run_merge_window(
     // Locked, and the window outcome is then reported as VaultLocked
     // (retriable; the in-window outcome error, if any, is logged).
     let published = keys.republish_if(state, epoch_at_window);
+    // local touch: in-person desktop path (v1.2.0 SEC-L5 remote-grace
+    // policy) — the sync window (merge/re-seal republish) is Tauri-only and
+    // driven by the desktop user, so the full window applies.
     state.touch_activity();
     match (outcome, published) {
         (Ok(merged), true) => Ok(merged),
@@ -281,7 +286,11 @@ pub fn sync_connect_with_backend(
 /// container only when the remote rev moved (P3.3 fast path).
 pub fn sync_now(state: &Arc<AppState>) -> Result<SyncStatusResponse, VaultError> {
     let lease = state.lease()?;
-    let config = load_config(&get_db(state)?)?.ok_or_else(not_configured)?;
+    // SEC-L2: the config row is sealed — decrypt under the lease's enc key
+    // (a legacy v1.1.x plaintext row migrates to sealed on this read; the
+    // migration write runs under the same lease-held mac).
+    let config = load_config(&get_db(state)?, lease.enc_key()?, lease.mac_key()?)?
+        .ok_or_else(not_configured)?;
     drop(lease);
     let backend = open_backend(state, &config)?;
     sync_now_with_backend(state, backend.as_ref())
@@ -293,11 +302,16 @@ pub fn sync_now_with_backend(
     backend: &dyn CloudBackend,
 ) -> Result<SyncStatusResponse, VaultError> {
     let db = get_db(state)?;
-    let config = load_config(&db)?.ok_or_else(not_configured)?;
-    let mut sync_state = load_sync_state(&db)?;
+    // SEC-L2: copy the session keys FIRST — the sealed config/state rows
+    // decrypt under the copied enc key, and a legacy plaintext row migrates
+    // with the copied mac (the copy's generation is still current here, so
+    // the digest pre-check accepts the migration write).
+    let mut keys = SessionKeys::copy(state)?;
+    let config =
+        load_config(&db, keys.enc_bytes(), keys.mac_bytes())?.ok_or_else(not_configured)?;
+    let mut sync_state = load_sync_state(&db, keys.enc_bytes(), keys.mac_bytes())?;
     let device_id = sync_state.device_id.clone().ok_or_else(not_configured)?;
     let paths = remote_paths(&config);
-    let mut keys = SessionKeys::copy(state)?;
 
     // Unwrap the container key with the session enc subkey (D2: no password).
     let cek: Zeroizing<[u8; KEY_SIZE]> = {
@@ -430,12 +444,19 @@ pub fn sync_disconnect(state: &Arc<AppState>) -> Result<(), VaultError> {
         vault_store::remove_blob_in_txn(txn, SYNC_STATE_BLOB_KEY)?;
         Ok(())
     })?;
-    lease.touch_activity();
+    lease.touch_remote_activity();
 
     // Best effort: drop the stored backend credentials with the connection
     // (WebDAV password P3.2, Baidu token P3.4). The cloud files stay.
-    let _ = state.sync_secret_store.delete(SYNC_WEBDAV_PASSWORD_ACCOUNT);
-    let _ = state.sync_secret_store.delete(SYNC_BAIDU_TOKEN_ACCOUNT);
+    // SF-P3b: "best effort" still logs — only a missing item is a normal
+    // outcome here; anything else would strand a live credential silently.
+    for account in [SYNC_WEBDAV_PASSWORD_ACCOUNT, SYNC_BAIDU_TOKEN_ACCOUNT] {
+        if let Err(err) = state.sync_secret_store.delete(account) {
+            if !matches!(err, SecretStoreError::NotFound) {
+                tracing::warn!("could not delete the sync credential {account}: {err}");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -443,8 +464,11 @@ pub fn sync_disconnect(state: &Arc<AppState>) -> Result<(), VaultError> {
 /// the server URL and user name, which are not for locked-vault eyes).
 pub fn sync_status(state: &Arc<AppState>) -> Result<SyncStatusResponse, VaultError> {
     let lease = state.lease()?;
-    let config = load_config(&get_db(state)?)?;
-    let sync_state = load_sync_state(&get_db(state)?)?;
+    // SEC-L2: sealed rows — decrypt under the lease's keys (a legacy
+    // plaintext row migrates to sealed on this read).
+    let db = get_db(state)?;
+    let config = load_config(&db, lease.enc_key()?, lease.mac_key()?)?;
+    let sync_state = load_sync_state(&db, lease.enc_key()?, lease.mac_key()?)?;
     drop(lease);
     Ok(build_status(&config, &sync_state))
 }

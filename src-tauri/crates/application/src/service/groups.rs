@@ -37,7 +37,7 @@ pub fn create_group(state: &Arc<AppState>, name: String) -> Result<Group, VaultE
         Ok(())
     })?;
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
     Ok(group)
 }
 
@@ -54,7 +54,7 @@ pub fn list_all_groups(state: &Arc<AppState>) -> Result<Vec<Group>, VaultError> 
         .filter(is_live)
         .collect::<Vec<_>>();
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
     Ok(groups)
 }
 
@@ -89,7 +89,7 @@ pub fn update_group(state: &Arc<AppState>, id: String, name: String) -> Result<G
         Ok(())
     })?;
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
     Ok(group)
 }
 
@@ -120,7 +120,7 @@ pub fn remove_group(state: &Arc<AppState>, id: String) -> Result<bool, VaultErro
         Ok(())
     })?;
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
     Ok(true)
 }
 

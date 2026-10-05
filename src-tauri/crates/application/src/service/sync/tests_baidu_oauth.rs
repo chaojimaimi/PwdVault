@@ -3,7 +3,7 @@
 //! token persistence, and the NotConfigured gating of the shipped
 //! placeholder credentials (P3.8).
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread;
@@ -58,7 +58,7 @@ fn callback_listener_receives_the_code() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = tiny_http::Server::from_listener(listener, None).unwrap();
-    let waiter = thread::spawn(move || wait_for_callback(&server, Duration::from_secs(10)));
+    let waiter = thread::spawn(move || wait_for_callback(&server, Duration::from_secs(10), "x"));
 
     let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
     stream
@@ -86,8 +86,59 @@ fn callback_listener_surfaces_error_and_timeout() {
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let server = tiny_http::Server::from_listener(listener, None).unwrap();
-    let outcome = wait_for_callback(&server, Duration::from_millis(150));
+    let outcome = wait_for_callback(&server, Duration::from_millis(150), "unused-state");
     assert!(outcome.unwrap_err().contains("timed out"));
+}
+
+/// SEC-L3: garbage callbacks (a probe without a code, or a code whose state
+/// echo does not match the parked expectation) are answered with the error
+/// page and DISCARDED — the listener keeps waiting, so the pending
+/// authorization is not consumed by noise and the REAL redirect still
+/// completes the flow.
+#[test]
+fn callback_listener_discards_invalid_requests_and_keeps_waiting() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tiny_http::Server::from_listener(listener, None).unwrap();
+    let waiter = thread::spawn(move || {
+        wait_for_callback(&server, Duration::from_secs(10), "real-state-123")
+    });
+
+    // 1. A garbage probe without any code gets the discard page...
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .write_all(b"GET /?foo=bar HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert!(response.contains(" 400 "), "garbage must get an error page");
+
+    // 2. ...and so does a forged redirect with the WRONG state echo (CSRF /
+    // stale tab). The code it carries is never accepted.
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .write_all(b"GET /?code=evil-code&state=forged HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert!(
+        response.contains(" 400 "),
+        "a state mismatch must get an error page"
+    );
+    assert!(response.contains("Invalid authorization callback"));
+
+    // 3. The listener is STILL waiting — the genuine redirect completes it.
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .write_all(
+            b"GET /?code=abc123&state=real-state-123 HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        )
+        .unwrap();
+    drop(stream);
+
+    let grant = waiter.join().unwrap().unwrap();
+    assert_eq!(grant.code, "abc123");
+    assert_eq!(grant.state.as_deref(), Some("real-state-123"));
 }
 
 /// complete_auth exchanges the code and stores {access, refresh, expires_at}

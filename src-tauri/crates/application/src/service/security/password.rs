@@ -137,6 +137,9 @@ pub fn change_password(
                 state.lock_epoch.load(Ordering::Acquire) == epoch_at_window
             });
             if published {
+                // local touch: in-person desktop path (v1.2.0 SEC-L5
+                // remote-grace policy) — change_password is a desktop-only
+                // command run by the user who just typed the new password.
                 state.touch_activity();
                 state.update_lock_menu("Lock Vault");
             } else {

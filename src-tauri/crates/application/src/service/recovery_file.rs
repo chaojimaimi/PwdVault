@@ -12,11 +12,13 @@ use crate::{AppState, VaultError};
 use pwdvault_infrastructure::paths;
 
 /// Result of `enable_recovery` over IPC: the one-time recovery key plus
-/// whether the optional key file was written.
+/// whether the optional key file was written. The key is `Zeroizing` so the
+/// in-memory copy is wiped when the response drops (SEC-L4, v1.2.0); IPC
+/// serialization is transparent — the frontend sees the same JSON string.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnableRecoveryResult {
-    pub key: String,
+    pub key: Zeroizing<String>,
     pub file_saved: bool,
 }
 
@@ -28,14 +30,14 @@ pub fn enable_recovery_with_file(
     password: Zeroizing<String>,
     save_path: Option<String>,
 ) -> Result<EnableRecoveryResult, VaultError> {
-    let key = crate::service::security::enable_recovery(state, password)?;
+    let key = Zeroizing::new(crate::service::security::enable_recovery(state, password)?);
     match save_path {
         None => Ok(EnableRecoveryResult {
             key,
             file_saved: false,
         }),
         Some(path) => {
-            write_recovery_key_file(&key, &path)?;
+            write_recovery_key_file(key.as_str(), &path)?;
             Ok(EnableRecoveryResult {
                 key,
                 file_saved: true,
@@ -170,7 +172,7 @@ mod tests {
                 "PwdVault Recovery Key\nGenerated: {today}\n\nKeep this file somewhere safe. \
                  It is the only way to recover your\nvault if you forget your master password. \
                  Anyone holding this key\ncan unlock your vault.\n\n{}\n",
-                result.key
+                result.key.as_str()
             )
         );
         #[cfg(unix)]

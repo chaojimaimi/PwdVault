@@ -1,7 +1,9 @@
 import Fuse, { type FuseResult, type IFuseOptions } from "fuse.js";
 import type { EntrySummary } from "../types";
 
-const fuseOptions: IFuseOptions<EntrySummary> = {
+// Exported so the extension's search-parity test can pin the popup's
+// FUSE_SEARCH_OPTIONS copy to this source of truth (KEEP-IN-SYNC contract).
+export const fuseOptions: IFuseOptions<EntrySummary> = {
 	keys: [
 		{ name: "title", weight: 0.4 },
 		{ name: "username", weight: 0.3 },

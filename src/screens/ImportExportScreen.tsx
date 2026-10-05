@@ -116,6 +116,8 @@ export function ImportExportScreen() {
 							return;
 						}
 						const reader = new FileReader();
+						reader.onerror = () =>
+							showToast("Failed to read the selected file");
 						reader.onload = () => {
 							try {
 								const backup = JSON.parse(

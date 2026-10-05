@@ -13,6 +13,7 @@
 //!     ├── enc_key
 //!     ├── mac_key
 //!     ├── last_activity
+//!     ├── last_remote_activity
 //!     └── session_generation
 //! ```
 //!
@@ -20,8 +21,22 @@
 //! guard) that keeps the keys alive for the duration of the operation.
 //! Auto-lock obtains an [`ExclusiveLease`] (exclusive/write guard) that waits
 //! for all operation leases to drain before clearing the keys.
+//!
+//! ## SEC-L5 remote-activity grace policy (v1.2.0)
+//!
+//! Service-layer operations serve both desktop IPC and the extension HTTP
+//! bridge and cannot tell the callers apart, so every explicit vault
+//! operation (`SessionLease::touch_remote_activity`) only extends a short
+//! [`REMOTE_ACTIVITY_GRACE_SECS`] window instead of the full auto-lock
+//! timeout. The vault stays alive while
+//! `now < max(last_activity + timeout, last_remote_activity + grace)`:
+//! the in-person desktop user is kept alive for the FULL window by the
+//! webview input heartbeat (`src/App.tsx` pointermove/pointerdown/keydown →
+//! the `touch_activity` IPC command), while an unattended extension fill
+//! only buys the 120s grace — "no one at the keyboard ⇒ locks soon".
 
 use crate::VaultError;
+use pwdvault_domain::constants::REMOTE_ACTIVITY_GRACE_SECS;
 use pwdvault_infrastructure::crypto::SecretKey;
 use std::sync::{Mutex, RwLock, RwLockReadGuard};
 use std::time::Instant;
@@ -40,6 +55,12 @@ enum SessionInner {
         enc_key: SecretKey,
         mac_key: SecretKey,
         last_activity: Mutex<Instant>,
+        /// SEC-L5: last explicit vault-operation timestamp (desktop IPC and
+        /// extension HTTP alike — the service layer cannot distinguish the
+        /// callers). Deliberately a variant field: built as `None` by every
+        /// unlock and discarded with the variant on lock, so a stale grace
+        /// window can never survive a lock/unlock cycle.
+        last_remote_activity: Mutex<Option<Instant>>,
         /// Monotonically increasing counter incremented on each unlock.
         /// Used by [`SessionLease`] to detect that the session changed
         /// (lock → re-unlock) while the lease was held.
@@ -120,6 +141,9 @@ impl VaultSession {
             enc_key: enc_key.into(),
             mac_key: mac_key.into(),
             last_activity: Mutex::new(Instant::now()),
+            // Fresh session: no remote activity has happened yet, so the
+            // grace window contributes nothing to the deadline.
+            last_remote_activity: Mutex::new(None),
             generation: live_generation + 1,
             // A fresh session never carries a wrap key; only
             // [`VaultSession::set_wrap_key`] installs one after a
@@ -163,6 +187,23 @@ impl VaultSession {
         }
     }
 
+    /// SEC-L5: record an explicit vault operation (desktop IPC or extension
+    /// HTTP — the service layer cannot tell them apart). Extends only the
+    /// short remote grace window, never the full auto-lock timeout; see the
+    /// module-level policy note.
+    pub fn touch_remote_activity(&self) {
+        let inner = self.inner.read().expect("session lock poisoned");
+        if let SessionInner::Unlocked {
+            last_remote_activity,
+            ..
+        } = &*inner
+        {
+            *last_remote_activity
+                .lock()
+                .expect("remote activity lock poisoned") = Some(Instant::now());
+        }
+    }
+
     /// Cache the biometric wrap key into the current Unlocked session (D5).
     ///
     /// Must only be called after a successful Touch ID unlock. If the session
@@ -194,16 +235,33 @@ impl VaultSession {
         }
     }
 
-    /// Read the activity timestamp and auto-lock timeout to determine
+    /// Read the activity timestamps and auto-lock timeout to determine
     /// whether auto-lock should fire. Returns `Some(deadline)` if the vault
     /// is unlocked and a deadline can be computed.
+    ///
+    /// SEC-L5 max semantics: the vault stays alive while
+    /// `now < max(last_activity + timeout, last_remote_activity + grace)`.
+    /// A remote (extension) touch therefore never pushes the deadline past
+    /// its short grace window, and a fresh local touch always wins over a
+    /// stale remote one.
     pub fn auto_lock_deadline(&self, timeout_secs: u64) -> Option<Instant> {
         let inner = self.inner.read().expect("session lock poisoned");
-        if let SessionInner::Unlocked { last_activity, .. } = &*inner {
-            Some(
-                *last_activity.lock().expect("activity lock poisoned")
-                    + std::time::Duration::from_secs(timeout_secs),
-            )
+        if let SessionInner::Unlocked {
+            last_activity,
+            last_remote_activity,
+            ..
+        } = &*inner
+        {
+            let local_deadline = *last_activity.lock().expect("activity lock poisoned")
+                + std::time::Duration::from_secs(timeout_secs);
+            let remote_deadline = (*last_remote_activity
+                .lock()
+                .expect("remote activity lock poisoned"))
+            .map(|t| t + std::time::Duration::from_secs(REMOTE_ACTIVITY_GRACE_SECS));
+            Some(match remote_deadline {
+                Some(remote) if remote > local_deadline => remote,
+                _ => local_deadline,
+            })
         } else {
             None
         }
@@ -211,18 +269,33 @@ impl VaultSession {
 
     /// Check whether auto-lock should fire given the current elapsed time.
     ///
-    /// Returns `true` only if the vault is unlocked AND the activity timer
-    /// has exceeded `timeout_secs`.
+    /// Returns `true` only if the vault is unlocked AND both windows have
+    /// expired: the local inactivity timer exceeds `timeout_secs` AND the
+    /// remote grace window (SEC-L5) has lapsed — `now >= deadline` is
+    /// equivalent to both when the deadline is their max.
     pub fn should_auto_lock(&self, timeout_secs: u64) -> bool {
         let inner = self.inner.read().expect("session lock poisoned");
         match &*inner {
-            SessionInner::Unlocked { last_activity, .. } => {
-                last_activity
+            SessionInner::Unlocked {
+                last_activity,
+                last_remote_activity,
+                ..
+            } => {
+                let local_expired = last_activity
                     .lock()
                     .expect("activity lock poisoned")
                     .elapsed()
                     .as_secs()
-                    >= timeout_secs
+                    >= timeout_secs;
+                let remote_expired = match *last_remote_activity
+                    .lock()
+                    .expect("remote activity lock poisoned")
+                {
+                    Some(t) => t.elapsed().as_secs() >= REMOTE_ACTIVITY_GRACE_SECS,
+                    // No remote activity this session: nothing to wait for.
+                    None => true,
+                };
+                local_expired && remote_expired
             }
             SessionInner::Locked { .. } => false,
         }
@@ -262,12 +335,15 @@ impl VaultSession {
                 enc_key,
                 mac_key,
                 last_activity: _,
+                last_remote_activity: _,
                 wrap_key,
                 generation,
             } => {
                 // All secret material zeroizes when dropped here.
-                // (`last_activity` is an Instant — no Drop impl, nothing to
-                // release — so it is simply discarded with the struct.)
+                // (`last_activity` / `last_remote_activity` are Instants — no
+                // Drop impl, nothing to release — so they are simply
+                // discarded with the struct. Discarding the slot is what
+                // clears a pending grace window on lock.)
                 drop(enc_key);
                 drop(mac_key);
                 drop(wrap_key);
@@ -325,6 +401,21 @@ impl<'a> SessionLease<'a> {
     pub fn touch_activity(&self) {
         if let SessionInner::Unlocked { last_activity, .. } = &*self.guard {
             *last_activity.lock().expect("activity lock poisoned") = Instant::now();
+        }
+    }
+
+    /// SEC-L5: mark a successful explicit vault operation (desktop IPC or
+    /// extension HTTP) without re-entering the session RwLock. Extends only
+    /// the short remote grace window, never the full auto-lock timeout.
+    pub fn touch_remote_activity(&self) {
+        if let SessionInner::Unlocked {
+            last_remote_activity,
+            ..
+        } = &*self.guard
+        {
+            *last_remote_activity
+                .lock()
+                .expect("remote activity lock poisoned") = Some(Instant::now());
         }
     }
 
@@ -449,6 +540,90 @@ mod tests {
         // Simulate old activity by checking with timeout=0.
         // (elapsed is always >= 0, so with timeout 0 it should be true)
         std::thread::sleep(std::time::Duration::from_millis(1));
+        assert!(session.should_auto_lock(0));
+    }
+
+    /// SEC-L5: a remote touch grants only the short grace window, never the
+    /// full auto-lock timeout.
+    #[test]
+    fn remote_touch_grants_only_grace() {
+        let session = VaultSession::new();
+        session.unlock(TEST_ENC_KEY, TEST_MAC_KEY);
+
+        // Full-window deadline is set by the unlock alone; a remote touch
+        // must not move it (its grace window is far shorter than 600s).
+        let full_window = session.auto_lock_deadline(600).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        session.touch_remote_activity();
+        assert_eq!(
+            session.auto_lock_deadline(600).unwrap(),
+            full_window,
+            "remote touch must not extend the full auto-lock window"
+        );
+
+        // With a tiny local timeout the deadline is the remote grace window
+        // (~120s), not the local one (~1s).
+        let now = Instant::now();
+        let deadline = session.auto_lock_deadline(1).unwrap();
+        assert!(
+            deadline > now + std::time::Duration::from_secs(115),
+            "remote touch must yield the ~120s grace deadline"
+        );
+        assert!(
+            deadline <= now + std::time::Duration::from_secs(121),
+            "remote touch must not exceed one grace window"
+        );
+
+        // The pending grace also blocks auto-lock even though the local
+        // window (timeout=0) has already expired.
+        assert!(!session.should_auto_lock(0));
+    }
+
+    /// SEC-L5 max semantics: the deadline is the LATER of the local window
+    /// and the remote grace window — whichever side is currently later wins.
+    #[test]
+    fn max_semantics() {
+        let session = VaultSession::new();
+        session.unlock(TEST_ENC_KEY, TEST_MAC_KEY);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        session.touch_remote_activity();
+
+        // Remote is the most recent activity: with a short local timeout the
+        // grace window (remote + 120s) beats the local one (unlock + 1s).
+        let now = Instant::now();
+        let deadline = session.auto_lock_deadline(1).unwrap();
+        assert!(
+            deadline > now + std::time::Duration::from_secs(115),
+            "the later remote grace window must win"
+        );
+
+        // Reverse: the local window is older in wall-clock terms but longer
+        // (unlock + 600s > remote + 120s), so the local deadline wins.
+        let deadline = session.auto_lock_deadline(600).unwrap();
+        assert!(
+            deadline > now + std::time::Duration::from_secs(595),
+            "the later long local window must win over the short grace"
+        );
+        assert!(deadline <= now + std::time::Duration::from_secs(600));
+    }
+
+    /// SEC-L5: locking discards the grace slot — a lock/unlock cycle leaves
+    /// no stale remote window behind.
+    #[test]
+    fn lock_clears_remote_activity() {
+        let session = VaultSession::new();
+        session.unlock(TEST_ENC_KEY, TEST_MAC_KEY);
+        session.touch_remote_activity();
+
+        // Grace pending: even an expired local window (timeout=0) must not
+        // auto-lock.
+        assert!(!session.should_auto_lock(0));
+
+        assert!(session.exclusive_lock_and_clear());
+        session.unlock(TEST_ENC_KEY, TEST_MAC_KEY);
+
+        // Fresh session, no remote activity recorded: the expired local
+        // window locks again — no stale grace.
         assert!(session.should_auto_lock(0));
     }
 

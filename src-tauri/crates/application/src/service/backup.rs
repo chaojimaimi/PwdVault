@@ -514,7 +514,7 @@ pub fn import_vault(
     let entries_count = payload.entries.len();
     let groups_count = payload.groups.len();
 
-    lease.touch_activity();
+    lease.touch_remote_activity();
     Ok(ImportResult {
         entries_imported: entries_count,
         groups_imported: groups_count,

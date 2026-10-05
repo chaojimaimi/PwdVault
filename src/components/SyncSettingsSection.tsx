@@ -70,7 +70,13 @@ function openAuthorizeUrl(url: string): void {
 }
 
 export function SyncSettingsSection() {
-	const [status, setStatus] = useState<SyncStatusResponse | null>(null);
+	// Three-valued on purpose (SF-P3f): a backend response, `null` while the
+	// initial probe is in flight, or the "unknown" sentinel when that first
+	// probe failed (no cached state to fall back on). Later refresh failures
+	// keep the last known value.
+	const [status, setStatus] = useState<
+		SyncStatusResponse | "unknown" | null
+	>(null);
 	const [busy, setBusy] = useState<BusyOp>(null);
 	// Sync can pull in entries/groups changed on other devices — the in-memory
 	// vault lists must be reloaded after a successful sync (H3).
@@ -98,7 +104,11 @@ export function SyncSettingsSection() {
 		try {
 			setStatus(await syncStatus());
 		} catch {
-			/* keep last known state; the probe is non-critical */
+			// Failed refresh with a known value → keep it silently (the probe
+			// is non-critical). Only when nothing is known yet — the initial
+			// probe — do we surface the explicit "unknown" state (functional
+			// update so a stale closure cannot clobber a concurrent success).
+			setStatus((prev) => (prev === null ? "unknown" : prev));
 		}
 	};
 
@@ -247,7 +257,10 @@ export function SyncSettingsSection() {
 		}
 	};
 
-	const connected = status?.enabled === true;
+	// Narrow the "unknown" sentinel away so the connected branch can keep
+	// reading the response fields directly.
+	const statusData = status === "unknown" ? null : status;
+	const connected = statusData?.enabled === true;
 
 	return (
 		<>
@@ -255,30 +268,45 @@ export function SyncSettingsSection() {
 			<div className="settings-section">
 				<h3 className="settings-section-title">Cloud Sync</h3>
 
-				{connected ? (
+				{status === "unknown" ? (
+					<>
+						<p className="error-message" role="alert">
+							Status unknown
+						</p>
+						<div className="security-status-row">
+							<button
+								type="button"
+								className="btn btn-secondary btn-sm"
+								onClick={() => void refreshStatus()}
+							>
+								Retry
+							</button>
+						</div>
+					</>
+				) : connected ? (
 					<>
 						<div className="sync-status-list">
 							<div className="option-row">
 								<span className="sync-status-label">Backend</span>
 								<span className="sync-status-value">
-									{backendLabel(status!.backend)}
+									{backendLabel(statusData!.backend)}
 								</span>
 							</div>
 							<div className="option-row">
 								<span className="sync-status-label">Last sync</span>
 								<span className="sync-status-value">
-									{formatSyncTime(status!.last_sync_at)}
+									{formatSyncTime(statusData!.last_sync_at)}
 								</span>
 							</div>
 							<div className="option-row">
 								<span className="sync-status-label">Remote revision</span>
 								<span className="sync-status-value">
-									{status!.remote_rev ?? "—"}
+									{statusData!.remote_rev ?? "—"}
 								</span>
 							</div>
-							{status!.last_result && status!.last_result !== "ok" && (
+							{statusData!.last_result && statusData!.last_result !== "ok" && (
 								<p className="error-message" role="alert">
-									Last sync failed: {status!.last_result}
+									Last sync failed: {statusData!.last_result}
 								</p>
 							)}
 						</div>

@@ -40,6 +40,13 @@ pub const NATIVE_PROTOCOL_VERSION: u16 = 1;
 /// Default auto-lock timeout in seconds (10 minutes).
 pub const AUTO_LOCK_SECS: u64 = 600;
 
+/// Grace window (seconds) that any explicit vault operation — desktop IPC or
+/// browser-extension request alike — adds to the auto-lock deadline
+/// (v1.2.0 SEC-L5). The deadline is `max(last_local_activity + auto_lock,
+/// last_remote_activity + this)`, so unattended extension fills keep the
+/// vault open only briefly instead of a full timeout window.
+pub const REMOTE_ACTIVITY_GRACE_SECS: u64 = 120;
+
 // ---------------------------------------------------------------------------
 // Rate limiting
 // ---------------------------------------------------------------------------
