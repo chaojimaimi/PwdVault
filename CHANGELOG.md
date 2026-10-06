@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [1.2.3] - 2026-10-07
+
+### Security
+
+- The updater trust anchor is now pinned in CI: a golden-contract test
+  asserts the update-signing public key, the update endpoint URL, and
+  the absence of platform config overlays against pinned values, so a
+  key swap or feed hijack cannot land silently — changing any of them
+  requires an explicit, unmissable same-commit diff that points at the
+  documented key-rotation runbook. No application code changed in this
+  release; builds are functionally identical to 1.2.2.
+
 ## [1.2.2] - 2026-10-07
 
 ### Added
