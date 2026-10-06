@@ -4,8 +4,8 @@ A secure, local-first password manager built with Tauri + React.
 
 **Last Updated**: 2026-10-05
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.2.1
-**Current Version**: `v1.2.1` — 2026-10 audit remediation complete + closure fixes (OAuth callback state-echo enforcement, prerelease-aware feed gating) + v1.2.0 hardening + v1.1.9 audit fixes + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.2.2
+**Current Version**: `v1.2.2` — manual update check + tags/group input layout fix + 2026-10 audit remediation complete (closure fixes incl. OAuth state-echo, prerelease-aware feed gating) + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -201,7 +201,7 @@ PwdVault/
 | Rust infrastructure crate | 108 (+1 ignored keychain SecItem smoke, CI 跑) | (same run)                                |
 | Rust domain crate         | 4                                              | (same run)                                |
 | Rust native-host          | 23                                             | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 253 (52 files, incl. 76 extension tests)       | `pnpm test`                               |
+| Frontend (total)          | 266 (53 files, incl. 76 extension tests)       | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -315,6 +315,29 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-10-07 (v1.2.2 — manual update check + tags/group layout fix)
+
+Standard pipeline (plan → plan-reviewer PASS after three rounds that
+caught a mid-download handle-close hazard, an auto/manual interleave
+ref leak, and a dead-click button spec gap → ds-worker → main-agent
+review + independent code-reviewer APPROVE, 0 P0-P2 → gates →
+release). Shipped: **manual "Check for updates"** in Settings →
+Updates — current version line, check button (disabled while
+checking/downloading/ready), aria-live status line with visible
+errors; manual check bypasses a dismissed version without rewriting
+the key; auto path gained the symmetric close-before-overwrite so
+auto/manual interleaves can't leak the plugin Update handle (13 new
+tests, incl. downloading/ready guards and an interleave case).
+**Layout fix**: the Tags input on the entry page (and the group
+inline rows) collapsed to a ~50px pill because `.btn`'s global
+`width:100%` acted as the flex base size and starved the `flex:1`
+input — pre-existing since the v0.3.1 theme redesign (jsdom can't see
+layout, found in manual QA); fixed with a scoped `width:auto +
+flex-shrink:0` in the two rows (same pattern as the earlier
+GroupManager fix). Test baseline after: 307 Rust (+1 ignored) + 23
+native-host + 266 frontend. Plan: `fix_impl_plan_v1.2.2.md` (R3); QA
+items T21-T23 appended to `qa_manual_v1.2.0.md`.
 
 ### 2026-10-06 (v1.2.1 — closure fixes: OAuth state-echo enforcement, prerelease feed gating)
 
