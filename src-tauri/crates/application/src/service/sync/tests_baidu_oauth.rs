@@ -76,13 +76,13 @@ fn callback_listener_receives_the_code() {
 /// Baidu error redirects and timeouts surface as failures.
 #[test]
 fn callback_listener_surfaces_error_and_timeout() {
-    let (outcome, _) = callback_page_for("/?error=access_denied&error_description=user+denied");
+    let parsed = callback_page_for("/?error=access_denied&error_description=user+denied");
     assert_eq!(
-        outcome.unwrap_err(),
+        parsed.outcome.unwrap_err(),
         "authorization was denied by Baidu (access_denied)"
     );
-    let (outcome, _) = callback_page_for("/?state=x");
-    assert!(outcome.is_err(), "missing code must fail");
+    let parsed = callback_page_for("/?state=x");
+    assert!(parsed.outcome.is_err(), "missing code must fail");
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let server = tiny_http::Server::from_listener(listener, None).unwrap();
@@ -139,6 +139,70 @@ fn callback_listener_discards_invalid_requests_and_keeps_waiting() {
     let grant = waiter.join().unwrap().unwrap();
     assert_eq!(grant.code, "abc123");
     assert_eq!(grant.state.as_deref(), Some("real-state-123"));
+}
+
+/// SEC-L3 v1.2.1: a forged `?error=` probe that does NOT echo the parked
+/// state is discarded — it must not terminate the pending wait. The
+/// genuine redirect (code + matching state) still completes the flow.
+#[test]
+fn callback_listener_discards_error_probe_without_state_echo() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tiny_http::Server::from_listener(listener, None).unwrap();
+    let waiter = thread::spawn(move || {
+        wait_for_callback(&server, Duration::from_secs(10), "real-state-123")
+    });
+
+    // 1. An `error=` probe without the state echo gets the discard page...
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .write_all(
+            b"GET /?error=access_denied HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        )
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert!(
+        response.contains(" 400 "),
+        "state-less error probe must be discarded"
+    );
+    assert!(response.contains("Invalid authorization callback"));
+
+    // 2. ...and the listener is STILL waiting — the genuine redirect
+    // (code + valid state echo) completes it.
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .write_all(
+            b"GET /?code=abc123&state=real-state-123 HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        )
+        .unwrap();
+    drop(stream);
+
+    let grant = waiter.join().unwrap().unwrap();
+    assert_eq!(grant.code, "abc123");
+    assert_eq!(grant.state.as_deref(), Some("real-state-123"));
+}
+
+/// SEC-L3 v1.2.1: a genuine Baidu denial redirect echoes the `state`
+/// parameter (RFC 6749 §4.1.2.1) — such an `error=` redirect terminates
+/// the wait immediately as a denial (no second redirect will come).
+#[test]
+fn callback_listener_terminates_on_error_with_matching_state() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tiny_http::Server::from_listener(listener, None).unwrap();
+    let waiter = thread::spawn(move || {
+        wait_for_callback(&server, Duration::from_secs(10), "real-state-123")
+    });
+
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .write_all(b"GET /?error=access_denied&state=real-state-123 HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    drop(stream);
+
+    let reason = waiter.join().unwrap().unwrap_err();
+    assert_eq!(reason, "authorization was denied by Baidu (access_denied)");
 }
 
 /// complete_auth exchanges the code and stores {access, refresh, expires_at}

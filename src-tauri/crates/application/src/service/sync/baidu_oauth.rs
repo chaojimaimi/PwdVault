@@ -36,8 +36,11 @@ const CALLBACK_HOST: &str = "127.0.0.1";
 /// redirect carried a Baidu `error=` condition (kept in one place so the
 /// wait loop can recognize a real denial without duplicating the wording).
 const DENIED_BY_BAIDU_PREFIX: &str = "authorization was denied by Baidu";
-/// Page served to DISCARDED callbacks (SEC-L3): probes without a code or
-/// redirects whose state echo does not match the parked expectation.
+/// Page served to DISCARDED callbacks (SEC-L3): probes without a code,
+/// `error=` redirects that do not echo the parked state (v1.2.1 — an
+/// `error=` condition terminates the wait only when the state echo
+/// matches), or redirects whose state echo does not match the parked
+/// expectation.
 const INVALID_CALLBACK_PAGE: &str = "<html><body><h3>PwdVault</h3><p>Invalid authorization \
      callback — please restart the connection from PwdVault.</p></body></html>";
 
@@ -329,9 +332,15 @@ pub(crate) fn token_request(oauth_base: &str, query: &str) -> Result<BaiduTokens
 /// state echo does not match `expected_state`). Such requests are answered
 /// with an error page and DISCARDED — the listener keeps waiting for the
 /// genuine redirect (code + matching state echo, P2-2) until the total
-/// timeout. A Baidu `error=` redirect is a genuine answer from the real
-/// flow (the user denied the grant; no second redirect will come), so it
-/// terminates the wait immediately.
+/// timeout. A Baidu `error=` redirect terminates the wait immediately ONLY
+/// when it echoes the parked `state` (v1.2.1 SEC-L3: a forged `?error=`
+/// probe without the echo is discarded like any other noise).
+///
+/// Risk note: RFC 6749 §4.1.2.1 requires an error redirect to echo the
+/// `state` parameter. If Baidu anomalously omits it, a REAL denial will be
+/// discarded too and the wait runs to the total timeout, surfacing as
+/// `authorization timed out` instead of the denial reason — an accepted
+/// tradeoff (a forged termination is worse than a delayed honest one).
 pub(crate) fn wait_for_callback(
     server: &tiny_http::Server,
     timeout: Duration,
@@ -346,13 +355,19 @@ pub(crate) fn wait_for_callback(
         match server.recv_timeout(deadline - now) {
             Ok(Some(request)) => {
                 let url = request.url().to_string();
-                let (outcome, page) = callback_page_for(&url);
-                let echoed_valid =
-                    matches!(&outcome, Ok(grant) if grant.state.as_deref() == Some(expected_state));
-                let denied =
-                    matches!(&outcome, Err(reason) if reason.starts_with(DENIED_BY_BAIDU_PREFIX));
-                if echoed_valid || denied {
-                    let status = if outcome.is_ok() { 200 } else { 400 };
+                let parsed = callback_page_for(&url);
+                // v1.2.1 SEC-L3: termination requires the state echo to
+                // match in ALL cases — including `error=` denials (denied
+                // is still recognized by the reason prefix). Anything else
+                // is noise: respond 400 and keep waiting.
+                let state_ok = parsed.state.as_deref() == Some(expected_state);
+                let denied = matches!(
+                    &parsed.outcome,
+                    Err(reason) if reason.starts_with(DENIED_BY_BAIDU_PREFIX)
+                );
+                if state_ok && (parsed.outcome.is_ok() || denied) {
+                    let status = if parsed.outcome.is_ok() { 200 } else { 400 };
+                    let ParsedCallback { outcome, page, .. } = parsed;
                     let response = tiny_http::Response::from_string(page).with_status_code(status);
                     let _ = request.respond(response);
                     return outcome;
@@ -370,9 +385,26 @@ pub(crate) fn wait_for_callback(
     }
 }
 
+/// One parsed callback redirect: the [`CallbackOutcome`] (or denial
+/// reason), the raw `state` echo if the redirect carried one, and the HTML
+/// page to answer the browser with. The `state` is kept OUTSIDE the
+/// outcome so the wait loop can validate it even for `error=` redirects —
+/// RFC 6749 §4.1.2.1 requires an error redirect to echo the state
+/// parameter (v1.2.1 SEC-L3: without this, a forged `?error=` probe could
+/// terminate a pending wait). `pub(crate)` mirrors [`CallbackGrant`] —
+/// visible to the sibling test module, still internal to the crate.
+pub(crate) struct ParsedCallback {
+    pub(crate) outcome: CallbackOutcome,
+    pub(crate) state: Option<String>,
+    pub(crate) page: String,
+}
+
 /// Parse `?code=`/`?state=`/`?error=` from the callback URL and build the
 /// HTML answer for the browser (the user just sees "return to PwdVault").
-pub(crate) fn callback_page_for(url: &str) -> (CallbackOutcome, String) {
+/// Both the Ok and Err outcomes carry the parsed `state` in
+/// [`ParsedCallback`] so the wait loop can gate termination on the state
+/// echo regardless of the redirect kind.
+pub(crate) fn callback_page_for(url: &str) -> ParsedCallback {
     let query = url.split_once('?').map(|(_, query)| query).unwrap_or("");
     let mut code = None;
     let mut state = None;
@@ -387,26 +419,32 @@ pub(crate) fn callback_page_for(url: &str) -> (CallbackOutcome, String) {
         }
     }
     if let Some(error) = error {
-        (
-            Err(format!("{DENIED_BY_BAIDU_PREFIX} ({error})")),
-            "<html><body><h3>PwdVault</h3><p>Authorization failed — you can close this tab \
-             and try again from PwdVault.</p></body></html>"
+        ParsedCallback {
+            outcome: Err(format!("{DENIED_BY_BAIDU_PREFIX} ({error})")),
+            state,
+            page: "<html><body><h3>PwdVault</h3><p>Authorization failed — you can close this \
+                   tab and try again from PwdVault.</p></body></html>"
                 .to_string(),
-        )
+        }
     } else if let Some(code) = code.filter(|code| !code.is_empty()) {
-        (
-            Ok(CallbackGrant { code, state }),
-            "<html><body><h3>PwdVault</h3><p>Authorization received. Return to PwdVault \
-             to finish connecting Baidu Netdisk.</p></body></html>"
+        ParsedCallback {
+            outcome: Ok(CallbackGrant {
+                code,
+                state: state.clone(),
+            }),
+            state,
+            page: "<html><body><h3>PwdVault</h3><p>Authorization received. Return to PwdVault \
+                   to finish connecting Baidu Netdisk.</p></body></html>"
                 .to_string(),
-        )
+        }
     } else {
-        (
-            Err("callback did not carry an authorization code".to_string()),
-            "<html><body><h3>PwdVault</h3><p>Missing authorization code — please restart \
-             the connection from PwdVault.</p></body></html>"
+        ParsedCallback {
+            outcome: Err("callback did not carry an authorization code".to_string()),
+            state,
+            page: "<html><body><h3>PwdVault</h3><p>Missing authorization code — please \
+                   restart the connection from PwdVault.</p></body></html>"
                 .to_string(),
-        )
+        }
     }
 }
 

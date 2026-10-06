@@ -407,16 +407,31 @@ jobs:
           echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           echo "version_clean=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      # Prerelease policy (v1.2.1): a pre-release tag (version_clean contains
+      # '-', e.g. v1.2.1-beta.1) produces artifacts but is marked prerelease —
+      # it never becomes "Latest" and the updater feed backfill below is
+      # skipped so test builds stay invisible to auto-update. Note:
+      # bump-version.sh only syncs three-part versions; prerelease version
+      # numbers must be synced manually across the versioned files.
       - name: Determine prerelease status
         id: prerelease
         run: |
           MACOS="${{ needs.build-macos.outputs.signing-status }}"
           WINDOWS="${{ needs.build-windows.outputs.signing-status }}"
+          UNSIGNED=false
           if [ "$MACOS" != "true" ] || [ "$WINDOWS" != "true" ]; then
-            echo "prerelease=true" >> $GITHUB_OUTPUT
+            UNSIGNED=true
             echo "⚠️  One or more platforms unsigned — marking as prerelease (§5.6.6-8)"
+          fi
+          PRERELEASE_TAG=false
+          if [[ "${{ steps.version.outputs.version_clean }}" == *-* ]]; then
+            PRERELEASE_TAG=true
+            echo "⚠️  Pre-release tag detected — marking as prerelease (no updater feed)"
+          fi
+          if [ "$UNSIGNED" = "true" ] || [ "$PRERELEASE_TAG" = "true" ]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
-            echo "prerelease=false" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Read CHANGELOG
@@ -454,7 +469,11 @@ jobs:
       # (D8: an earlier generate-only step was removed — it produced the same
       # dist/latest.json that this --commit run regenerates and nothing
       # consumed the un-committed copy.)
+      # v1.2.1: skipped for pre-release tags (version_clean contains '-') —
+      # test builds must stay invisible to the auto-update feed (they are
+      # marked prerelease and never become "Latest").
       - name: Commit updater feed to main
+        if: ${{ !contains(steps.version.outputs.version_clean, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
