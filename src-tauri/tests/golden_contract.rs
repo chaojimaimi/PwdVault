@@ -4,6 +4,9 @@
 //! dispatch table expose the same set of commands. The two adapter paths must
 //! stay in sync; this test fails if one side adds, renames, or removes a
 //! command without updating the other.
+//!
+//! Beyond the IPC sync contract, this file also pins the updater trust
+//! anchor (v1.2.3) — see `updater_trust_anchor_matches_pinned_key`.
 
 use std::collections::HashSet;
 
@@ -205,5 +208,73 @@ fn adapter_only_commands_are_documented() {
             &"unlock_biometric",
         ],
         "IPC-only command set changed — update this test if intentional"
+    );
+}
+
+/// UPDATER TRUST ANCHOR (v1.2.3, H3 hardening): the updater pubkey baked into
+/// tauri.conf.json is the root of trust for every auto-update
+/// (docs/UPDATER-KEYS.md). Pinning it here means a key swap cannot land
+/// silently — changing the pubkey requires changing this constant in the
+/// SAME commit, which is an unmissable review diff.
+/// Current key: minisign public key 237BD03CF7C9D12D (decoded from the base64
+/// below; the full string is compared byte-for-byte, no decoding here to
+/// avoid adding a dependency).
+const PINNED_UPDATER_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIzN0JEMDNDRjdDOUQxMkQKUldRdDBjbjNQTkI3SS9TUzJhZnVMdjJPOFRHcDJ6U3F6NHlOVGRNMGZDamI3dWdOQkFiZWhZTmcK";
+
+#[test]
+fn updater_trust_anchor_matches_pinned_key() {
+    let conf = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tauri.conf.json"))
+        .expect("tauri.conf.json readable next to the crate manifest");
+    let value: serde_json::Value = serde_json::from_str(&conf).expect("tauri.conf.json parses");
+
+    // WHY: a compromised repo could silently swap the update-signing key and
+    // ship malicious updates that verify as "legit"; the pin turns that into
+    // an unmissable same-commit diff.
+    let pubkey = value["plugins"]["updater"]["pubkey"]
+        .as_str()
+        .expect("plugins.updater.pubkey present");
+    assert_eq!(
+        pubkey, PINNED_UPDATER_PUBKEY,
+        "UPDATER TRUST ANCHOR CHANGED. If this is an intentional rotation, update \
+         PINNED_UPDATER_PUBKEY in this same commit and follow docs/UPDATER-KEYS.md \
+         §3 (transition release, users must manually upgrade once). If not \
+         intentional, treat it as a security incident (§4) — do NOT merge."
+    );
+
+    // WHY: Tauri v2 platform overlays deep-merge over the base conf, so a
+    // new tauri.<platform>.conf.json could override plugins.updater and
+    // bypass the pin above entirely.
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    for overlay in [
+        "tauri.macos.conf.json",
+        "tauri.windows.conf.json",
+        "tauri.linux.conf.json",
+        // Mobile overlays (android/ios) are included for completeness — the
+        // project is desktop-only today, but a future Tauri Mobile overlay
+        // must not silently bypass this guard either.
+        "tauri.android.conf.json",
+        "tauri.ios.conf.json",
+    ] {
+        let path = std::path::Path::new(manifest_dir).join(overlay);
+        assert!(
+            !path.exists(),
+            "platform overlay '{overlay}' must not exist: it can deep-merge over \
+             plugins.updater in tauri.conf.json and bypass the pinned trust anchor. \
+             If an overlay is genuinely required, remove this guard explicitly in \
+             the same commit and re-pin whatever it would override."
+        );
+    }
+
+    // WHY: pointing the updater at another (e.g. attacker-controlled) feed
+    // hijacks update lookups even with the key pinned — endpoint changes are
+    // as sensitive as a key rotation.
+    assert_eq!(
+        value["plugins"]["updater"]["endpoints"],
+        serde_json::json!([
+            "https://raw.githubusercontent.com/chaojimaimi/PwdVault/main/latest.json"
+        ]),
+        "updater endpoints changed. Endpoint changes are as sensitive as a trust \
+         anchor rotation: update this assertion explicitly in the same commit and \
+         follow docs/UPDATER-KEYS.md — do NOT merge silently."
     );
 }

@@ -99,12 +99,12 @@
 
 ## 3. 约束与文件域
 
-| 文件 | 改动 |
-|------|------|
-| `src/context/SettingsContext.tsx`（+测试文件） | §1.2 |
-| `src/screens/SettingsScreen.tsx`（+测试文件，如无则新建 __tests__） | §1.3 |
-| `src/styles/components.css` | §1.3 状态行类 + §2.2 三条规则 |
-| `qa_manual_v1.2.0.md` | 追加 v1.2.2 验证小节（T21 tags 输入框可见宽度/Add 后 chip、T22 手动检查四态 + 断网 error 态） |
+| 文件                                                                | 改动                                                                                          |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `src/context/SettingsContext.tsx`（+测试文件）                      | §1.2                                                                                          |
+| `src/screens/SettingsScreen.tsx`（+测试文件，如无则新建 __tests__） | §1.3                                                                                          |
+| `src/styles/components.css`                                         | §1.3 状态行类 + §2.2 三条规则                                                                 |
+| `qa_manual_v1.2.0.md`                                               | 追加 v1.2.2 验证小节（T21 tags 输入框可见宽度/Add 后 chip、T22 手动检查四态 + 断网 error 态） |
 
 ⛔ 禁触：Rust/扩展/manifest/版本文件/其它屏幕。不 commit、不 pnpm install、不新增依赖。文件 ≤400 行为宜（SettingsContext 现约 233 行，增后应 <400）。
 
@@ -120,9 +120,9 @@ CHANGELOG（Added: manual update check；Fixed: tags/group input layout collapse
 
 ## 6. 风险与回滚
 
-| 风险 | 缓解 | 回滚 |
-|------|------|------|
-| manualCheck 状态与既有 update/updatePhase 状态机互相干扰 | action 设计已定义覆盖规则（available 覆盖、error 不清除）；测试 5 条覆盖交互 | 纯前端 revert |
-| Update 资源句柄泄漏（手动重查） | 旧 ref close 语义与 dismissUpdate 一致；测试断言 close 被调 | revert |
-| CSS 修复影响其它 .btn 布局 | 选择器限定两行容器内；波及面 grep 已核；QA §4 冒烟两屏 | 单条 CSS revert |
-| SettingsScreen 挂横幅导致双屏同显（Vault+Settings） | 两处互斥导航（一次只见一屏），同源 state 无冲突；测试断言挂载条件 | revert |
+| 风险                                                     | 缓解                                                                         | 回滚            |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------- | --------------- |
+| manualCheck 状态与既有 update/updatePhase 状态机互相干扰 | action 设计已定义覆盖规则（available 覆盖、error 不清除）；测试 5 条覆盖交互 | 纯前端 revert   |
+| Update 资源句柄泄漏（手动重查）                          | 旧 ref close 语义与 dismissUpdate 一致；测试断言 close 被调                  | revert          |
+| CSS 修复影响其它 .btn 布局                               | 选择器限定两行容器内；波及面 grep 已核；QA §4 冒烟两屏                       | 单条 CSS revert |
+| SettingsScreen 挂横幅导致双屏同显（Vault+Settings）      | 两处互斥导航（一次只见一屏），同源 state 无冲突；测试断言挂载条件            | revert          |
