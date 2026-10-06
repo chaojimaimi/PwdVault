@@ -4,8 +4,8 @@ A secure, local-first password manager built with Tauri + React.
 
 **Last Updated**: 2026-10-05
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.2.0
-**Current Version**: `v1.2.0` — 2026-10 audit remediation complete (Low-tier hardening: auto-lock remote grace, sync config encryption, native-host token validation, OAuth callback hardening; P3 polish + dead-code cleanup) + v1.1.9 audit fixes + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.2.1
+**Current Version**: `v1.2.1` — 2026-10 audit remediation complete + closure fixes (OAuth callback state-echo enforcement, prerelease-aware feed gating) + v1.2.0 hardening + v1.1.9 audit fixes + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -197,7 +197,7 @@ PwdVault/
 | Rust tauri-app lib        | 31                                             | `cd src-tauri && cargo test`              |
 | Rust capability contract  | 1                                              | (same run)                                |
 | Rust golden contract      | 2                                              | (same run)                                |
-| Rust application crate    | 159                                            | `cd src-tauri && cargo test --workspace`  |
+| Rust application crate    | 161                                            | `cd src-tauri && cargo test --workspace`  |
 | Rust infrastructure crate | 108 (+1 ignored keychain SecItem smoke, CI 跑) | (same run)                                |
 | Rust domain crate         | 4                                              | (same run)                                |
 | Rust native-host          | 23                                             | `cd extensions/native-host && cargo test` |
@@ -315,6 +315,25 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-10-06 (v1.2.1 — closure fixes: OAuth state-echo enforcement, prerelease feed gating)
+
+Compact pipeline (mini-plan → plan-reviewer PASS after one revise round
+that caught a transcribed key ID and a missing version-bump step → one
+worker → code-reviewer APPROVE, zero findings → gates → release).
+Shipped: **SEC-L3 closure** — the OAuth callback `error=` branch now
+requires the state echo to match before terminating (forged `?error=`
+probes are discarded; real denials echo state per RFC 6749), with the
+accepted tradeoff that an anomalous state-less denial degrades to a
+timeout; **prerelease-aware publishing** — semver pre-release tags
+(`vX.Y.Z-beta.N`) build artifacts, are marked GitHub prerelease, and
+skip the updater-feed commit, so test builds are invisible to
+auto-update (bump-version.sh stays three-part; pre-release versions
+sync manually); **docs** — the retired minisign public key in
+PHASE-AU-PLAN.md is marked DEPRECATED with both key IDs (decoded
+on-site, not copied from the plan). Test baseline after: 307 Rust
+(+1 ignored CI smoke) + 23 native-host + 253 frontend. Plan:
+`fix_impl_plan_v1.2.1.md` (R2).
 
 ### 2026-10-05 (v1.2.0 — audit remediation complete: Low hardening + cleanup)
 
