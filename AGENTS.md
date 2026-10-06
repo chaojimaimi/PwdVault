@@ -4,8 +4,8 @@ A secure, local-first password manager built with Tauri + React.
 
 **Last Updated**: 2026-10-05
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.2.2
-**Current Version**: `v1.2.2` — manual update check + tags/group input layout fix + 2026-10 audit remediation complete (closure fixes incl. OAuth state-echo, prerelease-aware feed gating) + v1.1.9/v1.2.0 hardening + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.2.3
+**Current Version**: `v1.2.3` — updater trust-anchor pinned in CI + manual update check + tags/group input layout fix + 2026-10 audit remediation complete (closure fixes incl. OAuth state-echo, prerelease-aware feed gating) + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -196,7 +196,7 @@ PwdVault/
 | ------------------------- | ---------------------------------------------- | ----------------------------------------- |
 | Rust tauri-app lib        | 31                                             | `cd src-tauri && cargo test`              |
 | Rust capability contract  | 1                                              | (same run)                                |
-| Rust golden contract      | 2                                              | (same run)                                |
+| Rust golden contract      | 3                                              | (same run)                                |
 | Rust application crate    | 161                                            | `cd src-tauri && cargo test --workspace`  |
 | Rust infrastructure crate | 108 (+1 ignored keychain SecItem smoke, CI 跑) | (same run)                                |
 | Rust domain crate         | 4                                              | (same run)                                |
@@ -315,6 +315,22 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-10-07 (v1.2.3 — updater trust anchor pinned in CI)
+
+Compact pipeline (mini-plan → plan-reviewer PASS in one round, P2/P3
+folded in → ds-worker → code-reviewer APPROVE with comments, 0 P0-P2 →
+gates → release). Shipped the H3 hardening from the key-strategy
+review: golden_contract now pins the updater pubkey (byte-for-byte,
+key 237BD03CF7C9D12D), asserts the single https feed endpoint, and
+rejects any `tauri.<platform>.conf.json` overlay (incl. android/ios
+for future mobile) — a trust-anchor swap or feed hijack can no longer
+land silently; the test's failure message IS the rotation runbook
+(docs/UPDATER-KEYS.md §3/§4). Worker reverse-verified all three
+assertions red→green. No application code changes; release is
+functionally identical to 1.2.2. Test baseline: 308 Rust (+1 ignored
+CI smoke) + 23 native-host + 266 frontend. Plan: fix_impl_plan_v1.2.3.md
+(R2).
 
 ### 2026-10-07 (v1.2.2 — manual update check + tags/group layout fix)
 
