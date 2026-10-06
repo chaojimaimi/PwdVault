@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+
+## [1.2.1] - 2026-10-06
+
+### Security
+
+- The Baidu OAuth callback listener now requires the `state` echo to
+  match before an `error=` redirect terminates the wait. A forged
+  `?error=` probe (no valid state) is discarded like any other noise —
+  previously it could consume a pending authorization. Real denials
+  carry the state echo per RFC 6749 and still terminate immediately.
+
+### Internal
+
+- Pre-release-aware publishing: a tag with a semver pre-release suffix
+  (e.g. `v1.3.0-beta.1`) now produces release artifacts but is marked
+  as a GitHub prerelease and **does not update the auto-update feed** —
+  test builds stay invisible to the updater. Note:
+  `bump-version.sh` only syncs three-part versions, so pre-release
+  version numbers must be synced manually.
+- The retired minisign public key in docs/PHASE-AU-PLAN.md is now
+  explicitly marked DEPRECATED with both key IDs (old vs. the one
+  built into the app) so manual signature checks cannot pick the wrong
+  one.
+
 ## [1.2.0] - 2026-10-06
 
 ### Security
