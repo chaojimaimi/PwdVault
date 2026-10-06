@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [1.2.2] - 2026-10-07
+
+### Added
+
+- Settings → Updates now has a manual "Check for updates" control: the
+  current version, a check button, and a live status line (up to date /
+  update available / couldn't reach the update server — the silent
+  failure of the startup-only auto check is finally visible and
+  retryable). The button is disabled while a check or an update
+  download/relaunch is in progress, and a manual check intentionally
+  bypasses a previously dismissed version without rewriting that choice.
+
+### Fixed
+
+- The Tags input on the entry page (and the inline new-group row) no
+  longer collapses to a tiny empty pill: the global full-width button
+  rule was starving the flexible input inside those rows. Typing is
+  visible in real time again; the group selector row also gets a
+  saner select/button split. (Bug present since the v0.3.1 theme
+  redesign; found in manual QA.)
+
 ## [1.2.1] - 2026-10-06
 
 ### Security
