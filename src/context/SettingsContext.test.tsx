@@ -184,4 +184,152 @@ describe('SettingsProvider update privacy', () => {
     await waitFor(() => expect(latestCtx?.state.update).toBeNull());
     expect(storage.get('pwdvault_dismissed_update')).toBe('1.1.7');
   });
+
+  // -------------------------------------------------------------------------
+  // v1.2.2: manual "Check for updates" (Settings page button). Independent of
+  // the auto startup check: explicit, visible on failure, dismissal-bypassing.
+  // -------------------------------------------------------------------------
+  describe('manual checkForUpdates', () => {
+    it('surfaces an update: reuses the banner state and closes the previous ref', async () => {
+      const older = fakeUpdate('1.1.6');
+      vi.mocked(check).mockResolvedValueOnce(older).mockResolvedValueOnce(fakeUpdate('1.1.7'));
+      // check_updates=false proves the manual path is independent of the toggle.
+      await renderWithSettings(false);
+
+      await latestCtx!.actions.checkForUpdates();
+      await waitFor(() => expect(latestCtx?.state.update).toEqual({ version: '1.1.6' }));
+      expect(latestCtx?.state.manualCheck).toMatchObject({ phase: 'available', version: '1.1.6' });
+      expect(vi.mocked(check)).toHaveBeenCalledWith({ timeout: 15000 });
+
+      await latestCtx!.actions.checkForUpdates();
+      await waitFor(() => expect(latestCtx?.state.update).toEqual({ version: '1.1.7' }));
+      expect(older.close).toHaveBeenCalledOnce();
+      expect(latestCtx?.state.manualCheck).toMatchObject({ phase: 'available', version: '1.1.7' });
+      // Explicit asks never write the dismissal memory.
+      expect(storage.has('pwdvault_dismissed_update')).toBe(false);
+    });
+
+    it('reports up-to-date on null and clears a stale banner + ref', async () => {
+      const older = fakeUpdate('1.1.6');
+      vi.mocked(check).mockResolvedValueOnce(older).mockResolvedValueOnce(null);
+      await renderWithSettings(false);
+
+      await latestCtx!.actions.checkForUpdates();
+      await waitFor(() => expect(latestCtx?.state.update).toEqual({ version: '1.1.6' }));
+
+      await latestCtx!.actions.checkForUpdates();
+      await waitFor(() => expect(latestCtx?.state.manualCheck.phase).toBe('uptodate'));
+      expect(latestCtx?.state.update).toBeNull();
+      expect(latestCtx?.state.manualCheck.checkedAt).not.toBeNull();
+      expect(older.close).toHaveBeenCalledOnce();
+    });
+
+    it('keeps an existing banner when the manual check fails', async () => {
+      const found = fakeUpdate('1.1.6');
+      vi.mocked(check).mockResolvedValueOnce(found).mockRejectedValueOnce(new Error('feed unreachable'));
+      await renderWithSettings(false);
+
+      await latestCtx!.actions.checkForUpdates();
+      await waitFor(() => expect(latestCtx?.state.update).toEqual({ version: '1.1.6' }));
+
+      await latestCtx!.actions.checkForUpdates();
+      await waitFor(() => expect(latestCtx?.state.manualCheck.phase).toBe('error'));
+      // Failure only means "this check found nothing" — the banner stays.
+      expect(latestCtx?.state.update).toEqual({ version: '1.1.6' });
+    });
+
+    it('guards re-entry while a check is in flight', async () => {
+      let release!: (update: Update | null) => void;
+      vi.mocked(check).mockImplementationOnce(
+        () => new Promise<Update | null>((resolve) => { release = resolve; }),
+      );
+      await renderWithSettings(false);
+
+      void latestCtx!.actions.checkForUpdates();
+      // Let the 'checking' state render so the second call sees the guard.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      void latestCtx!.actions.checkForUpdates();
+
+      expect(vi.mocked(check)).toHaveBeenCalledTimes(1);
+      expect(latestCtx?.state.manualCheck.phase).toBe('checking');
+
+      release(null);
+      await waitFor(() => expect(latestCtx?.state.manualCheck.phase).toBe('uptodate'));
+    });
+
+    it('bypasses the dismissal memory on an explicit check', async () => {
+      storage.set('pwdvault_dismissed_update', '9.9.9');
+      vi.mocked(check).mockResolvedValue(fakeUpdate('9.9.9'));
+      await renderWithSettings(false);
+
+      await latestCtx!.actions.checkForUpdates();
+
+      await waitFor(() => expect(latestCtx?.state.update).toEqual({ version: '9.9.9' }));
+      expect(latestCtx?.state.manualCheck).toMatchObject({ phase: 'available', version: '9.9.9' });
+      // The manual path must not overwrite the dismissal memory either.
+      expect(storage.get('pwdvault_dismissed_update')).toBe('9.9.9');
+    });
+
+    it('resets manualCheck on RESET', async () => {
+      vi.mocked(check).mockResolvedValue(null);
+      await renderWithSettings(false);
+
+      await latestCtx!.actions.checkForUpdates();
+      await waitFor(() => expect(latestCtx?.state.manualCheck.phase).toBe('uptodate'));
+
+      latestCtx!.dispatch({ type: 'RESET' });
+
+      await waitFor(() =>
+        expect(latestCtx?.state.manualCheck).toEqual({ phase: 'idle', checkedAt: null }));
+    });
+
+    it('refuses to re-check while a download is in progress', async () => {
+      // Auto path populates the banner; its install hangs in 'downloading'.
+      const hanging = fakeUpdate('1.1.7', (() => new Promise(() => {})) as unknown as Update['downloadAndInstall']);
+      vi.mocked(check).mockResolvedValue(hanging);
+      await renderWithSettings(true);
+      await waitFor(() => expect(latestCtx?.state.update).toEqual({ version: '1.1.7' }));
+      expect(latestCtx?.state.manualCheck.phase).toBe('idle');
+
+      void latestCtx!.actions.installUpdate();
+      await waitFor(() => expect(latestCtx?.state.updatePhase).toBe('downloading'));
+
+      await latestCtx!.actions.checkForUpdates();
+
+      expect(vi.mocked(check)).toHaveBeenCalledTimes(1); // only the auto check ran
+      expect(latestCtx?.state.manualCheck.phase).toBe('idle'); // guard returned pre-checking
+      expect(latestCtx?.state.updatePhase).toBe('downloading');
+    });
+
+    it('refuses to re-check while an install is ready to relaunch', async () => {
+      vi.mocked(check).mockResolvedValue(fakeUpdate('1.1.7'));
+      await renderWithSettings(true);
+      await waitFor(() => expect(latestCtx?.state.update).toEqual({ version: '1.1.7' }));
+
+      await latestCtx!.actions.installUpdate();
+      await waitFor(() => expect(latestCtx?.state.updatePhase).toBe('ready'));
+
+      await latestCtx!.actions.checkForUpdates();
+
+      expect(vi.mocked(check)).toHaveBeenCalledTimes(1);
+      expect(latestCtx?.state.manualCheck.phase).toBe('idle');
+      expect(latestCtx?.state.updatePhase).toBe('ready');
+    });
+
+    it('auto path closes the manual ref before overwriting (interleave)', async () => {
+      const manualFind = fakeUpdate('1.1.6');
+      vi.mocked(check).mockResolvedValueOnce(manualFind).mockResolvedValueOnce(fakeUpdate('1.1.7'));
+      await renderWithSettings(false); // auto effect dormant (check_updates=false)
+      await latestCtx!.actions.checkForUpdates();
+      await waitFor(() => expect(latestCtx?.state.update).toEqual({ version: '1.1.6' }));
+
+      // Flipping the toggle re-arms the auto startup effect (last writer wins).
+      vi.mocked(api.updateSettings).mockResolvedValue({ ...DEFAULT_SETTINGS, check_updates: true });
+      await latestCtx!.actions.updateSettings({ ...DEFAULT_SETTINGS, check_updates: true });
+
+      await waitFor(() => expect(latestCtx?.state.update).toEqual({ version: '1.1.7' }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(manualFind.close).toHaveBeenCalledOnce();
+    });
+  });
 });

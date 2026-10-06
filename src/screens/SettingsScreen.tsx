@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth, useSettings } from "../context/AppContext";
+import type { ManualCheckState } from "../context/SettingsContext";
 import { useTheme } from "../hooks/useTheme";
 import { showToast } from "../utils/toast";
 import { BackHeader } from "../components/BackHeader";
@@ -7,6 +8,7 @@ import type { Settings } from "../types";
 import { UnsavedChangesModal } from "../components/UnsavedChangesModal";
 import { revokeExtensionAccess } from "../api/vault";
 import { AccessibleDialog } from "../components/AccessibleDialog";
+import { UpdateNotification } from "../components/UpdateNotification";
 import { SecuritySettingsSection } from "../components/SecuritySettingsSection";
 import { SyncSettingsSection } from "../components/SyncSettingsSection";
 
@@ -20,6 +22,30 @@ const AUTO_LOCK_OPTIONS = [
 	{ label: "1 hour", value: 3600 },
 ];
 
+function formatCheckedTime(ts: number): string {
+	const at = new Date(ts);
+	return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+}
+
+/** Status line copy for the manual update check (null = nothing to report). */
+function updateCheckStatusText(
+	manualCheck: ManualCheckState,
+	appVersion: string | null,
+): string | null {
+	switch (manualCheck.phase) {
+		case "checking":
+			return "Checking for updates…";
+		case "available":
+			return `Update available: v${manualCheck.version} — use the banner above to install`;
+		case "uptodate":
+			return `You're up to date${appVersion ? ` (v${appVersion})` : ""} — checked ${manualCheck.checkedAt ? formatCheckedTime(manualCheck.checkedAt) : "just now"}`;
+		case "error":
+			return "Couldn't reach the update server — check your connection and try again";
+		default:
+			return null;
+	}
+}
+
 export function SettingsScreen() {
 	const { actions: authActions } = useAuth();
 	const { state, actions } = useSettings();
@@ -29,6 +55,7 @@ export function SettingsScreen() {
 	const [showUnsaved, setShowUnsaved] = useState(false);
 	const [showRevoke, setShowRevoke] = useState(false);
 	const [revoking, setRevoking] = useState(false);
+	const [appVersion, setAppVersion] = useState<string | null>(null);
 	const charsetValid =
 		settings.default_include_uppercase ||
 		settings.default_include_lowercase ||
@@ -44,6 +71,32 @@ export function SettingsScreen() {
 	useEffect(() => {
 		if (state.status === "success") setSettings(state.settings);
 	}, [state.settings, state.status]);
+
+	// Current app version for the Updates section ("Current version" row and
+	// the up-to-date hint). Dynamic import matches the repo's Tauri API usage.
+	useEffect(() => {
+		let cancelled = false;
+		import("@tauri-apps/api/app")
+			.then(({ getVersion }) => getVersion())
+			.then((version) => {
+				if (!cancelled) setAppVersion(version);
+			})
+			.catch(() => {
+				// Not in Tauri (tests / browser preview): keep the placeholder.
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	const manualCheck = state.manualCheck;
+	// Mirrors the checkForUpdates guards: no re-check while one is in flight
+	// or while an install is downloading / waiting for relaunch.
+	const updateCheckDisabled =
+		manualCheck.phase === "checking" ||
+		state.updatePhase === "downloading" ||
+		state.updatePhase === "ready";
+	const updateCheckStatus = updateCheckStatusText(manualCheck, appVersion);
 
 	useEffect(() => {
 		const warn = (event: BeforeUnloadEvent) => {
@@ -90,6 +143,20 @@ export function SettingsScreen() {
 	return (
 		<div className="generator-screen screen-shell">
 			<BackHeader title="Settings" onBack={handleBack} />
+
+			{/* Update banner reuses the same install flow as the vault screen.
+			    Mounted outside the disabled settings fieldset so its buttons
+			    stay clickable during a settings load/save. */}
+			{state.update && (
+				<UpdateNotification
+					version={state.update.version}
+					phase={state.updatePhase}
+					progress={state.downloadProgress}
+					onUpdate={() => void actions.installUpdate()}
+					onRelaunch={() => void actions.relaunchApp()}
+					onDismiss={() => actions.dismissUpdate()}
+				/>
+			)}
 
 			<div className="generator-content screen-scroll-region">
 				{(state.status === "idle" || state.status === "loading") && (
@@ -200,6 +267,25 @@ export function SettingsScreen() {
 								}
 							/>
 						</div>
+						<div className="option-row">
+							<span className="settings-hint">
+								Current version: {appVersion ?? "…"}
+							</span>
+							{/* Manual check: independent of the startup toggle above. */}
+							<button
+								type="button"
+								className="btn btn-secondary"
+								onClick={() => void actions.checkForUpdates()}
+								disabled={updateCheckDisabled}
+							>
+								{manualCheck.phase === "checking"
+									? "Checking…"
+									: "Check for updates"}
+							</button>
+						</div>
+						<p className="update-check-status" aria-live="polite">
+							{updateCheckStatus}
+						</p>
 					</div>
 
 					<div className="settings-divider" />

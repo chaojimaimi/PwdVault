@@ -84,3 +84,30 @@
 ## 问题报告格式
 
 每条：步骤编号（T#）+ 平台 + 实际 vs 预期 + 截图/录屏 + （可选）`RUST_LOG`/控制台输出。已知残余（§3 T10 备注、剪贴板根治延期）请标注"known"以便过滤。
+
+---
+
+# v1.2.2 验证小节（2026-10-06）
+
+## T21 Tags 输入框布局修复（components.css flex 行修复）
+
+1. 打开 Entries → 编辑任一条目，滚动到 Tags 区。
+2. 预期：输入框占满整行宽（不再塌缩为 ~50px 胶囊），占位符完整可见，输入字符实时可见。
+3. 输入文字后点击 Add → chip 正常生成并显示，输入框清空且仍占满行宽。
+
+## T22 设置页手动 "Check for updates"
+
+1. Settings → Updates 区：确认版本行（Current version: v…）与 Check for updates 按钮可见；按钮不受 "Check on startup" 开关状态影响（开关关闭时仍可点击）。
+2. 四态验证：
+   - 点击 Check → 按钮变 "Checking…" 且禁用，状态行显示 "Checking for updates…"；
+   - 有更新（本地 mock feed 或对照真实新版本）→ 页面顶部（Settings 标题栏下方）出现更新横幅，状态行 "Update available: vX.Y.Z — use the banner above to install"；横幅 Update now → 下载进度 → Relaunch 全流程可用，Dismiss 后横幅消失；
+   - 无更新 → 状态行 "You're up to date (v…) — checked HH:MM"，若此前有横幅则被清除；
+   - 断网（关 Wi-Fi / 防火墙拦截）→ 状态行 "Couldn't reach the update server — check your connection and try again"，恢复网络后可重试成功。
+3. 下载中（进度条）与就绪（Relaunch）两种状态下 Check 按钮均禁用。
+4. 回归：Vault 首页横幅行为不变（自动检查静默、dismiss 记忆仍生效——手动检查不受 dismiss 记忆影响属预期）。
+
+## T23 分组行两种形态
+
+1. Entries → 编辑条目 → Group 下拉形态：select 占满行宽，"New" 缩为内容宽度，同一行内比例正常。
+2. 点击 "New" → 内联新建形态：输入框占满行宽，Add / Cancel 为内容宽度按钮，三元素同一行；新建成功后回到 select 形态且自动选中新组。
+3. GroupManager 页内新建分组行不受本次修复影响（该页布局独立），正常增删改。

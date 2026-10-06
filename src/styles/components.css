@@ -155,6 +155,20 @@
   align-items: center;
 }
 
+/* Flex rows pairing an input with buttons: .btn's global width:100% (line ~36)
+   acts as the flex base size and starves the flex:1 input (basis 0, nothing
+   to grow into). Undo it inside these rows — the input owns the space. */
+.tag-input-row .btn,
+.group-selector-row .btn {
+  width: auto;
+  flex-shrink: 0;
+}
+
+.group-selector-row .form-input {
+  flex: 1;
+  min-width: 0;
+}
+
 .group-selector-error {
   margin-top: 0.25rem;
 }
@@ -896,6 +910,12 @@
   height: 100%;
   background: var(--color-primary);
   transition: width 0.2s ease;
+}
+
+/* Settings page manual-check status line (aria-live="polite"). */
+.update-check-status {
+  font-size: var(--text-label);
+  color: var(--color-text-muted);
 }
 
 /* --- Layout utilities --- */

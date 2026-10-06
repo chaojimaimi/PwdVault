@@ -13,6 +13,17 @@ import { useAuth } from './AuthContext';
 /** Banner lifecycle: offer → download (with progress) → ready to relaunch. */
 export type UpdatePhase = 'available' | 'downloading' | 'ready';
 
+/** Manual "Check for updates" button lifecycle (Settings page). */
+export type ManualCheckPhase = 'idle' | 'checking' | 'available' | 'uptodate' | 'error';
+
+export interface ManualCheckState {
+  phase: ManualCheckPhase;
+  /** Date.now() of the last completed check — powers the "checked HH:MM" hint. */
+  checkedAt: number | null;
+  /** Feed version when phase === 'available'. */
+  version?: string;
+}
+
 export interface SettingsState {
   settings: Settings;
   /** Update found by the plugin `check()`; null = up to date or silent. */
@@ -20,6 +31,8 @@ export interface SettingsState {
   updatePhase: UpdatePhase;
   /** Download progress 0-100 (only meaningful while phase is 'downloading'). */
   downloadProgress: number;
+  /** Result of the last explicit (button-triggered) update check. */
+  manualCheck: ManualCheckState;
   status: ResourceStatus;
   error: string | null;
 }
@@ -29,6 +42,7 @@ type SettingsAction =
   | { type: 'SET_UPDATE'; payload: { version: string } | null }
   | { type: 'SET_UPDATE_PHASE'; payload: UpdatePhase }
   | { type: 'SET_DOWNLOAD_PROGRESS'; payload: number }
+  | { type: 'SET_MANUAL_CHECK'; payload: ManualCheckState }
   | { type: 'SET_RESOURCE'; payload: { status: ResourceStatus; error?: string | null } }
   | { type: 'RESET' };
 
@@ -37,6 +51,7 @@ const initialSettingsState: SettingsState = {
   update: null,
   updatePhase: 'available',
   downloadProgress: 0,
+  manualCheck: { phase: 'idle', checkedAt: null },
   status: 'idle',
   error: null,
 };
@@ -56,6 +71,8 @@ function settingsReducer(state: SettingsState, action: SettingsAction): Settings
       return { ...state, updatePhase: action.payload };
     case 'SET_DOWNLOAD_PROGRESS':
       return { ...state, downloadProgress: action.payload };
+    case 'SET_MANUAL_CHECK':
+      return { ...state, manualCheck: action.payload };
     case 'SET_RESOURCE':
       return { ...state, status: action.payload.status, error: action.payload.error ?? null };
     case 'RESET':
@@ -75,6 +92,7 @@ export interface SettingsContextValue {
   actions: {
     loadSettings: () => Promise<void>;
     updateSettings: (settings: Settings) => Promise<void>;
+    checkForUpdates: () => Promise<void>;
     installUpdate: () => Promise<void>;
     relaunchApp: () => Promise<void>;
     dismissUpdate: () => void;
@@ -86,6 +104,12 @@ const DISMISSED_UPDATE_KEY = 'pwdvault_dismissed_update';
 
 /** D1.4: updater check timeout — a hung feed must not stall startup UX. */
 const UPDATE_CHECK_TIMEOUT_MS = 5000;
+
+/**
+ * Manual checks have a user actively waiting on the result, so the timeout
+ * is relaxed vs. the 5s startup check that must not block boot UX.
+ */
+const MANUAL_UPDATE_CHECK_TIMEOUT_MS = 15000;
 
 export const SettingsContext = createContext<SettingsContextValue | null>(null);
 
@@ -114,6 +138,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           void update.close().catch(() => {});
           return;
         }
+        // Close-before-overwrite, mirroring checkForUpdates: if a manual check
+        // already populated the ref, overwriting without close would leak the
+        // plugin handle. Concurrency policy (plan v1.2.2 §1.2.5): last writer
+        // wins; a transient null/error from either path clearing the banner is
+        // accepted — the user can always re-check for the latest fact.
+        const previous = updateRef.current;
+        if (previous) void previous.close().catch(() => {});
         updateRef.current = update;
         dispatch({ type: 'SET_UPDATE', payload: { version: update.version } });
       })
@@ -171,6 +202,56 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       }
     },
 
+    checkForUpdates: async () => {
+      // Guards: a check is already in flight, or an install is in progress.
+      // Re-checking mid-download would close the in-flight Update handle, and
+      // a re-check from 'ready' would flip a finished install back into a
+      // re-download. The manual button is the first path able to trigger a
+      // close during a download, so this is stopped at the action layer (the
+      // Settings button mirrors the same disabled conditions).
+      if (
+        state.manualCheck.phase === 'checking' ||
+        state.updatePhase === 'downloading' ||
+        state.updatePhase === 'ready'
+      ) {
+        return;
+      }
+      dispatch({ type: 'SET_MANUAL_CHECK', payload: { phase: 'checking', checkedAt: null } });
+      try {
+        const update = await check({ timeout: MANUAL_UPDATE_CHECK_TIMEOUT_MS });
+        if (update) {
+          // Explicit ask: bypass the dismissal memory (and never write it) —
+          // the user asked, so they get the full answer. The auto-path gate
+          // (checkedThisStartup) stays untouched — the two are orthogonal.
+          const previous = updateRef.current;
+          if (previous) void previous.close().catch(() => {});
+          updateRef.current = update;
+          dispatch({ type: 'SET_UPDATE', payload: { version: update.version } });
+          dispatch({
+            type: 'SET_MANUAL_CHECK',
+            payload: { phase: 'available', checkedAt: Date.now(), version: update.version },
+          });
+        } else {
+          // No update: the latest explicit fact overrides any stale banner.
+          const previous = updateRef.current;
+          updateRef.current = null;
+          if (previous) void previous.close().catch(() => {});
+          dispatch({ type: 'SET_UPDATE', payload: null });
+          dispatch({
+            type: 'SET_MANUAL_CHECK',
+            payload: { phase: 'uptodate', checkedAt: Date.now() },
+          });
+        }
+      } catch {
+        // Failure only means "this check found nothing reliable" — it must
+        // not overturn an existing banner/download state.
+        dispatch({
+          type: 'SET_MANUAL_CHECK',
+          payload: { phase: 'error', checkedAt: Date.now() },
+        });
+      }
+    },
+
     installUpdate: async () => {
       const update = updateRef.current;
       if (!update || state.updatePhase === 'downloading' || state.updatePhase === 'ready') return;
@@ -220,7 +301,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       }
       dispatch({ type: 'SET_UPDATE', payload: null });
     },
-  }), [dispatch, state.update, state.updatePhase]);
+  }), [dispatch, state.update, state.updatePhase, state.manualCheck]);
 
   const value = useMemo(() => ({ state, dispatch, actions }), [state, dispatch, actions]);
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
