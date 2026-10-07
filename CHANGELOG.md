@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [1.2.4] - 2026-10-07
+
+### Security
+
+- Pair-confirmation requests now share the pairing rate-limit budget
+  (10/min combined), closing the prompt-bombing gap that let
+  `pair_confirm` bypass the pair throttle.
+
+### Fixed
+
+- Tag change detection is no longer order-sensitive — reordering tags
+  in the entry editor no longer marks the entry dirty.
+- The content-script entry filter matches scheme-less entry URLs the
+  same way the popup does, so such entries now appear for sender-driven
+  autofill too (empty entry URLs remain intentionally excluded).
+
+### Internal
+
+- Audit-polish batch: defensive debug-assert on the sync secrets
+  invariant at its production call site; 12 over-wide `pub` items
+  narrowed; dead types/exports removed (EncryptedData, VaultState,
+  EntryScreen default export, searchEntries alias, context-object
+  exports); the redundant POST debug-assert, join-error wording, and
+  entity import paths were cleaned up.
+- Settings: the Updates section is now its own component; the
+  SettingsScreen shrinks to 408 lines.
+- CI: `cargo audit` falls back to the offline advisory DB when the
+  fetch fails (the release gate stays fail-closed); SHA256SUMS is now
+  minisign-signed with the updater key and the signature ships as a
+  release asset.
+- Repo hygiene: obsolete CLAUDE.md removed, the historical audit
+  snapshot moved to docs/, empty .conductor/ deleted.
+
 ## [1.2.3] - 2026-10-07
 
 ### Security
