@@ -368,7 +368,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           cargo install --locked tauri-cli --version ^2
-          tauri signer sign SHA256SUMS
+          cargo tauri signer sign SHA256SUMS
 
       - name: Generate Rust SBOM (CycloneDX)
         continue-on-error: true
