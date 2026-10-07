@@ -1,6 +1,6 @@
 [package]
 name = "pwdvault"
-version = "1.2.4"
+version = "1.3.0"
 description = "A secure, local-first password manager"
 authors = ["andylee"]
 license = "MIT"
@@ -58,7 +58,11 @@ tauri-plugin-process = "2.3.1"
 
 [dev-dependencies]
 tempfile = "3"
-bincode = "1"
+# Pinned to 2.0.x (not "2"): legacy (bincode 1-compatible) disk format is
+# only guaranteed for the 2.0 series — golden byte fixtures in
+# pwdvault-infrastructure guard it. Dev-only: tests/benches serialize
+# fixtures via the infrastructure bc_serialize/bc_deserialize seam.
+bincode = { version = "2.0", features = ["serde"] }
 redb = "2"
 # tauri "test" feature provides mock_app()/mock_builder() so IPC command
 # wrappers (which need a managed State) can be unit tested. Dev-only: the

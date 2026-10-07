@@ -24,8 +24,8 @@ use crate::service::sync::{entries_to_sync, sync_to_entry, SyncEntry, SyncGroup,
 use crate::service::vault::get_db;
 use crate::{AppState, VaultError};
 use pwdvault_infrastructure::crypto::{
-    decrypt, decrypt_with_aad, encrypt_with_aad, wrap_secret, EncryptedData, SecretKey, KEY_SIZE,
-    WRAP_AAD_SYNC,
+    bc_deserialize, bc_serialize, decrypt, decrypt_with_aad, encrypt_with_aad, wrap_secret,
+    EncryptedData, SecretKey, KEY_SIZE, WRAP_AAD_SYNC,
 };
 use pwdvault_infrastructure::database::{
     self,
@@ -367,7 +367,7 @@ pub(super) struct LocalRows {
 /// `zeroize()` of the original. On a UTF-8 rejection the raw bytes are wiped
 /// before the error escapes.
 fn decrypt_inner(enc: &[u8; KEY_SIZE], blob: &[u8]) -> Result<String, VaultError> {
-    let sealed: EncryptedData = bincode::deserialize(blob)
+    let sealed: EncryptedData = bc_deserialize(blob)
         .or_else(|_| EncryptedData::from_bytes(blob))
         .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
     match String::from_utf8(decrypt(enc, &sealed)?) {
@@ -599,8 +599,7 @@ fn sync_row_corrupt(row_key: &str, detail: impl std::fmt::Display) -> VaultError
 /// row-key AAD (SEC-L2; the sealed-row pattern of `save_entry_in_txn`).
 fn seal_sync_row(enc: &[u8; KEY_SIZE], row_key: &str, json: &[u8]) -> Result<Vec<u8>, VaultError> {
     let sealed = encrypt_with_aad(enc, json, &sync_row_aad(row_key))?;
-    let encoded =
-        bincode::serialize(&sealed).map_err(|e| VaultError::InternalError(e.to_string()))?;
+    let encoded = bc_serialize(&sealed).map_err(|e| VaultError::InternalError(e.to_string()))?;
     let mut row = SYNC_ROW_ENC_PREFIX.to_vec();
     row.extend_from_slice(&encoded);
     Ok(row)
@@ -622,7 +621,7 @@ fn parse_sync_row<T: serde::de::DeserializeOwned>(
     bytes: &[u8],
 ) -> Result<(T, bool), VaultError> {
     if let Some(encoded) = bytes.strip_prefix(SYNC_ROW_ENC_PREFIX) {
-        let sealed: EncryptedData = bincode::deserialize(encoded)
+        let sealed: EncryptedData = bc_deserialize(encoded)
             .or_else(|_| EncryptedData::from_bytes(encoded))
             .map_err(|e| sync_row_corrupt(row_key, e))?;
         let plain = decrypt_with_aad(enc, &sealed, &sync_row_aad(row_key))

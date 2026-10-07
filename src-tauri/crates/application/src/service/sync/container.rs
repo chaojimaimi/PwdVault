@@ -30,9 +30,9 @@ use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
 
 use pwdvault_infrastructure::crypto::{
-    decrypt_with_aad, derive_key, derive_key_with_params, encrypt_with_aad, generate_salt,
-    generate_wrap_key, unwrap_secret, wrap_secret, AdaptiveParams, EncryptedData, KEY_SIZE,
-    SALT_SIZE, WRAP_AAD_CONTAINER,
+    bc_serialize, decrypt_with_aad, derive_key, derive_key_with_params, encrypt_with_aad,
+    generate_salt, generate_wrap_key, unwrap_secret, wrap_secret, AdaptiveParams, EncryptedData,
+    KEY_SIZE, SALT_SIZE, WRAP_AAD_CONTAINER,
 };
 
 use super::{SyncEntry, SyncGroup, SyncSnapshot};
@@ -235,14 +235,14 @@ pub fn reseal_snapshot(
 /// devices must run the same container format version (the container
 /// `version` field gates cross-version sync, P3.8).
 pub fn entry_fingerprint(entry: &SyncEntry) -> [u8; 32] {
-    let encoded = bincode::serialize(entry)
+    let encoded = bc_serialize(entry)
         .expect("SyncEntry bincode encoding is infallible (no maps, no non-string keys)");
     Sha256::digest(&encoded).into()
 }
 
 /// Same fingerprint rule for groups (LWW tiebreak in [`super::merge`]).
 pub(super) fn group_fingerprint(group: &SyncGroup) -> [u8; 32] {
-    let encoded = bincode::serialize(group)
+    let encoded = bc_serialize(group)
         .expect("SyncGroup bincode encoding is infallible (no maps, no non-string keys)");
     Sha256::digest(&encoded).into()
 }
@@ -537,5 +537,133 @@ mod tests {
             decrypt_snapshot_with_cek(b"junk", &cek),
             Err(ContainerError::InvalidContainer)
         ));
+    }
+}
+
+/// Golden byte fixtures pinning the LWW tiebreak fingerprint inputs.
+///
+/// **Provenance**: the `*_HEX` constants were produced by **bincode 1.3.3**
+/// on `main @ b9185a2` (v1.2.4) via `bincode::serialize`, captured BEFORE
+/// the v1.3.0 bincode 1 → 2 dependency swap. [`entry_fingerprint`] /
+/// [`group_fingerprint`] are SHA-256 over exactly these bytes, so a device
+/// running bincode 2 and a device still running bincode 1 must agree on them
+/// or the D3 LWW tiebreak becomes inconsistent across a sync pair.
+///
+/// **These tests are the cross-version fingerprint tripwire.** If upgrading
+/// bincode 2.x (or the `bc_serialize`/`bc_deserialize` config) makes any of
+/// them red, the legacy byte semantics have drifted and the fingerprint of
+/// the same logical entry would change across app versions — any such change
+/// MUST be evaluated for tiebreak compatibility in the same commit.
+#[cfg(test)]
+mod bincode_golden {
+    use pwdvault_infrastructure::crypto::{bc_deserialize, bc_serialize};
+
+    use super::{SyncEntry, SyncGroup};
+
+    /// All-empty / all-`None` `SyncEntry`.
+    const SYNC_ENTRY_MINIMAL_HEX: &str = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+    /// Fully populated `SyncEntry`: UTF-8 fields, password/notes/totp/group
+    /// set, tombstone, `updated_at = i64::MAX`.
+    const SYNC_ENTRY_FULL_UTF8_HEX: &str = "140000000000000073796e632d656e7472792d757569642df09f94901200000000000000e5908ce6ada5e69da1e79bae2d456e74727901240000000000000068747470733a2f2f73796e632e6578616d706c652e6a702fe383ade382b0e382a4e383b3150000000000000073796e632d75736572406578616d706c652e636f6d010f0000000000000070407373773072642de5af86e7a0810119000000000000006e6f74652d776974682de5a49ae5ad97e88a822d6368617273012b000000000000006f7470617574683a2f2f746f74702f746573743f7365637265743d4a425357593344504548504b335058500200000000000000040000000000000073796e630600000000000000e5908ce6ada5010c0000000000000073796e632d67726f75702d3100f1536500000000ffffffffffffff7f011018546500000000";
+
+    /// All-empty / all-`None` `SyncGroup`.
+    const SYNC_GROUP_MINIMAL_HEX: &str =
+        "000000000000000000000000000000000000000000000000000000000000000000";
+
+    /// `SyncGroup` with UTF-8 id/name, `created_at = i64::MIN`, tombstone
+    /// `i64::MAX`.
+    const SYNC_GROUP_FULL_EXTREMES_HEX: &str = "140000000000000073796e632d67726f75702d757569642df09f8f861200000000000000e5908ce6ada5e58886e7bb842f47726f7570000000000000008000f153650000000001ffffffffffffff7f";
+
+    fn decode_hex(s: &str) -> Vec<u8> {
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("fixture hex is well-formed"))
+            .collect()
+    }
+
+    /// Byte-exact reproduction + round-trip equality (these types derive
+    /// `PartialEq`, so direct comparison works).
+    fn assert_golden<
+        T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug,
+    >(
+        hex_fixture: &str,
+        value: &T,
+    ) {
+        let bytes = decode_hex(hex_fixture);
+        assert_eq!(
+            bc_serialize(value).expect("bc_serialize is infallible for these shapes"),
+            bytes,
+            "serialized bytes diverge from the bincode 1.3.3 golden fixture — \
+             LWW tiebreak fingerprint drift, see bincode_golden module docs"
+        );
+        let decoded: T =
+            bc_deserialize(&bytes).expect("golden fixture must deserialize via bc_deserialize");
+        assert_eq!(
+            decoded, *value,
+            "fixture did not round-trip to an equal value"
+        );
+    }
+
+    #[test]
+    fn sync_entry_minimal() {
+        let entry = SyncEntry {
+            id: String::new(),
+            title: String::new(),
+            url: None,
+            username: String::new(),
+            password: None,
+            notes: None,
+            totp_secret: None,
+            tags: vec![],
+            group_id: None,
+            created_at: 0,
+            updated_at: 0,
+            deleted_at: None,
+        };
+        assert_golden(SYNC_ENTRY_MINIMAL_HEX, &entry);
+    }
+
+    #[test]
+    fn sync_entry_full_utf8() {
+        let entry = SyncEntry {
+            id: "sync-entry-uuid-🔐".to_string(),
+            title: "同步条目-Entry".to_string(),
+            url: Some("https://sync.example.jp/ログイン".to_string()),
+            username: "sync-user@example.com".to_string(),
+            password: Some("p@ssw0rd-密码".to_string()),
+            notes: Some("note-with-多字节-chars".to_string()),
+            totp_secret: Some("otpauth://totp/test?secret=JBSWY3DPEHPK3PXP".to_string()),
+            tags: vec!["sync".to_string(), "同步".to_string()],
+            group_id: Some("sync-group-1".to_string()),
+            created_at: 1700000000,
+            updated_at: i64::MAX,
+            deleted_at: Some(1700010000),
+        };
+        assert_golden(SYNC_ENTRY_FULL_UTF8_HEX, &entry);
+    }
+
+    #[test]
+    fn sync_group_minimal() {
+        let group = SyncGroup {
+            id: String::new(),
+            name: String::new(),
+            created_at: 0,
+            updated_at: 0,
+            deleted_at: None,
+        };
+        assert_golden(SYNC_GROUP_MINIMAL_HEX, &group);
+    }
+
+    #[test]
+    fn sync_group_full_extremes() {
+        let group = SyncGroup {
+            id: "sync-group-uuid-🏆".to_string(),
+            name: "同步分组/Group".to_string(),
+            created_at: i64::MIN,
+            updated_at: 1700000000,
+            deleted_at: Some(i64::MAX),
+        };
+        assert_golden(SYNC_GROUP_FULL_EXTREMES_HEX, &group);
     }
 }

@@ -9,11 +9,18 @@
 # See docs/SECURITY-ADVISORY-ALLOWLIST.md for the full rationale table.
 db-urls = ["https://github.com/RustSec/advisory-db"]
 ignore = [
-    # bincode 1.x — unmaintained but no drop-in replacement available; used
-    # for redb value serialization. Tracked for migration to bincode 2 or
-    # postcard in a future release. Expiry tracked in
-    # docs/SECURITY-ADVISORY-ALLOWLIST.md (2026-12-31).
-    { id = "RUSTSEC-2025-0141", reason = "bincode 1.x unmaintained; no drop-in replacement yet; migration planned" },
+    # bincode — RUSTSEC-2025-0141 is a CRATE-LEVEL advisory ("unmaintained",
+    # no patched version): it covers 1.x AND 2.x, so the v1.3.0 swap to
+    # bincode 2.0.1 (final released API) does NOT clear it. Kept on the
+    # allowlist because v1.3.0 landed the end-state 2.0.1 API plus a golden
+    # byte-fixture guardrail (database/bincode_golden.rs + the sync
+    # container fingerprint fixtures) and a single serialization seam
+    # (crypto::codec bc_serialize/bc_deserialize) — migrating to postcard,
+    # the only real advisory-clearing path, now touches that seam alone.
+    # Re-evaluate when: bincode gets an actual CVE, or the next
+    # format-level development starts. Routine review: 2027-10. Tracked in
+    # docs/SECURITY-ADVISORY-ALLOWLIST.md.
+    { id = "RUSTSEC-2025-0141", reason = "bincode unmaintained (crate-level, covers 2.x); on bincode 2.0.1 final API with golden-byte guardrail and single serialization seam; postcard migration only changes the seam" },
 ]
 # Transitive unmaintained crates are reported as warnings. Direct workspace
 # dependencies remain blocking unless explicitly reviewed above.

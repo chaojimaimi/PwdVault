@@ -45,7 +45,7 @@ use std::collections::HashMap;
 use std::mem;
 
 use pwdvault_domain::validation::normalize_url;
-use pwdvault_infrastructure::crypto::{encrypt, KEY_SIZE};
+use pwdvault_infrastructure::crypto::{bc_serialize, encrypt, KEY_SIZE};
 use pwdvault_infrastructure::database::PasswordEntry;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -183,7 +183,7 @@ pub fn sync_to_entry(
         enc_key,
         entry.password.as_deref().unwrap_or_default().as_bytes(),
     )?;
-    sealed.encrypted_password = bincode::serialize(&encrypted_password)
+    sealed.encrypted_password = bc_serialize(&encrypted_password)
         .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
     sealed.encrypted_notes = match notes {
         Some(notes) => Some(seal_inner(enc_key, &notes)?),
@@ -204,18 +204,18 @@ pub fn sync_to_entry(
 /// Encrypt one inner string field to its stored blob form.
 fn seal_inner(enc_key: &[u8; KEY_SIZE], plain: &str) -> Result<Vec<u8>, VaultError> {
     let encrypted = encrypt(enc_key, plain.as_bytes())?;
-    bincode::serialize(&encrypted).map_err(|e| VaultError::EncryptionFailed(e.to_string()))
+    bc_serialize(&encrypted).map_err(|e| VaultError::EncryptionFailed(e.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pwdvault_infrastructure::crypto::{decrypt, EncryptedData};
+    use pwdvault_infrastructure::crypto::{bc_deserialize, decrypt, EncryptedData};
 
     const ENC_KEY: [u8; KEY_SIZE] = [7; KEY_SIZE];
 
     fn decrypt_inner(blob: &[u8]) -> String {
-        let encrypted: EncryptedData = bincode::deserialize(blob).unwrap();
+        let encrypted: EncryptedData = bc_deserialize(blob).unwrap();
         String::from_utf8(decrypt(&ENC_KEY, &encrypted).unwrap()).unwrap()
     }
 

@@ -7,6 +7,8 @@
 
 use redb::{Database, WriteTransaction};
 
+use crate::crypto::bc_serialize;
+
 use super::integrity;
 use super::{DatabaseError, Group, PasswordEntry, ENTRIES_TABLE, GROUPS_TABLE, SETTINGS_TABLE};
 
@@ -117,7 +119,7 @@ pub fn save_verification_data_in_txn(
     data: &super::super::crypto::VerificationData,
 ) -> Result<(), DatabaseError> {
     let encoded =
-        bincode::serialize(data).map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
+        bc_serialize(data).map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
     let mut table = txn.open_table(super::VAULT_TABLE)?;
     table.insert("verification", encoded.as_slice())?;
     Ok(())

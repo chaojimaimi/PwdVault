@@ -10,7 +10,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::{decrypt_with_aad, encrypt_with_aad, EncryptedData};
+use crate::crypto::{
+    bc_deserialize, bc_serialize, decrypt_with_aad, encrypt_with_aad, EncryptedData,
+};
 use crate::database::{DatabaseError, VAULT_TABLE};
 use redb::{Database, WriteTransaction};
 
@@ -73,23 +75,23 @@ impl VaultHeader {
 
     /// Serialize and encrypt the header with enc_key.
     pub(crate) fn seal(&self, enc_key: &[u8; 32]) -> Result<Vec<u8>, DatabaseError> {
-        let plain = bincode::serialize(self)
-            .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
+        let plain =
+            bc_serialize(self).map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
         let aad = b"vault_header";
         let enc = encrypt_with_aad(enc_key, &plain, aad)
             .map_err(|e| DatabaseError::EncryptionError(e.to_string()))?;
-        bincode::serialize(&enc).map_err(|e| DatabaseError::SerializationError(e.to_string()))
+        bc_serialize(&enc).map_err(|e| DatabaseError::SerializationError(e.to_string()))
     }
 
     /// Decrypt and deserialize the header from a stored blob.
     pub fn open(blob: &[u8], enc_key: &[u8; 32]) -> Result<Self, DatabaseError> {
         crate::database::check_encoded_blob_size(blob)?;
-        let enc: EncryptedData = bincode::deserialize(blob)
-            .map_err(|e| DatabaseError::DeserializationError(e.to_string()))?;
+        let enc: EncryptedData =
+            bc_deserialize(blob).map_err(|e| DatabaseError::DeserializationError(e.to_string()))?;
         let aad = b"vault_header";
         let plain = decrypt_with_aad(enc_key, &enc, aad)
             .map_err(|e| DatabaseError::DecryptionError(e.to_string()))?;
-        bincode::deserialize(&plain).map_err(|e| DatabaseError::DeserializationError(e.to_string()))
+        bc_deserialize(&plain).map_err(|e| DatabaseError::DeserializationError(e.to_string()))
     }
 }
 

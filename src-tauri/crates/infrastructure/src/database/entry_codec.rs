@@ -23,7 +23,9 @@
 
 use serde::Deserialize;
 
-use crate::crypto::{decrypt, decrypt_with_aad, encrypt_with_aad, EncryptedData};
+use crate::crypto::{
+    bc_deserialize, bc_serialize, decrypt, decrypt_with_aad, encrypt_with_aad, EncryptedData,
+};
 
 use super::{DatabaseError, PasswordEntry};
 
@@ -63,11 +65,11 @@ fn entry_aad(entry_id: &str) -> Vec<u8> {
 /// AAD / v1 / plaintext migration) read records that may use either layout,
 /// so they must all route through this helper.
 fn decode_entry_plain(plain: &[u8]) -> Result<PasswordEntry, DatabaseError> {
-    if let Ok(entry) = bincode::deserialize::<PasswordEntry>(plain) {
+    if let Ok(entry) = bc_deserialize::<PasswordEntry>(plain) {
         return Ok(entry);
     }
-    let legacy: LegacyEntryV2 = bincode::deserialize(plain)
-        .map_err(|e| DatabaseError::DeserializationError(e.to_string()))?;
+    let legacy: LegacyEntryV2 =
+        bc_deserialize(plain).map_err(|e| DatabaseError::DeserializationError(e.to_string()))?;
     Ok(PasswordEntry {
         id: legacy.id,
         title: legacy.title,
@@ -88,11 +90,11 @@ fn decode_entry_plain(plain: &[u8]) -> Result<PasswordEntry, DatabaseError> {
 /// Serialize and encrypt a PasswordEntry with AAD (§5.1.4 record format v2).
 pub fn seal_entry(entry: &PasswordEntry, key: &[u8; 32]) -> Result<Vec<u8>, DatabaseError> {
     let plain =
-        bincode::serialize(entry).map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
+        bc_serialize(entry).map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
     let aad = entry_aad(&entry.id);
     let enc = encrypt_with_aad(key, &plain, &aad)
         .map_err(|e| DatabaseError::EncryptionError(e.to_string()))?;
-    bincode::serialize(&enc).map_err(|e| DatabaseError::SerializationError(e.to_string()))
+    bc_serialize(&enc).map_err(|e| DatabaseError::SerializationError(e.to_string()))
 }
 
 /// Decrypt and deserialize a stored PasswordEntry blob.
@@ -118,7 +120,7 @@ pub fn open_entry(
 ) -> Result<PasswordEntry, DatabaseError> {
     super::check_encoded_blob_size(blob)?;
     // Try v2 (AAD) first.
-    if let Ok(enc) = bincode::deserialize::<EncryptedData>(blob) {
+    if let Ok(enc) = bc_deserialize::<EncryptedData>(blob) {
         let aad = entry_aad(entry_id);
         if let Ok(plain) = decrypt_with_aad(key, &enc, &aad) {
             return decode_entry_plain(&plain);
@@ -145,7 +147,7 @@ pub fn is_encrypted(blob: &[u8]) -> bool {
     if super::check_encoded_blob_size(blob).is_err() {
         return false;
     }
-    bincode::deserialize::<EncryptedData>(blob).is_ok()
+    bc_deserialize::<EncryptedData>(blob).is_ok()
 }
 
 #[cfg(test)]
@@ -188,7 +190,7 @@ mod tests {
             group_id: Some("group-7".to_string()),
         };
         let id = fixture.id.clone();
-        (id, bincode::serialize(&fixture).unwrap())
+        (id, bc_serialize(&fixture).unwrap())
     }
 
     /// Channel 3 (pre-v1.0.5 plaintext migration path): a legacy-layout
@@ -215,7 +217,7 @@ mod tests {
         aad.extend_from_slice(id.as_bytes());
         aad.extend_from_slice(&ENTRY_RECORD_FORMAT_VERSION.to_le_bytes());
         let enc = encrypt_with_aad(&TEST_KEY, &legacy, &aad).unwrap();
-        let blob = bincode::serialize(&enc).unwrap();
+        let blob = bc_serialize(&enc).unwrap();
 
         let entry = open_entry(&blob, &TEST_KEY, &id, false).unwrap();
         assert_eq!(entry.title, "Legacy Site");
@@ -228,7 +230,7 @@ mod tests {
     fn legacy_layout_in_v1_channel_reads_with_new_fields_none() {
         let (id, legacy) = legacy_blob();
         let enc = encrypt(&TEST_KEY, &legacy).unwrap();
-        let blob = bincode::serialize(&enc).unwrap();
+        let blob = bc_serialize(&enc).unwrap();
 
         let entry = open_entry(&blob, &TEST_KEY, &id, false).unwrap();
         assert_eq!(entry.title, "Legacy Site");

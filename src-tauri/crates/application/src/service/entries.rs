@@ -6,7 +6,9 @@ use crate::{
     validation, AppState, CreateEntryRequest, EntrySecretResponse, EntrySummary,
     UpdateEntryRequest, VaultError,
 };
-use pwdvault_infrastructure::crypto::{decrypt, encrypt, EncryptedData};
+use pwdvault_infrastructure::crypto::{
+    bc_deserialize, bc_serialize, decrypt, encrypt, EncryptedData,
+};
 use pwdvault_infrastructure::database;
 use pwdvault_infrastructure::database::{
     list_all_entries_bulk, load_entry, vault_store, PasswordEntry,
@@ -36,13 +38,13 @@ pub fn create_entry(
     // Encrypt password and notes BEFORE opening the write transaction,
     // so crypto failures roll back cleanly without holding the write lock.
     let encrypted_password = encrypt(key, request.password.as_bytes())?;
-    let encrypted_password_bytes = bincode::serialize(&encrypted_password)
+    let encrypted_password_bytes = bc_serialize(&encrypted_password)
         .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
 
     let encrypted_notes = if let Some(notes) = &request.notes {
         let encrypted = encrypt(key, notes.as_bytes())?;
-        let bytes = bincode::serialize(&encrypted)
-            .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
+        let bytes =
+            bc_serialize(&encrypted).map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
         Some(bytes)
     } else {
         None
@@ -99,10 +101,10 @@ pub fn get_entry_secret(
     }
 
     // Decrypt password. Try bincode format first (v1.0.5+ and v1.0.4 both use
-    // bincode::serialize(EncryptedData)), then fall back to raw bytes
+    // bc_serialize(EncryptedData)), then fall back to raw bytes
     // (nonce||ciphertext) just in case an older build used to_bytes().
-    let encrypted_password: EncryptedData = bincode::deserialize(&entry.encrypted_password)
-        .or_else(|e| {
+    let encrypted_password: EncryptedData =
+        bc_deserialize(&entry.encrypted_password).or_else(|e| {
             EncryptedData::from_bytes(&entry.encrypted_password)
                 .map_err(|e2| VaultError::DecryptionFailed(format!("bincode: {} / raw: {}", e, e2)))
         })?;
@@ -114,12 +116,10 @@ pub fn get_entry_secret(
 
     // Decrypt notes if present
     let notes = if let Some(encrypted_notes_bytes) = &entry.encrypted_notes {
-        let encrypted: EncryptedData =
-            bincode::deserialize(encrypted_notes_bytes).or_else(|e| {
-                EncryptedData::from_bytes(encrypted_notes_bytes).map_err(|e2| {
-                    VaultError::DecryptionFailed(format!("bincode: {} / raw: {}", e, e2))
-                })
-            })?;
+        let encrypted: EncryptedData = bc_deserialize(encrypted_notes_bytes).or_else(|e| {
+            EncryptedData::from_bytes(encrypted_notes_bytes)
+                .map_err(|e2| VaultError::DecryptionFailed(format!("bincode: {} / raw: {}", e, e2)))
+        })?;
         let mut notes_bytes = decrypt(key, &encrypted)?;
         let notes_str = Zeroizing::new(
             String::from_utf8(notes_bytes.clone())
@@ -208,7 +208,7 @@ pub fn update_entry<R: Into<UpdateEntryRequest>>(
     // Only replace sensitive fields explicitly included in the patch.
     if let Some(password) = &request.password {
         let encrypted_password = encrypt(key, password.as_bytes())?;
-        entry.encrypted_password = bincode::serialize(&encrypted_password)
+        entry.encrypted_password = bc_serialize(&encrypted_password)
             .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
     }
 
@@ -217,7 +217,7 @@ pub fn update_entry<R: Into<UpdateEntryRequest>>(
         entry.encrypted_notes = if let Some(notes) = &request.notes {
             let encrypted = encrypt(key, notes.as_bytes())?;
             Some(
-                bincode::serialize(&encrypted)
+                bc_serialize(&encrypted)
                     .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?,
             )
         } else {
@@ -234,7 +234,7 @@ pub fn update_entry<R: Into<UpdateEntryRequest>>(
         } else {
             let encrypted = encrypt(key, totp_secret.as_bytes())?;
             Some(
-                bincode::serialize(&encrypted)
+                bc_serialize(&encrypted)
                     .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?,
             )
         };

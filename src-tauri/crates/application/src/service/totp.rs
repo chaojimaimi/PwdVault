@@ -10,7 +10,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::service::vault::get_db;
 use crate::{validation, AppState, TotpCodeResponse, VaultError};
-use pwdvault_infrastructure::crypto::{decrypt, EncryptedData};
+use pwdvault_infrastructure::crypto::{bc_deserialize, decrypt, EncryptedData};
 use pwdvault_infrastructure::database::load_entry;
 use pwdvault_infrastructure::totp::{
     base32_decode, parse_otpauth_uri, totp_code as generate_code, TotpAlgorithm, DEFAULT_DIGITS,
@@ -70,7 +70,7 @@ pub fn totp_code(state: &Arc<AppState>, id: String) -> Result<TotpCodeResponse, 
 
     // Same resilient shape as the password/notes reads: bincode(EncryptedData)
     // first, raw nonce||ciphertext fallback for historical layouts.
-    let encrypted: EncryptedData = bincode::deserialize(sealed_bytes).or_else(|e| {
+    let encrypted: EncryptedData = bc_deserialize(sealed_bytes).or_else(|e| {
         EncryptedData::from_bytes(sealed_bytes)
             .map_err(|e2| VaultError::DecryptionFailed(format!("bincode: {} / raw: {}", e, e2)))
     })?;

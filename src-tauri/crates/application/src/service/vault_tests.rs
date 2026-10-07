@@ -30,7 +30,7 @@ fn create_modern_vault(entry_count: usize) -> ModernVault {
         let mut entry =
             database::PasswordEntry::new(format!("Entry {index}"), None, format!("user-{index}"));
         let encrypted = crypto::encrypt(&enc_key, format!("secret-{index}").as_bytes()).unwrap();
-        entry.encrypted_password = bincode::serialize(&encrypted).unwrap();
+        entry.encrypted_password = bc_serialize(&encrypted).unwrap();
         entry_ids.push(entry.id.clone());
         entries.push(entry);
     }
@@ -398,7 +398,241 @@ fn init_vault_refuses_to_overwrite_existing_verification_row() {
         let db = redb::Database::open(&db_path).unwrap();
         database::load_verification_data(&db).unwrap().unwrap()
     };
-    let before = bincode::serialize(&row_before).unwrap();
-    let after = bincode::serialize(&row_after).unwrap();
+    let before = bc_serialize(&row_before).unwrap();
+    let after = bc_serialize(&row_after).unwrap();
     assert_eq!(before, after, "verification row bytes must not change");
+}
+
+// ---------------------------------------------------------------------------
+// v1.3.0 bincode 1→2 swap — full-chain round-trip over the shipped legacy
+// fixture generations (DoD #5).
+// ---------------------------------------------------------------------------
+
+/// The whole service chain across every on-disk byte generation this app has
+/// shipped: build fixture → (explicit migration for the headerless
+/// generation) → unlock → read → write → re-read → sync rows (PVSYNC1) →
+/// change password → re-read. Proves the bincode 2 `bc_serialize` /
+/// `bc_deserialize` seam reads, re-seals and rotates every historical layout
+/// without a single `bincode 1` call.
+#[test]
+fn legacy_fixtures_full_chain_round_trip() {
+    use crate::service::sync::backend::MockCloudBackend;
+    use crate::service::sync::engine::{
+        sync_connect_with_backend, sync_now_with_backend, SyncBackendKind, SyncConfig,
+    };
+    use crate::service::sync::state_io::{SYNC_CONFIG_BLOB_KEY, SYNC_ROW_ENC_PREFIX};
+    use crate::{change_password, create_entry, get_entry_secret, list_all_entries};
+    use pwdvault_infrastructure::keychain::{MemorySecretStore, SecretStore};
+
+    let new_password = "brand-new-chain-password";
+    let fixture_password = crate::fixtures::FIXTURE_PASSWORD;
+
+    // ---- Leg 1: pre-v1.0.5 raw-blob fixture (oldest generation). ----
+    let (_dir, db_path, _) = crate::fixtures::create_pre_v1_0_5(2);
+    let db = Arc::new(redb::Database::open(&db_path).unwrap());
+    let verification = database::load_verification_data(&db).unwrap().unwrap();
+    let state = Arc::new(AppState {
+        secret_store: Arc::new(MemorySecretStore::new()) as Arc<dyn SecretStore>,
+        sync_secret_store: Arc::new(MemorySecretStore::new()) as Arc<dyn SecretStore>,
+        ..AppState::default()
+    });
+    *state.database.lock().unwrap() = Some(Arc::clone(&db));
+    *state.verification_data.lock().unwrap() = Some(verification.clone());
+
+    // The headerless legacy vault refuses plain unlock; migrate explicitly.
+    assert!(matches!(
+        unlock_vault(&state, Zeroizing::new(fixture_password.to_string())),
+        Err(VaultError::LegacyVaultRequiresMigration)
+    ));
+    let (master_key, _) = crypto::kdf::derive_key_with_params(
+        fixture_password,
+        &verification.salt,
+        &verification.params,
+    )
+    .unwrap();
+    let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &verification.salt);
+    migrate_database(&db, &master_key, &enc_key, &mac_key).unwrap();
+    assert!(unlock_vault(&state, Zeroizing::new(fixture_password.to_string())).unwrap());
+
+    // READ: legacy raw-blob rows decrypt through the new seam.
+    let listed = list_all_entries(&state).unwrap();
+    assert_eq!(listed.len(), 2);
+    let legacy_id = listed
+        .iter()
+        .find(|entry| entry.title == "Legacy Entry 0")
+        .unwrap()
+        .id
+        .clone();
+    assert_eq!(
+        get_entry_secret(&state, legacy_id.clone())
+            .unwrap()
+            .password
+            .to_string(),
+        "legacy-password-0"
+    );
+
+    // WRITE + RE-READ: a fresh entry lands in the current format.
+    let new_id = create_entry(
+        &state,
+        crate::CreateEntryRequest {
+            title: "Chain New Entry".to_string(),
+            url: Some("https://chain.example.test".to_string()),
+            username: "chain-user".to_string(),
+            password: Zeroizing::new("chain-secret-新".to_string()),
+            notes: Some("chain notes".to_string()),
+            tags: vec!["chain".to_string()],
+            group_id: None,
+        },
+    )
+    .unwrap()
+    .id;
+    let fresh = get_entry_secret(&state, new_id.clone()).unwrap();
+    assert_eq!(fresh.password.to_string(), "chain-secret-新");
+    assert_eq!(fresh.notes.as_ref().unwrap().to_string(), "chain notes");
+
+    // SYNC: connecting seals a PVSYNC1 row next to the migrated legacy rows.
+    let cloud = MockCloudBackend::new();
+    sync_connect_with_backend(
+        &state,
+        &cloud,
+        SyncConfig {
+            enabled: true,
+            backend: SyncBackendKind::Webdav,
+            server_url: "https://dav.example.com/dav".to_string(),
+            remote_dir: "PwdVault".to_string(),
+            username: "chain@example.com".to_string(),
+        },
+        Zeroizing::new("container-passphrase".to_string()),
+        None,
+    )
+    .unwrap();
+    let sync_row = {
+        let db_ref = get_db(&state).unwrap();
+        let txn = db_ref.begin_read().unwrap();
+        let table = txn.open_table(database::VAULT_TABLE).unwrap();
+        table
+            .get(SYNC_CONFIG_BLOB_KEY)
+            .unwrap()
+            .unwrap()
+            .value()
+            .to_vec()
+    };
+    assert!(
+        sync_row.starts_with(SYNC_ROW_ENC_PREFIX),
+        "sync config row must be sealed in the PVSYNC1 layout"
+    );
+
+    // CHANGE PASSWORD, then re-read everything under the new credential.
+    change_password(
+        &state,
+        Zeroizing::new(fixture_password.to_string()),
+        Zeroizing::new(new_password.to_string()),
+        None,
+    )
+    .unwrap();
+    lock_vault(&state);
+    assert!(unlock_vault(&state, Zeroizing::new(new_password.to_string())).unwrap());
+    assert_eq!(
+        get_entry_secret(&state, legacy_id)
+            .unwrap()
+            .password
+            .to_string(),
+        "legacy-password-0"
+    );
+    assert_eq!(
+        get_entry_secret(&state, new_id)
+            .unwrap()
+            .password
+            .to_string(),
+        "chain-secret-新"
+    );
+    // The PVSYNC1 rows survived the rotation; sync still round-trips.
+    let status = sync_now_with_backend(&state, &cloud).unwrap();
+    assert_eq!(status.last_result.as_deref(), Some("ok"));
+
+    // ---- Leg 2: v1.0.5 sealed fixture (HKDF subkeys + seal + digest v3). ----
+    let fixture = crate::fixtures::create_v1_0_5_digest_v3(2);
+    drop(fixture.db);
+    let db2 = Arc::new(redb::Database::open(&fixture.db_path).unwrap());
+    let verification2 = database::load_verification_data(&db2).unwrap().unwrap();
+    let state2 = Arc::new(AppState {
+        secret_store: Arc::new(MemorySecretStore::new()) as Arc<dyn SecretStore>,
+        sync_secret_store: Arc::new(MemorySecretStore::new()) as Arc<dyn SecretStore>,
+        ..AppState::default()
+    });
+    *state2.database.lock().unwrap() = Some(Arc::clone(&db2));
+    *state2.verification_data.lock().unwrap() = Some(verification2);
+    // The digest-v3 generation has no vault header either (headers arrived
+    // later) — explicit migration, then unlock.
+    assert!(matches!(
+        unlock_vault(&state2, Zeroizing::new(fixture.password.to_string())),
+        Err(VaultError::LegacyVaultRequiresMigration)
+    ));
+    let (master_key2, _) = crypto::kdf::derive_key_with_params(
+        fixture.password,
+        &fixture.salt,
+        &crypto::kdf::AdaptiveParams {
+            m_cost: 16384,
+            t_cost: 1,
+            p_cost: 1,
+        },
+    )
+    .unwrap();
+    let (enc_key2, mac_key2) = crypto::kdf::derive_subkeys(&master_key2, &fixture.salt);
+    migrate_database(&db2, &master_key2, &enc_key2, &mac_key2).unwrap();
+    // The sealed generation unlocks directly after migration.
+    assert!(unlock_vault(&state2, Zeroizing::new(fixture.password.to_string())).unwrap());
+    let listed2 = list_all_entries(&state2).unwrap();
+    assert_eq!(listed2.len(), 2);
+    let sealed_id = listed2
+        .iter()
+        .find(|entry| entry.title == "Fixture Entry 0")
+        .unwrap()
+        .id
+        .clone();
+    let sealed = get_entry_secret(&state2, sealed_id.clone()).unwrap();
+    assert_eq!(sealed.password.to_string(), "fixture-password-0");
+    assert_eq!(
+        sealed.notes.as_ref().unwrap().to_string(),
+        "Notes for entry 0"
+    );
+
+    let sealed_new_id = create_entry(
+        &state2,
+        crate::CreateEntryRequest {
+            title: "Sealed Chain Entry".to_string(),
+            url: None,
+            username: "sealed-user".to_string(),
+            password: Zeroizing::new("sealed-secret".to_string()),
+            notes: None,
+            tags: vec![],
+            group_id: None,
+        },
+    )
+    .unwrap()
+    .id;
+    assert_eq!(
+        get_entry_secret(&state2, sealed_new_id)
+            .unwrap()
+            .password
+            .to_string(),
+        "sealed-secret"
+    );
+
+    change_password(
+        &state2,
+        Zeroizing::new(fixture.password.to_string()),
+        Zeroizing::new(new_password.to_string()),
+        None,
+    )
+    .unwrap();
+    lock_vault(&state2);
+    assert!(unlock_vault(&state2, Zeroizing::new(new_password.to_string())).unwrap());
+    assert_eq!(
+        get_entry_secret(&state2, sealed_id)
+            .unwrap()
+            .password
+            .to_string(),
+        "fixture-password-0"
+    );
 }

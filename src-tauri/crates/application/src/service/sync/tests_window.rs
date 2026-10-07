@@ -18,6 +18,7 @@ use super::tests_engine::{
     create_entry_titled, test_config, test_state, CONTAINER_PASSWORD, NEW_PASSWORD, TEST_PASSWORD,
 };
 use crate::{change_password, list_all_entries, AppState, VaultError};
+use pwdvault_infrastructure::crypto::bc_deserialize;
 use pwdvault_infrastructure::database;
 
 /// Settle time for a spawned unlock thread. The unlock must pass the
@@ -329,7 +330,7 @@ fn assert_rows_read_back(state: &Arc<AppState>, ids: &[String], before: &[String
             .unwrap()
             .expect("pre-window entry must survive the re-seal");
         let sealed: pwdvault_infrastructure::crypto::EncryptedData =
-            bincode::deserialize(&entry.encrypted_password).unwrap();
+            bc_deserialize(&entry.encrypted_password).unwrap();
         let plain = pwdvault_infrastructure::crypto::decrypt(&enc, &sealed).unwrap();
         assert_eq!(
             String::from_utf8(plain).unwrap(),

@@ -4,7 +4,9 @@ use zeroize::Zeroizing;
 
 use crate::{AppState, VaultError};
 use pwdvault_domain::constants;
-use pwdvault_infrastructure::crypto::{self, create_verification_header};
+use pwdvault_infrastructure::crypto::{
+    self, bc_deserialize, bc_serialize, create_verification_header,
+};
 use pwdvault_infrastructure::database::{self, load_settings, Settings};
 use pwdvault_infrastructure::paths;
 
@@ -284,11 +286,11 @@ pub(crate) fn migrate_database(
         if let Some(mut entry) = database::load_entry(db, enc_key, id, true)? {
             // Re-encrypt encrypted_password: master_key → enc_key
             if !entry.encrypted_password.is_empty() {
-                let old_enc: EncryptedData = bincode::deserialize(&entry.encrypted_password)
+                let old_enc: EncryptedData = bc_deserialize(&entry.encrypted_password)
                     .or_else(|_| EncryptedData::from_bytes(&entry.encrypted_password))?;
                 if let Ok(plain) = decrypt(master_key, &old_enc) {
                     let new_enc = encrypt(enc_key, &plain)?;
-                    entry.encrypted_password = bincode::serialize(&new_enc)
+                    entry.encrypted_password = bc_serialize(&new_enc)
                         .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
                 }
                 // If decrypt with master_key fails, the field is already
@@ -297,12 +299,12 @@ pub(crate) fn migrate_database(
 
             // Re-encrypt encrypted_notes: master_key → enc_key
             if let Some(old_notes_bytes) = entry.encrypted_notes.take() {
-                let old_enc: EncryptedData = bincode::deserialize(&old_notes_bytes)
+                let old_enc: EncryptedData = bc_deserialize(&old_notes_bytes)
                     .or_else(|_| EncryptedData::from_bytes(&old_notes_bytes))?;
                 if let Ok(plain) = decrypt(master_key, &old_enc) {
                     let new_enc = encrypt(enc_key, &plain)?;
                     entry.encrypted_notes = Some(
-                        bincode::serialize(&new_enc)
+                        bc_serialize(&new_enc)
                             .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?,
                     );
                 } else {

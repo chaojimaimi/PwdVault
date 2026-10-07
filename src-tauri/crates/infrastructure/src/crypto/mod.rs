@@ -7,6 +7,7 @@
 //! - Verification header for password validation
 
 pub mod cipher;
+pub mod codec;
 pub mod kdf;
 pub mod verification;
 pub mod wrap;
@@ -15,6 +16,7 @@ pub mod wrap;
 pub use cipher::{
     decrypt, decrypt_with_aad, encrypt, encrypt_with_aad, EncryptedData, EncryptionError,
 };
+pub use codec::{bc_deserialize, bc_serialize};
 pub use kdf::{derive_key, derive_key_with_params, generate_salt, AdaptiveParams, KdfError};
 pub use verification::{
     create_verification_header, unlock_with_password, verify_password, VerificationData,

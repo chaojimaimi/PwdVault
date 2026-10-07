@@ -9,8 +9,9 @@ use zeroize::Zeroizing;
 use crate::service::sync::state_io;
 use crate::{AppState, VaultError};
 use pwdvault_infrastructure::crypto::{
-    self, create_verification_header, recovery_wrap_key, unwrap_secret, wrap_secret, SecretKey,
-    VerificationData, WRAP_AAD_BIO, WRAP_AAD_RECOVERY, WRAP_AAD_SYNC,
+    self, bc_deserialize, bc_serialize, create_verification_header, recovery_wrap_key,
+    unwrap_secret, wrap_secret, SecretKey, VerificationData, WRAP_AAD_BIO, WRAP_AAD_RECOVERY,
+    WRAP_AAD_SYNC,
 };
 use pwdvault_infrastructure::database::{
     self, load_settings,
@@ -297,41 +298,37 @@ fn reencrypt_entry_inner(
     use pwdvault_infrastructure::crypto::{decrypt, encrypt, EncryptedData};
 
     if !entry.encrypted_password.is_empty() {
-        let sealed: EncryptedData = bincode::deserialize(&entry.encrypted_password)
+        let sealed: EncryptedData = bc_deserialize(&entry.encrypted_password)
             .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
         let mut plain = decrypt(old_enc, &sealed)?;
         let resealed = encrypt(new_enc, &plain)?;
         plain.zeroize();
-        entry.encrypted_password = bincode::serialize(&resealed)
-            .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
+        entry.encrypted_password =
+            bc_serialize(&resealed).map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
     }
 
     if let Some(notes_bytes) = entry.encrypted_notes.take() {
-        let sealed: EncryptedData = bincode::deserialize(&notes_bytes)
+        let sealed: EncryptedData = bc_deserialize(&notes_bytes)
             .or_else(|_| EncryptedData::from_bytes(&notes_bytes))
             .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
         let mut plain = decrypt(old_enc, &sealed)?;
         let resealed = encrypt(new_enc, &plain)?;
         plain.zeroize();
-        entry.encrypted_notes = Some(
-            bincode::serialize(&resealed)
-                .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?,
-        );
+        entry.encrypted_notes =
+            Some(bc_serialize(&resealed).map_err(|e| VaultError::EncryptionFailed(e.to_string()))?);
     }
 
     // P2.4: the TOTP secret blob rotates with the enc subkey too — leaving it
     // behind would strand it undecryptable after the key change.
     if let Some(totp_bytes) = entry.encrypted_totp_secret.take() {
-        let sealed: EncryptedData = bincode::deserialize(&totp_bytes)
+        let sealed: EncryptedData = bc_deserialize(&totp_bytes)
             .or_else(|_| EncryptedData::from_bytes(&totp_bytes))
             .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
         let mut plain = decrypt(old_enc, &sealed)?;
         let resealed = encrypt(new_enc, &plain)?;
         plain.zeroize();
-        entry.encrypted_totp_secret = Some(
-            bincode::serialize(&resealed)
-                .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?,
-        );
+        entry.encrypted_totp_secret =
+            Some(bc_serialize(&resealed).map_err(|e| VaultError::EncryptionFailed(e.to_string()))?);
     }
 
     Ok(())

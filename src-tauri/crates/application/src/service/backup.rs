@@ -6,7 +6,8 @@ use base64::Engine;
 use crate::service::vault::get_db;
 use crate::{AppState, BackupPayload, ExportEntry, ImportResult, VaultBackup, VaultError};
 use pwdvault_infrastructure::crypto::{
-    self, decrypt, decrypt_with_aad, encrypt, encrypt_with_aad, EncryptedData,
+    self, bc_deserialize, bc_serialize, decrypt, decrypt_with_aad, encrypt, encrypt_with_aad,
+    EncryptedData,
 };
 use pwdvault_infrastructure::database::{self, load_settings, Group, PasswordEntry};
 
@@ -77,7 +78,7 @@ pub fn export_vault(
         let password = if entry.encrypted_password.is_empty() {
             String::new()
         } else {
-            let enc_pwd: EncryptedData = bincode::deserialize(&entry.encrypted_password)
+            let enc_pwd: EncryptedData = bc_deserialize(&entry.encrypted_password)
                 .or_else(|_| EncryptedData::from_bytes(&entry.encrypted_password))
                 .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
             let mut pwd_bytes = decrypt(key, &enc_pwd)?;
@@ -92,7 +93,7 @@ pub fn export_vault(
             if enc_notes_bytes.is_empty() {
                 None
             } else {
-                let enc: EncryptedData = bincode::deserialize(enc_notes_bytes)
+                let enc: EncryptedData = bc_deserialize(enc_notes_bytes)
                     .or_else(|_| EncryptedData::from_bytes(enc_notes_bytes))
                     .map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
                 let mut notes_bytes = decrypt(key, &enc)?;
@@ -372,16 +373,13 @@ fn encrypt_import_entries(
 
         // Encrypt password with current master key
         let enc_pwd = encrypt(key, export_entry.password.as_bytes())?;
-        entry.encrypted_password = bincode::serialize(&enc_pwd)
-            .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
+        entry.encrypted_password =
+            bc_serialize(&enc_pwd).map_err(|e| VaultError::EncryptionFailed(e.to_string()))?;
 
         // Encrypt notes
         entry.encrypted_notes = if let Some(ref notes) = export_entry.notes {
             let enc = encrypt(key, notes.as_bytes())?;
-            Some(
-                bincode::serialize(&enc)
-                    .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?,
-            )
+            Some(bc_serialize(&enc).map_err(|e| VaultError::EncryptionFailed(e.to_string()))?)
         } else {
             None
         };

@@ -5,7 +5,9 @@ use super::*;
 use crate::fixtures;
 use crate::{AppState, VaultError};
 use pwdvault_infrastructure::crypto::kdf::AdaptiveParams;
-use pwdvault_infrastructure::crypto::{self, create_verification_header};
+use pwdvault_infrastructure::crypto::{
+    self, bc_deserialize, bc_serialize, create_verification_header,
+};
 use pwdvault_infrastructure::database;
 use pwdvault_infrastructure::database::vault_store::{self, VaultStore};
 use pwdvault_infrastructure::keychain::{MemorySecretStore, SecretStore, BIO_WRAP_ACCOUNT};
@@ -60,7 +62,7 @@ pub(crate) fn create_test_vault(entry_count: usize, group_count: usize) -> TestV
         let mut entry =
             database::PasswordEntry::new(format!("Entry {index}"), None, format!("user-{index}"));
         let encrypted = crypto::encrypt(&enc_key, format!("secret-{index}").as_bytes()).unwrap();
-        entry.encrypted_password = bincode::serialize(&encrypted).unwrap();
+        entry.encrypted_password = bc_serialize(&encrypted).unwrap();
         entry.group_id = group_ids.first().cloned();
         entry_ids.push(entry.id.clone());
         database::vault_store::VaultStore::new(&db)
@@ -140,8 +142,7 @@ fn change_password_preserves_content_and_rotates_keys() {
     // Entries decrypt identically.
     for (index, id) in vault.entry_ids.iter().enumerate() {
         let entry = database::load_entry(&db, &enc, id, false).unwrap().unwrap();
-        let encrypted: crypto::EncryptedData =
-            bincode::deserialize(&entry.encrypted_password).unwrap();
+        let encrypted: crypto::EncryptedData = bc_deserialize(&entry.encrypted_password).unwrap();
         assert_eq!(
             crypto::decrypt(&enc, &encrypted).unwrap(),
             format!("secret-{index}").into_bytes()
@@ -574,8 +575,8 @@ fn change_password_on_headerless_legacy_vault_fails_closed() {
     ));
     // The fixture vault's verification row is untouched.
     assert_eq!(
-        bincode::serialize(&database::load_verification_data(&db).unwrap().unwrap()).unwrap(),
-        bincode::serialize(&verification).unwrap()
+        bc_serialize(&database::load_verification_data(&db).unwrap().unwrap()).unwrap(),
+        bc_serialize(&verification).unwrap()
     );
     // The error fired in the preamble: the session was never disturbed.
     assert!(state.is_unlocked());

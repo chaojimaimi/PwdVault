@@ -9,7 +9,7 @@
 
 | RUSTSEC ID | Package | Reason | Expiry | Owner |
 |------------|---------|--------|--------|-------|
-| RUSTSEC-2025-0141 | bincode 1.x | Unmaintained; used for redb value serialization and historical-format compatibility; no drop-in replacement; migration to bincode 2 or postcard planned | 2026-12-31 | backend |
+| RUSTSEC-2025-0141 | bincode 2.0.1 | Unmaintained — advisory is crate-level (no patched version), covers 1.x and 2.x alike, so the v1.3.0 swap to the final 2.0.1 API cannot clear it. Kept: golden byte fixtures pin the legacy disk format and a single serialization seam (`crypto::codec` bc_serialize/bc_deserialize) means a postcard migration touches one place. Re-evaluate on a real bincode CVE or the next format-level development | 2027-10-31 | backend |
 
 ## Review process
 

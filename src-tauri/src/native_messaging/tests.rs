@@ -460,7 +460,7 @@ fn test_update_entry() {
     let entry = database::load_entry(&db, key, result["id"].as_str().unwrap(), false)
         .unwrap()
         .unwrap();
-    let enc: crypto::EncryptedData = bincode::deserialize(&entry.encrypted_password).unwrap();
+    let enc: crypto::EncryptedData = crypto::bc_deserialize(&entry.encrypted_password).unwrap();
     let decrypted = crypto::decrypt(key, &enc).unwrap();
     assert_eq!(String::from_utf8(decrypted).unwrap(), "new_pass");
 }

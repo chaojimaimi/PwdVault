@@ -11,7 +11,7 @@ use thiserror::Error;
 // resolving `database::PasswordEntry` etc.
 pub use pwdvault_domain::entities::{Group, PasswordEntry, Settings};
 
-use crate::crypto::VerificationData;
+use crate::crypto::{bc_deserialize, bc_serialize, VerificationData};
 
 // ============================================================================
 // Constants
@@ -20,7 +20,7 @@ use crate::crypto::VerificationData;
 pub const VAULT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("vault");
 
 /// Upper bound for a single encoded record read from disk before it is handed
-/// to `bincode::deserialize`. Legitimate records (entries, groups, header,
+/// to `bc_deserialize`. Legitimate records (entries, groups, header,
 /// verification row, settings) are a few hundred bytes; bincode trusts length
 /// prefixes, so refusing oversized blobs up front bounds attacker-controlled
 /// input before any deserialization is attempted.
@@ -34,6 +34,11 @@ pub mod group_codec;
 pub mod integrity;
 pub mod migrations;
 pub mod vault_store;
+
+/// Golden byte fixtures pinning the legacy serialization format
+/// (test-only; see the module docs before touching the codec seam).
+#[cfg(test)]
+mod bincode_golden;
 
 // ============================================================================
 // Error Types
@@ -185,7 +190,7 @@ pub fn init_database<P: AsRef<Path>>(path: P) -> Result<Database, DatabaseError>
 /// Save verification data to the database
 pub fn save_verification_data(db: &Database, data: &VerificationData) -> Result<(), DatabaseError> {
     let encoded =
-        bincode::serialize(data).map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
+        bc_serialize(data).map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
 
     let write_txn = db.begin_write()?;
     {
@@ -199,7 +204,7 @@ pub fn save_verification_data(db: &Database, data: &VerificationData) -> Result<
 
 /// Reject records read from disk that exceed [`MAX_ENCODED_BLOB`].
 ///
-/// Every "disk bytes → `bincode::deserialize`" call site must run this check
+/// Every "disk bytes → `bc_deserialize`" call site must run this check
 /// before deserializing: bincode trusts embedded length prefixes, so the blob
 /// size is the only attacker-controlled bound we get for free.
 pub fn check_encoded_blob_size(blob: &[u8]) -> Result<(), DatabaseError> {
@@ -217,7 +222,7 @@ pub fn load_verification_data(db: &Database) -> Result<Option<VerificationData>,
     match table.get("verification")? {
         Some(value) => {
             check_encoded_blob_size(value.value())?;
-            let data: VerificationData = bincode::deserialize(value.value())
+            let data: VerificationData = bc_deserialize(value.value())
                 .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
             Ok(Some(data))
         }
@@ -442,9 +447,9 @@ pub fn load_settings(db: &Database) -> Result<Settings, DatabaseError> {
             // by released versions. Keep malformed data fail-closed.
             if let Ok(settings) = serde_json::from_slice::<Settings>(data) {
                 Ok(settings)
-            } else if let Ok(settings) = bincode::deserialize::<Settings>(data) {
+            } else if let Ok(settings) = bc_deserialize::<Settings>(data) {
                 Ok(settings)
-            } else if let Ok(legacy) = bincode::deserialize::<LegacySettingsV1>(data) {
+            } else if let Ok(legacy) = bc_deserialize::<LegacySettingsV1>(data) {
                 Ok(upgrade_legacy_settings(legacy))
             } else {
                 Err(DatabaseError::DeserializationError(
@@ -538,7 +543,7 @@ mod tests {
             default_include_numbers: false,
             default_include_symbols: true,
         };
-        let encoded = bincode::serialize(&(
+        let encoded = bc_serialize(&(
             legacy.auto_lock_secs,
             legacy.default_length,
             legacy.default_include_uppercase,
@@ -654,7 +659,7 @@ mod tests {
     fn runtime_path_rejects_plaintext_group_blob() {
         let (db, _temp) = get_test_db();
         let group = Group::new("Plaintext Group".to_string());
-        let raw = bincode::serialize(&group).unwrap();
+        let raw = bc_serialize(&group).unwrap();
         {
             let txn = db.begin_write().unwrap();
             {

@@ -51,7 +51,7 @@ fn unlocked_state() -> (Arc<AppState>, TempDir) {
     let (state, dir, _) = unlocked_state_with_entries(|enc_key| {
         let mut entry = PasswordEntry::new("Backup entry".into(), None, "backup-user".into());
         let encrypted_password = crypto::encrypt(enc_key, b"backup-secret").unwrap();
-        entry.encrypted_password = bincode::serialize(&encrypted_password).unwrap();
+        entry.encrypted_password = bc_serialize(&encrypted_password).unwrap();
         vec![entry]
     });
     (state, dir)
@@ -126,7 +126,7 @@ fn export_normalizes_historical_empty_urls() {
             "legacy-user".into(),
         );
         let encrypted_password = crypto::encrypt(enc_key, b"legacy-secret").unwrap();
-        empty_url.encrypted_password = bincode::serialize(&encrypted_password).unwrap();
+        empty_url.encrypted_password = bc_serialize(&encrypted_password).unwrap();
         vec![empty_url]
     });
 
@@ -154,19 +154,16 @@ fn export_excludes_tombstones_and_normalizes_dangling_groups() {
     dead_group.deleted_at = Some(1_700_000_000);
 
     let mut live = PasswordEntry::new("Live entry".into(), None, "user".into());
-    live.encrypted_password =
-        bincode::serialize(&crypto::encrypt(&enc_key, b"pw").unwrap()).unwrap();
+    live.encrypted_password = bc_serialize(&crypto::encrypt(&enc_key, b"pw").unwrap()).unwrap();
     live.group_id = Some(live_group.id.clone());
 
     let mut dangling = PasswordEntry::new("Dangling entry".into(), None, "user".into());
-    dangling.encrypted_password =
-        bincode::serialize(&crypto::encrypt(&enc_key, b"pw").unwrap()).unwrap();
+    dangling.encrypted_password = bc_serialize(&crypto::encrypt(&enc_key, b"pw").unwrap()).unwrap();
     // References the tombstoned group: cascade clearing is gone (P2.2).
     dangling.group_id = Some(dead_group.id.clone());
 
     let mut dead = PasswordEntry::new("Dead entry".into(), None, "user".into());
-    dead.encrypted_password =
-        bincode::serialize(&crypto::encrypt(&enc_key, b"pw").unwrap()).unwrap();
+    dead.encrypted_password = bc_serialize(&crypto::encrypt(&enc_key, b"pw").unwrap()).unwrap();
     dead.deleted_at = Some(1_700_000_100);
 
     database::vault_store::VaultStore::new(&db)

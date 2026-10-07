@@ -92,14 +92,14 @@ pub fn create_v1_0_5_digest_v3(entry_count: usize) -> DbFixture {
         let enc_pwd = crypto::encrypt(&enc_key, format!("fixture-password-{}", i).as_bytes())
             .expect("encrypt password");
         entry.encrypted_password =
-            bincode::serialize(&enc_pwd).expect("serialize encrypted password");
+            crypto::bc_serialize(&enc_pwd).expect("serialize encrypted password");
 
         // Some entries have notes
         if i % 3 == 0 {
             let enc_notes = crypto::encrypt(&enc_key, format!("Notes for entry {}", i).as_bytes())
                 .expect("encrypt notes");
             entry.encrypted_notes =
-                Some(bincode::serialize(&enc_notes).expect("serialize encrypted notes"));
+                Some(crypto::bc_serialize(&enc_notes).expect("serialize encrypted notes"));
         }
 
         // Some entries have tags
@@ -158,7 +158,7 @@ pub fn create_v1_0_5_digest_v3(entry_count: usize) -> DbFixture {
 /// Create a pre-v1.0.5 database (no digest, plaintext bincode blobs, no HKDF).
 ///
 /// This simulates a database created by v1.0.4 or earlier:
-/// - Entries stored as raw `bincode::serialize(PasswordEntry)` (no outer seal)
+/// - Entries stored as raw `crypto::bc_serialize(PasswordEntry)` (no outer seal)
 /// - `encrypted_password` encrypted with master_key (not enc_key)
 /// - No integrity digest stored
 /// - No HKDF subkey derivation
@@ -194,10 +194,10 @@ pub fn create_pre_v1_0_5(entry_count: usize) -> (TempDir, std::path::PathBuf, [u
         let enc_pwd = crypto::encrypt(&master_key, format!("legacy-password-{}", i).as_bytes())
             .expect("encrypt password");
         entry.encrypted_password =
-            bincode::serialize(&enc_pwd).expect("serialize encrypted password");
+            crypto::bc_serialize(&enc_pwd).expect("serialize encrypted password");
 
         // Store as raw bincode (pre-v1.0.5 — no outer seal_entry)
-        let raw_blob = bincode::serialize(&entry).expect("serialize entry");
+        let raw_blob = crypto::bc_serialize(&entry).expect("serialize entry");
 
         let write_txn = db.begin_write().expect("begin write");
         {

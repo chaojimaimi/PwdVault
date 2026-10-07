@@ -1,6 +1,6 @@
 [package]
 name = "pwdvault-infrastructure"
-version = "1.2.4"
+version = "1.3.0"
 edition = "2021"
 description = "PwdVault infrastructure — redb repository, crypto, filesystem, native host setup"
 license = "MIT"
@@ -16,7 +16,11 @@ pwdvault-domain = { version = "1.1.0", path = "../domain" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
-bincode = "1"
+# Pinned to 2.0.x (not "2"): the golden byte fixtures guarantee legacy
+# (bincode 1-compatible) disk format only for the 2.0 series; a future
+# minor bump must re-validate disk compatibility. The serde feature is the
+# bridge used by crypto::codec::bc_serialize/bc_deserialize.
+bincode = { version = "2.0", features = ["serde"] }
 
 # Cryptography
 aes-gcm = { version = "0.10", features = ["std"] }

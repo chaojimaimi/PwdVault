@@ -48,7 +48,7 @@ fn build_db(n: usize) -> (Database, [u8; 32], [u8; 32], TempDir) {
             );
             entry.encrypted_password = crypto::encrypt(&enc_key, b"bench-password")
                 .ok()
-                .and_then(|d| bincode::serialize(&d).ok())
+                .and_then(|d| crypto::bc_serialize(&d).ok())
                 .unwrap_or_default();
             database::vault_store::save_entry_in_txn(&txn, &enc_key, &entry).expect("seed entry");
         }
