@@ -4,8 +4,8 @@ A secure, local-first password manager built with Tauri + React.
 
 **Last Updated**: 2026-10-05
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.2.3
-**Current Version**: `v1.2.3` — updater trust-anchor pinned in CI + manual update check + tags/group input layout fix + 2026-10 audit remediation complete (closure fixes incl. OAuth state-echo, prerelease-aware feed gating) + v1.1.9/v1.2.0 hardening + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.2.4
+**Current Version**: `v1.2.4` — audit-polish integration batch (pair_confirm throttle, sender URL parity, dead-code sweep, SHA256SUMS signing) + trust anchor pinned + manual update check + layout fixes + 2026-10 audit remediation complete (closure fixes incl. OAuth state-echo, prerelease-aware feed gating) + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -194,14 +194,14 @@ PwdVault/
 
 | Module                    | Tests                                          | Command                                   |
 | ------------------------- | ---------------------------------------------- | ----------------------------------------- |
-| Rust tauri-app lib        | 31                                             | `cd src-tauri && cargo test`              |
+| Rust tauri-app lib        | 33                                             | `cd src-tauri && cargo test`              |
 | Rust capability contract  | 1                                              | (same run)                                |
 | Rust golden contract      | 3                                              | (same run)                                |
 | Rust application crate    | 161                                            | `cd src-tauri && cargo test --workspace`  |
 | Rust infrastructure crate | 108 (+1 ignored keychain SecItem smoke, CI 跑) | (same run)                                |
 | Rust domain crate         | 4                                              | (same run)                                |
 | Rust native-host          | 23                                             | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 266 (53 files, incl. 76 extension tests)       | `pnpm test`                               |
+| Frontend (total)          | 270 (54 files, incl. 78 extension tests)       | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -315,6 +315,27 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-10-07 (v1.2.4 — audit-polish integration batch)
+
+Standard pipeline over the consolidated backlog from the audit ledger
+(plan → plan-reviewer PASS after one revise round that caught a
+debug-assert placement that would have broken baseline tests, four
+non-narrowable pub symbols, and a wrong section anchor → ds-worker,
+five groups → code-reviewer APPROVE with comments, 0 P0-P2 → gates →
+release). Shipped: pair_confirm shares the pair 10/min rate-limit
+budget (tests via execute_command); sender URL matching gains
+scheme-less parity with the popup (empty entryUrl divergence pinned by
+comment); the A-class secrets-invariant debug-assert landed at the
+read_local_rows call site; 12 pub items narrowed / 4 skipped as
+cross-crate API; dead types & exports swept; tags dirty-check is now
+order-insensitive (sorted-join, multiplicity preserved); Updates
+section extracted (SettingsScreen 408 lines); cargo audit gains an
+offline fallback in quality (release gate stays fail-closed);
+SHA256SUMS is minisign-signed in provenance and ships as an asset;
+CLAUDE.md removed / audit snapshot moved to docs/ / .conductor gone.
+Test baseline after: 310 Rust (+1 ignored CI smoke) + 23 native-host +
+270 frontend (78 extension). Plan: fix_impl_plan_v1.2.4.md (R2).
 
 ### 2026-10-07 (v1.2.3 — updater trust anchor pinned in CI)
 
