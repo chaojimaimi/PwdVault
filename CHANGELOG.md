@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+## [1.3.0] - 2026-10-07
+
+### Changed
+
+- Serialization layer moved from bincode 1.3.3 to bincode 2.0.1 (the
+  crate's final API) via the serde bridge with the bincode-1-compatible
+  `legacy()` config. **The on-disk byte format is unchanged** — verified
+  by a byte-level pre-migration experiment (19/19 shapes) and pinned by
+  16 permanent golden-fixture tests across eight types, plus a full
+  legacy-fixture round-trip chain (pre-v1.0.5 raw rows → migration →
+  unlock → read/write → password change → re-read). No user action
+  needed.
+- Note on RUSTSEC-2025-0141: the advisory is crate-wide (covers 1.x
+  AND 2.x, no patched version exists), so the cargo-deny ignore stays —
+  with an updated rationale and a re-evaluation trigger (a real bincode
+  CVE or the next format-level work; routine review 2027-10). The
+  single serialization seam (`bc_serialize`/`bc_deserialize`) and the
+  golden fixtures are the groundwork for a future move to a maintained
+  format (e.g. postcard).
+
 ## [1.2.4] - 2026-10-07
 
 ### Security
