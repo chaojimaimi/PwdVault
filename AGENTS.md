@@ -4,8 +4,8 @@ A secure, local-first password manager built with Tauri + React.
 
 **Last Updated**: 2026-10-05
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.2.4
-**Current Version**: `v1.2.4` — audit-polish integration batch (pair_confirm throttle, sender URL parity, dead-code sweep, SHA256SUMS signing) + trust anchor pinned + manual update check + layout fixes + 2026-10 audit remediation complete (closure fixes incl. OAuth state-echo, prerelease-aware feed gating) + v1.1.9/v1.2.0 hardening + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.3.0
+**Current Version**: `v1.3.0` — bincode 1→2 serialization swap (byte-identical, golden-pinned) + audit-polish batch + trust anchor pinned + manual update check + layout fixes + 2026-10 audit remediation complete (closure fixes incl. OAuth state-echo, prerelease-aware feed gating) + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -197,8 +197,8 @@ PwdVault/
 | Rust tauri-app lib        | 33                                             | `cd src-tauri && cargo test`              |
 | Rust capability contract  | 1                                              | (same run)                                |
 | Rust golden contract      | 3                                              | (same run)                                |
-| Rust application crate    | 161                                            | `cd src-tauri && cargo test --workspace`  |
-| Rust infrastructure crate | 108 (+1 ignored keychain SecItem smoke, CI 跑) | (same run)                                |
+| Rust application crate    | 166                                            | `cd src-tauri && cargo test --workspace`  |
+| Rust infrastructure crate | 121 (+1 ignored keychain SecItem smoke, CI 跑) | (same run)                                |
 | Rust domain crate         | 4                                              | (same run)                                |
 | Rust native-host          | 23                                             | `cd extensions/native-host && cargo test` |
 | Frontend (total)          | 270 (54 files, incl. 78 extension tests)       | `pnpm test`                               |
@@ -316,6 +316,32 @@ git tag vX.Y.Z && git push origin main --tags
 
 ## 7. Session Log
 
+### 2026-10-07 (v1.3.0 — bincode 1→2 serialization swap, byte-identical)
+
+Standard pipeline with a twist worth recording. **P0 pre-experiment**
+(main agent, /tmp dual-version crate): bincode 1.3.3 ↔ 2.0.1
+serde+legacy() byte-identical across all PwdVault shapes — 19/19
+four-way checks. **Plan review caught the headline misconception**
+(R1 P0): RUSTSEC-2025-0141 is crate-wide (2.x equally unmaintained, no
+patched version) — the migration does NOT clear the advisory; reframed
+honestly as terminal-API landing + golden guardrail + single
+serialization seam (bc_serialize/bc_deserialize in crypto/codec.rs) as
+groundwork for a future postcard migration; deny ignore retained with
+a trigger (real CVE / next format work; review 2027-10). ds-worker hit
+a quota cap mid-run and left a half-finished tree; the re-dispatched
+general-purpose worker verified the inherited work independently and
+caught two fabricated sync fixtures from the predecessor (odd-length
+hex / wrong length), regenerating them with real 1.3.3 bytes — the
+code-reviewer then re-verified all 16 fixtures three ways (hand byte
+accounting, independent bincode-1.3.3 crate reproduction, non-tautological
+assertion check). Shipped: 20 files swapped (77 call sites), 16 golden
+tests across 8 types (incl. sync LWW fingerprint pinning for
+cross-version tiebreak stability), full-chain legacy round-trip test,
+deny/allowlist rationale sync. Disk format byte-identical; no user
+action. Test baseline after: 328 Rust (+1 ignored) + 23 native-host +
+270 frontend. Plan: fix_impl_plan_v1.3.0.md (R2).
+
+### 2026-10-07 (v1.2.4 — audit-polish integration batch)
 ### 2026-10-07 (v1.2.4 — audit-polish integration batch)
 
 Standard pipeline over the consolidated backlog from the audit ledger
