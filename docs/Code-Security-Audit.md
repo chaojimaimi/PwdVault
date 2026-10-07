@@ -362,7 +362,7 @@ async function performAutofill(tabId, entryId) {
 
 `cipher.rs` 中的 `generate_nonce()` 和 `kdf.rs` 中的 `generate_salt()` 使用 `rand::thread_rng()` 生成随机值。虽然 `thread_rng()` 默认使用加密安全的生成器（ChaCha），但 `OsRng` 直接从操作系统 CSPRNG 读取，提供更强的安全保证。对于 AES-256-GCM，nonce 唯一性至关重要——如果 nonce 被重用，认证将被破坏。
 
-> 注：密码生成器已更新为使用 `OsRng`（见 CLAUDE.md 历史），但加密模块未同步更新。
+> 注：密码生成器已更新为使用 `OsRng`（见 AGENTS.md 历史，原 CLAUDE.md），但加密模块未同步更新。
 
 **CWE-338: Use of Cryptographically Weak Pseudo-Random Number Generator**
 

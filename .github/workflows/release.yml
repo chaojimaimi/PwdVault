@@ -355,6 +355,21 @@ jobs:
           done < <(find . -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.zip" -o -name "*.app.tar.gz" -o -name "*.app.tar.gz.sig" -o -name "*.exe.sig" \) -print0 | sort -z) > SHA256SUMS
           cat SHA256SUMS
 
+      # Sign SHA256SUMS with the SAME updater trust anchor the build jobs use
+      # (v1.2.4): the manifest becomes tamper-evident end to end, verifiable
+      # with `tauri signer verify` and the pinned public key
+      # (docs/UPDATER-KEYS.md, golden_contract). Pure env-string key mode is
+      # what the build jobs already use. Fail-closed: a missing/invalid key
+      # must red the job, not ship an unverifiable manifest.
+      - name: Sign SHA256SUMS (updater trust anchor)
+        working-directory: artifacts
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          cargo install --locked tauri-cli --version ^2
+          tauri signer sign SHA256SUMS
+
       - name: Generate Rust SBOM (CycloneDX)
         continue-on-error: true
         run: |
@@ -378,6 +393,7 @@ jobs:
             artifacts/**/*.app.tar.gz.sig
             artifacts/**/*.exe.sig
             artifacts/SHA256SUMS
+            artifacts/SHA256SUMS.sig
             artifacts/*bom.cdx.json
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -385,6 +401,7 @@ jobs:
           name: provenance-artifacts
           path: |
             artifacts/SHA256SUMS
+            artifacts/SHA256SUMS.sig
             artifacts/*bom.cdx.json
 
   # ---------------------------------------------------------------------------
@@ -459,6 +476,7 @@ jobs:
             artifacts/**/*.app.tar.gz.sig
             artifacts/**/*.exe.sig
             artifacts/**/SHA256SUMS
+            artifacts/**/SHA256SUMS.sig
             artifacts/**/*bom.cdx.json
 
       # Phase AU: build the signed updater feed from the RELEASED assets and
