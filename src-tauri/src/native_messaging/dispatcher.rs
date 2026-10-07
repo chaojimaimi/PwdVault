@@ -12,8 +12,8 @@ use pwdvault_application::{
     AppState, CreateEntryRequest, UpdateEntryRequest, VaultBackup, VaultError,
 };
 use pwdvault_domain::constants;
+use pwdvault_domain::Settings;
 use pwdvault_infrastructure::auth;
-use pwdvault_infrastructure::database;
 
 use super::protocol::{enforce_pair_rate_limit, GeneratorOptions, NativeRequest};
 
@@ -75,6 +75,10 @@ pub(super) fn execute_command(
 
         "pair_confirm" => {
             let caller = caller.as_deref().ok_or("Browser caller required")?;
+            // Same shared 10/min counter as "pair": code guessing and
+            // pairing-prompt bombing are throttled across BOTH endpoints,
+            // not per method.
+            enforce_pair_rate_limit(&state)?;
             let session_nonce = req.session_nonce.ok_or("Pairing session required")?;
             let user_code = req.code.ok_or("Code required")?;
             if pwdvault_infrastructure::pairing::verify(
@@ -126,7 +130,7 @@ pub(super) fn execute_command(
 
         "update_settings" => {
             let settings_json = req.settings.ok_or("Settings required".to_string())?;
-            let settings: database::Settings = serde_json::from_value(settings_json)
+            let settings: Settings = serde_json::from_value(settings_json)
                 .map_err(|_| "Invalid settings".to_string())?;
             service::update_settings(&state, settings)
                 .map(|s| serde_json::to_value(s).expect("settings serializable"))

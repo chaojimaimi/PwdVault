@@ -72,7 +72,7 @@ impl VaultHeader {
     }
 
     /// Serialize and encrypt the header with enc_key.
-    pub fn seal(&self, enc_key: &[u8; 32]) -> Result<Vec<u8>, DatabaseError> {
+    pub(crate) fn seal(&self, enc_key: &[u8; 32]) -> Result<Vec<u8>, DatabaseError> {
         let plain = bincode::serialize(self)
             .map_err(|e| DatabaseError::SerializationError(e.to_string()))?;
         let aad = b"vault_header";

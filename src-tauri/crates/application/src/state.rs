@@ -35,7 +35,7 @@ pub type ReloadWindowFn = Box<dyn Fn() + Send + Sync>;
 /// parallel; a resident static gate would leak between tests).
 #[cfg(test)]
 #[derive(Default)]
-pub struct WindowGate {
+pub(crate) struct WindowGate {
     armed: Mutex<bool>,
     arrived: Mutex<bool>,
     arrived_signal: Condvar,
@@ -143,9 +143,9 @@ pub struct AppState {
     /// Test seams (cfg(test)): one-shot parks placed right after each D8
     /// window's drain. See [`WindowGate`].
     #[cfg(test)]
-    pub merge_window_gate: WindowGate,
+    pub(crate) merge_window_gate: WindowGate,
     #[cfg(test)]
-    pub reseal_window_gate: WindowGate,
+    pub(crate) reseal_window_gate: WindowGate,
 }
 
 impl AppState {

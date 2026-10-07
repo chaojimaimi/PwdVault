@@ -206,7 +206,7 @@ pub use macos::{MacSecretStore, MacSyncSecretStore};
 
 #[cfg(not(target_os = "macos"))]
 /// Stub used on platforms without a supported credential store (D7).
-pub struct UnavailableSecretStore;
+pub(crate) struct UnavailableSecretStore;
 
 #[cfg(not(target_os = "macos"))]
 impl SecretStore for UnavailableSecretStore {

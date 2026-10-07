@@ -147,7 +147,6 @@ fn reject_busy_connection(stream: &mut TcpStream) {
 
 #[derive(Debug)]
 pub(super) struct ParsedHttpRequest {
-    pub(super) method: String,
     pub(super) path: String,
     pub(super) headers: HashMap<String, String>,
     pub(super) body: Zeroizing<String>,
@@ -278,7 +277,6 @@ pub(super) fn read_http_request(stream: &mut TcpStream) -> Result<ParsedHttpRequ
     let body = String::from_utf8(body).map_err(|_| HttpFailure::new(400, "Invalid request"))?;
 
     Ok(ParsedHttpRequest {
-        method: method.to_string(),
         path: path.to_string(),
         headers,
         body: Zeroizing::new(body),

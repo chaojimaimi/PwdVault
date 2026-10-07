@@ -188,7 +188,8 @@ pub fn decrypt_snapshot_with_cek(
 /// envelope (version + kdf record + wrapped_cek). The sync engine publishes
 /// a new revision this way: same container password/KDF, same cek, only the
 /// snapshot ciphertext rotates.
-pub fn update_container_snapshot(
+#[cfg(test)]
+pub(crate) fn update_container_snapshot(
     container_bytes: &[u8],
     cek: &[u8; KEY_SIZE],
     snapshot: &SyncSnapshot,

@@ -222,7 +222,7 @@ pub fn refresh_digest(db: &Database, mac_key: &[u8; 32]) -> Result<(), DatabaseE
 /// This is the core digest computation extracted from `refresh_digest` so it
 /// can be called within a caller-owned transaction (§5.1.2 VaultWriteTxn).
 /// The caller is responsible for committing the transaction afterward.
-pub fn compute_digest_from_txn(
+pub(crate) fn compute_digest_from_txn(
     txn: &redb::WriteTransaction,
     mac_key: &[u8; 32],
 ) -> Result<[u8; 32], DatabaseError> {

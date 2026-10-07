@@ -413,6 +413,10 @@ pub(super) fn read_local_rows(
             },
         );
     }
+    // Future callers passing incomplete `secrets` would snapshot empty
+    // passwords into LWW merge — catch it in debug builds. (The documented
+    // fallback inside entries_to_sync stays total on purpose.)
+    debug_assert!(entries.iter().all(|e| secrets.contains_key(&e.id)));
     Ok(LocalRows {
         sync_entries: entries_to_sync(&entries, &secrets),
         sync_groups: groups

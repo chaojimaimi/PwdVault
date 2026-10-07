@@ -554,7 +554,9 @@ pub async fn baidu_start_auth(
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || app::baidu_start_auth(&state))
         .await
-        .map_err(|e| VaultError::InternalError(format!("baidu auth start join error: {}", e)))?
+        .map_err(|e| {
+            VaultError::InternalError(format!("baidu auth start task join error: {}", e))
+        })?
 }
 
 /// P3.4 (D6): Tauri-only — exchange the authorization code (explicit, or
@@ -568,7 +570,9 @@ pub async fn baidu_complete_auth(
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || app::baidu_complete_auth(&state, code))
         .await
-        .map_err(|e| VaultError::InternalError(format!("baidu auth complete join error: {}", e)))?
+        .map_err(|e| {
+            VaultError::InternalError(format!("baidu auth complete task join error: {}", e))
+        })?
 }
 
 #[cfg(test)]

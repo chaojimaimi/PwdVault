@@ -268,7 +268,8 @@ pub fn load_entry(
 }
 
 /// Delete a password entry from the database
-pub fn delete_entry(db: &Database, id: &str) -> Result<bool, DatabaseError> {
+#[cfg(test)]
+pub(crate) fn delete_entry(db: &Database, id: &str) -> Result<bool, DatabaseError> {
     let write_txn = db.begin_write()?;
     let existed = {
         let mut table = write_txn.open_table(ENTRIES_TABLE)?;
@@ -409,7 +410,8 @@ pub fn list_all_groups_bulk(db: &Database, key: &[u8; 32]) -> Result<Vec<Group>,
 }
 
 /// Count groups
-pub fn count_groups(db: &Database) -> Result<usize, DatabaseError> {
+#[cfg(test)]
+pub(crate) fn count_groups(db: &Database) -> Result<usize, DatabaseError> {
     let read_txn = db.begin_read()?;
     let table = read_txn.open_table(GROUPS_TABLE)?;
     Ok(table.len()? as usize)

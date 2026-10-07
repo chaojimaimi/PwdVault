@@ -425,7 +425,7 @@ impl<'a> SessionLease<'a> {
     /// unlocked with a newer generation — the caller should treat a generation
     /// mismatch as a stale-state error).
     #[cfg(test)]
-    pub fn check_valid(&self) -> Result<(), VaultError> {
+    pub(crate) fn check_valid(&self) -> Result<(), VaultError> {
         match &*self.guard {
             SessionInner::Unlocked { generation, .. } if *generation == self.generation => Ok(()),
             _ => Err(VaultError::VaultLocked),

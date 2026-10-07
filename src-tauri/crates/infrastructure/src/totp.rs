@@ -19,6 +19,7 @@ pub const DEFAULT_DIGITS: u8 = 6;
 /// Default time step in seconds (RFC 6238 §5.2 recommends 30).
 pub const DEFAULT_PERIOD: u32 = 30;
 
+#[cfg(test)]
 const BASE32_ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 /// Hash algorithm used for the HMAC in a TOTP scheme.
@@ -95,7 +96,8 @@ pub fn base32_decode(input: &str) -> Result<Vec<u8>, TotpError> {
 }
 
 /// Encode to canonical base32 without padding (authenticator-app style).
-pub fn base32_encode(data: &[u8]) -> String {
+#[cfg(test)]
+pub(crate) fn base32_encode(data: &[u8]) -> String {
     let mut accumulator: u32 = 0;
     let mut bits: u32 = 0;
     let mut out = String::with_capacity(data.len().div_ceil(5) * 8);

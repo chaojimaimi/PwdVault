@@ -12,9 +12,9 @@ use std::path::Path;
 use std::path::PathBuf;
 
 /// The native messaging host name browsers use in `connectNative`.
-pub const HOST_NAME: &str = "com.pwdvault.app";
+pub(crate) const HOST_NAME: &str = "com.pwdvault.app";
 /// Stable ID derived from the public key embedded in the Chrome manifest.
-pub const CHROME_EXTENSION_ID: &str = "kekeibdcccjakipnmdpbafhaeknioaem";
+pub(crate) const CHROME_EXTENSION_ID: &str = "kekeibdcccjakipnmdpbafhaeknioaem";
 pub const FIREFOX_EXTENSION_ID: &str = "pwdvault@pwdvault.app";
 
 /// Register the native messaging host for Chrome and Firefox.

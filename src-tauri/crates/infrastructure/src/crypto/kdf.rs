@@ -93,7 +93,7 @@ impl AdaptiveParams {
     }
 
     /// Convert to Argon2 Params
-    pub fn to_argon2_params(&self) -> Result<Params, KdfError> {
+    pub(crate) fn to_argon2_params(&self) -> Result<Params, KdfError> {
         KdfPolicy::validate(self)?;
         Params::new(self.m_cost, self.t_cost, self.p_cost, None)
             .map_err(|e| KdfError::InvalidParams(e.to_string()))

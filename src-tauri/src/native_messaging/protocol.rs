@@ -12,8 +12,8 @@ use zeroize::Zeroizing;
 
 use pwdvault_application::AppState;
 use pwdvault_domain::constants;
+use pwdvault_domain::PasswordEntry;
 use pwdvault_infrastructure::auth;
-use pwdvault_infrastructure::database;
 
 use super::dispatcher::execute_command;
 use super::server::{read_http_request, write_http_response};
@@ -50,7 +50,7 @@ pub struct NativeRequest {
     #[serde(default)]
     pub tags: Option<Vec<String>>,
     #[serde(default)]
-    pub request: Option<database::PasswordEntry>,
+    pub request: Option<PasswordEntry>,
     #[serde(default)]
     pub options: Option<GeneratorOptions>,
     #[serde(default)]
@@ -95,6 +95,13 @@ pub struct NativeResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
+    // Error triplet: all three fields carry the same failure so older and
+    // newer extension builds can both consume it (wire compatibility).
+    // `error` is the legacy field the popup reads directly; `error_message`
+    // is the same text, preferred by the background worker
+    // (`data?.error_message || data?.error`); `error_code` is a stable
+    // machine-readable tag (REQUEST_REJECTED / COMMAND_FAILED) that no
+    // consumer branches on yet but must not change shape.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -163,7 +170,8 @@ pub(super) fn handle_connection(
             return;
         }
     };
-    debug_assert_eq!(request.method, "POST");
+    // Non-POST is already rejected with 405 by the HTTP layer (server.rs);
+    // re-asserting it here added no information.
     let origin = request.headers.get("origin").cloned();
     // This is a caller label derived by the native host from browser process
     // arguments. The loopback header is not itself an authentication boundary;
@@ -257,9 +265,39 @@ pub(super) fn handle_connection(
 mod tests {
     use std::sync::Arc;
 
-    use super::enforce_pair_rate_limit;
+    use zeroize::Zeroizing;
+
+    use super::execute_command;
+    use super::{enforce_pair_rate_limit, NativeRequest};
     use pwdvault_application::AppState;
     use pwdvault_domain::constants;
+
+    /// Build a minimal pair/pair_confirm request: both branches hit the
+    /// shared rate-limit gate before any pairing logic runs.
+    fn rate_limit_request(command: &str, id: u32) -> NativeRequest {
+        NativeRequest {
+            id,
+            protocol_version: constants::NATIVE_PROTOCOL_VERSION,
+            command: command.to_string(),
+            password: None,
+            url: None,
+            id_param: None,
+            code: Some(Zeroizing::new("000000".to_string())),
+            session_nonce: Some(Zeroizing::new("no-such-nonce".to_string())),
+            title: None,
+            username: None,
+            notes: None,
+            tags: None,
+            request: None,
+            options: None,
+            name: None,
+            group_id: None,
+            settings: None,
+            export_password: None,
+            import_password: None,
+            backup: None,
+        }
+    }
 
     /// CQ-P3b: a concurrent same-window burst must accept exactly the
     /// per-minute budget. With the old two-mutex split, a reset racing
@@ -299,5 +337,75 @@ mod tests {
             .expect("pair rate limit lock poisoned");
         assert_eq!(window.0, constants::MAX_PAIR_REQUESTS_PER_MIN);
         assert!(window.1.is_some(), "the burst must have opened the window");
+    }
+
+    /// v1.2.4: pair_confirm draws from the SAME per-minute budget as pair.
+    /// The first 10 confirms pass the gate (then fail pairing verify — no
+    /// session exists for the caller), and the 11th is rejected by the rate
+    /// limiter before verify ever runs.
+    #[test]
+    fn pair_confirm_shares_pair_rate_limit_budget() {
+        let state = Arc::new(AppState::default());
+
+        for id in 0..constants::MAX_PAIR_REQUESTS_PER_MIN {
+            let err = execute_command(
+                rate_limit_request("pair_confirm", id),
+                Arc::clone(&state),
+                None,
+                Some("confirm-budget-caller".to_string()),
+            )
+            .expect_err("confirm without a session must fail verify");
+            assert_eq!(err, "Invalid or expired code");
+        }
+
+        let err = execute_command(
+            rate_limit_request("pair_confirm", constants::MAX_PAIR_REQUESTS_PER_MIN),
+            Arc::clone(&state),
+            None,
+            Some("confirm-budget-caller".to_string()),
+        )
+        .expect_err("shared budget must be exhausted after the per-minute max");
+        assert!(
+            err.contains("Too many pair requests"),
+            "rate-limit copy expected, got: {err}"
+        );
+    }
+
+    /// Mixed pair/pair_confirm traffic drains one counter: half the budget
+    /// via each method, then the next request of either kind is limited.
+    #[test]
+    fn pair_and_pair_confirm_share_one_budget() {
+        let state = Arc::new(AppState::default());
+        let caller = "mixed-budget-caller".to_string();
+        let half = constants::MAX_PAIR_REQUESTS_PER_MIN / 2;
+
+        for id in 0..half {
+            execute_command(
+                rate_limit_request("pair", id),
+                Arc::clone(&state),
+                None,
+                Some(caller.clone()),
+            )
+            .expect("pair within budget must reach the pairing service");
+            execute_command(
+                rate_limit_request("pair_confirm", id + half),
+                Arc::clone(&state),
+                None,
+                Some(caller.clone()),
+            )
+            .expect_err("wrong-code confirm; only the gate call matters here");
+        }
+
+        let err = execute_command(
+            rate_limit_request("pair", 2 * half),
+            Arc::clone(&state),
+            None,
+            Some(caller),
+        )
+        .expect_err("mixed traffic must exhaust the shared budget");
+        assert!(
+            err.contains("Too many pair requests"),
+            "rate-limit copy expected, got: {err}"
+        );
     }
 }

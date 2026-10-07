@@ -136,7 +136,8 @@ impl MockCloudBackend {
     }
 
     /// Seed the store directly (e.g. pre-existing remote container).
-    pub fn put_file(&self, path: &str, body: &[u8]) {
+    #[cfg(test)]
+    pub(crate) fn put_file(&self, path: &str, body: &[u8]) {
         let mut inner = self.inner.lock().expect("mock backend lock poisoned");
         bump_etag_insert(&mut inner.files, path, body);
     }

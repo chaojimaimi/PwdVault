@@ -29,7 +29,7 @@ pub fn get_token() -> String {
 
 /// Regenerate the API token. This invalidates all existing browser extensions
 /// and requires them to re-pair. Call this when the user wants to revoke extension access.
-pub fn regenerate_token() -> String {
+pub(crate) fn regenerate_token() -> String {
     let mut guard = API_TOKEN.lock().expect("token lock poisoned");
     let new_token = generate_token();
     *guard = new_token.clone();
