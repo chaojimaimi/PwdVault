@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { searchEntries } from '../search';
+import { searchWithIndex } from '../search';
 import type { EntrySummary } from '../../types';
 
 const entries: EntrySummary[] = [
@@ -9,44 +9,44 @@ const entries: EntrySummary[] = [
   { id: '4', title: 'Netflix', username: 'viewer@example.com', url: 'https://netflix.com', tags: ['streaming'], group_id: null, created_at: 0, updated_at: 0 },
 ];
 
-describe('searchEntries', () => {
+describe('searchWithIndex', () => {
   it('returns all entries when query is empty', () => {
-    expect(searchEntries(entries, '')).toHaveLength(4);
-    expect(searchEntries(entries, '  ')).toHaveLength(4);
+    expect(searchWithIndex(entries, '')).toHaveLength(4);
+    expect(searchWithIndex(entries, '  ')).toHaveLength(4);
   });
 
   it('finds exact title match', () => {
-    const results = searchEntries(entries, 'GitHub');
+    const results = searchWithIndex(entries, 'GitHub');
     expect(results).toHaveLength(1);
     expect(results[0].id).toBe('1');
   });
 
   it('finds fuzzy title match with typo', () => {
-    const results = searchEntries(entries, 'githb');
+    const results = searchWithIndex(entries, 'githb');
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results.some(r => r.id === '1')).toBe(true);
   });
 
   it('finds by username', () => {
-    const results = searchEntries(entries, 'admin@company');
+    const results = searchWithIndex(entries, 'admin@company');
     expect(results).toHaveLength(1);
     expect(results[0].id).toBe('3');
   });
 
   it('finds by url domain', () => {
-    const results = searchEntries(entries, 'netflix');
+    const results = searchWithIndex(entries, 'netflix');
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results.some(r => r.id === '4')).toBe(true);
   });
 
   it('finds by tag', () => {
-    const results = searchEntries(entries, 'streaming');
+    const results = searchWithIndex(entries, 'streaming');
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results.some(r => r.id === '4')).toBe(true);
   });
 
   it('returns empty for no match', () => {
-    const results = searchEntries(entries, 'zzzzznonexistent');
+    const results = searchWithIndex(entries, 'zzzzznonexistent');
     expect(results).toHaveLength(0);
   });
 });

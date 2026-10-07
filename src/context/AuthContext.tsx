@@ -87,7 +87,7 @@ export interface AuthContextValue {
 	};
 }
 
-export const AuthContext = createContext<AuthContextValue | null>(null);
+const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
 	const [state, dispatch] = useReducer(authReducer, initialAuthState);

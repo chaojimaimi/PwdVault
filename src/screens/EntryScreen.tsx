@@ -25,6 +25,17 @@ import type {
 } from "../types";
 
 /**
+ * Order-insensitive tags equality that PRESERVES duplicate multiplicity:
+ * sort-then-join, deliberately not a Set — ["a", "a"] and ["a"] must stay
+ * unequal or clearing a duplicate tag would not dirty the form.
+ */
+export function sameTags(a: string[], b: string[]): boolean {
+	if (a.length !== b.length) return false;
+	const canonical = (tags: string[]) => [...tags].sort().join("\u0000");
+	return canonical(a) === canonical(b);
+}
+
+/**
  * Pure diff between the saved entry and the current form, for the save
  * confirmation modal. Every "changed" flag is passed in explicitly (secrets
  * are fetched on demand, so password/notes/TOTP edits are tracked outside
@@ -213,14 +224,13 @@ export function EntryScreen() {
 					formData.group_id,
 			);
 		}
-		return (
-			state.selectedEntry.title !== formData.title ||
-			(state.selectedEntry.url || "") !== (formData.url || "") ||
-			state.selectedEntry.username !== formData.username ||
-			JSON.stringify(state.selectedEntry.tags || []) !==
-				JSON.stringify(formData.tags) ||
-			(state.selectedEntry.group_id || null) !== (formData.group_id || null)
-		);
+	return (
+		state.selectedEntry.title !== formData.title ||
+		(state.selectedEntry.url || "") !== (formData.url || "") ||
+		state.selectedEntry.username !== formData.username ||
+		!sameTags(state.selectedEntry.tags || [], formData.tags) ||
+		(state.selectedEntry.group_id || null) !== (formData.group_id || null)
+	);
 	}, [formData, state.selectedEntry]);
 	const isDirty = metadataDirty || passwordChanged || notesChanged || totpChanged;
 
@@ -682,5 +692,3 @@ export function EntryScreen() {
 		</div>
 	);
 }
-
-export default EntryScreen;

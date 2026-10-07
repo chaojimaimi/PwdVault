@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
-import EntryScreen from "../EntryScreen";
+import { EntryScreen } from "../EntryScreen";
 
 const getEntrySecret = vi.fn();
 const updateEntry = vi.fn().mockResolvedValue({});

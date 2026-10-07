@@ -1,10 +1,5 @@
 // API Types - matches Rust backend
 
-export interface EncryptedData {
-  nonce: number[];
-  ciphertext: number[];
-}
-
 export interface CreateEntryRequest {
   title: string;
   url?: string;
@@ -149,16 +144,6 @@ export interface SyncStatusResponse {
 export interface BaiduAuthStart {
   /** Authorization URL for the system browser. */
   auth_url: string;
-}
-
-export interface VaultState {
-  isInitialized: boolean;
-  isUnlocked: boolean;
-  entries: EntrySummary[];
-  selectedEntry: EntrySummary | null;
-  searchQuery: string;
-  groups: Group[];
-  selectedGroupId?: string | null;
 }
 
 export interface PasswordGeneratorOptions {

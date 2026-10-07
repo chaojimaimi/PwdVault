@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth, useSettings } from "../context/AppContext";
-import type { ManualCheckState } from "../context/SettingsContext";
 import { useTheme } from "../hooks/useTheme";
 import { showToast } from "../utils/toast";
 import { BackHeader } from "../components/BackHeader";
@@ -11,6 +10,7 @@ import { AccessibleDialog } from "../components/AccessibleDialog";
 import { UpdateNotification } from "../components/UpdateNotification";
 import { SecuritySettingsSection } from "../components/SecuritySettingsSection";
 import { SyncSettingsSection } from "../components/SyncSettingsSection";
+import { UpdatesSettingsSection } from "../components/UpdatesSettingsSection";
 
 const AUTO_LOCK_OPTIONS = [
 	{ label: "1 minute", value: 60 },
@@ -22,30 +22,6 @@ const AUTO_LOCK_OPTIONS = [
 	{ label: "1 hour", value: 3600 },
 ];
 
-function formatCheckedTime(ts: number): string {
-	const at = new Date(ts);
-	return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
-}
-
-/** Status line copy for the manual update check (null = nothing to report). */
-function updateCheckStatusText(
-	manualCheck: ManualCheckState,
-	appVersion: string | null,
-): string | null {
-	switch (manualCheck.phase) {
-		case "checking":
-			return "Checking for updates…";
-		case "available":
-			return `Update available: v${manualCheck.version} — use the banner above to install`;
-		case "uptodate":
-			return `You're up to date${appVersion ? ` (v${appVersion})` : ""} — checked ${manualCheck.checkedAt ? formatCheckedTime(manualCheck.checkedAt) : "just now"}`;
-		case "error":
-			return "Couldn't reach the update server — check your connection and try again";
-		default:
-			return null;
-	}
-}
-
 export function SettingsScreen() {
 	const { actions: authActions } = useAuth();
 	const { state, actions } = useSettings();
@@ -55,7 +31,6 @@ export function SettingsScreen() {
 	const [showUnsaved, setShowUnsaved] = useState(false);
 	const [showRevoke, setShowRevoke] = useState(false);
 	const [revoking, setRevoking] = useState(false);
-	const [appVersion, setAppVersion] = useState<string | null>(null);
 	const charsetValid =
 		settings.default_include_uppercase ||
 		settings.default_include_lowercase ||
@@ -71,32 +46,6 @@ export function SettingsScreen() {
 	useEffect(() => {
 		if (state.status === "success") setSettings(state.settings);
 	}, [state.settings, state.status]);
-
-	// Current app version for the Updates section ("Current version" row and
-	// the up-to-date hint). Dynamic import matches the repo's Tauri API usage.
-	useEffect(() => {
-		let cancelled = false;
-		import("@tauri-apps/api/app")
-			.then(({ getVersion }) => getVersion())
-			.then((version) => {
-				if (!cancelled) setAppVersion(version);
-			})
-			.catch(() => {
-				// Not in Tauri (tests / browser preview): keep the placeholder.
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, []);
-
-	const manualCheck = state.manualCheck;
-	// Mirrors the checkForUpdates guards: no re-check while one is in flight
-	// or while an install is downloading / waiting for relaunch.
-	const updateCheckDisabled =
-		manualCheck.phase === "checking" ||
-		state.updatePhase === "downloading" ||
-		state.updatePhase === "ready";
-	const updateCheckStatus = updateCheckStatusText(manualCheck, appVersion);
 
 	useEffect(() => {
 		const warn = (event: BeforeUnloadEvent) => {
@@ -251,42 +200,12 @@ export function SettingsScreen() {
 
 					<div className="settings-divider" />
 
-					<div className="settings-section">
-						<h3 className="settings-section-title">Updates</h3>
-						<div className="option-row">
-							<label htmlFor="check-updates">
-								Check for updates on startup
-							</label>
-							<input
-								id="check-updates"
-								type="checkbox"
-								className="checkbox"
-								checked={settings.check_updates}
-								onChange={(e) =>
-									setSettings({ ...settings, check_updates: e.target.checked })
-								}
-							/>
-						</div>
-						<div className="option-row">
-							<span className="settings-hint">
-								Current version: {appVersion ?? "…"}
-							</span>
-							{/* Manual check: independent of the startup toggle above. */}
-							<button
-								type="button"
-								className="btn btn-secondary"
-								onClick={() => void actions.checkForUpdates()}
-								disabled={updateCheckDisabled}
-							>
-								{manualCheck.phase === "checking"
-									? "Checking…"
-									: "Check for updates"}
-							</button>
-						</div>
-						<p className="update-check-status" aria-live="polite">
-							{updateCheckStatus}
-						</p>
-					</div>
+					<UpdatesSettingsSection
+						checkUpdates={settings.check_updates}
+						onCheckUpdatesChange={(checked) =>
+							setSettings({ ...settings, check_updates: checked })
+						}
+					/>
 
 					<div className="settings-divider" />
 

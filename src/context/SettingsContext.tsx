@@ -111,7 +111,7 @@ const UPDATE_CHECK_TIMEOUT_MS = 5000;
  */
 const MANUAL_UPDATE_CHECK_TIMEOUT_MS = 15000;
 
-export const SettingsContext = createContext<SettingsContextValue | null>(null);
+const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(settingsReducer, initialSettingsState);

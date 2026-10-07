@@ -88,11 +88,3 @@ export function searchWithIndex(
 		.search(trimmed)
 		.map((result: FuseResult<EntrySummary>) => result.item);
 }
-
-/**
- * Backward-compatible alias for {@link searchWithIndex}. Screens that build
- * their own memoized entries array should call `searchWithIndex` so the Fuse
- * index is reused across keystrokes; this wrapper exists for tests and any
- * caller that passes a fresh array.
- */
-export const searchEntries = searchWithIndex;

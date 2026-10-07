@@ -1278,7 +1278,7 @@ function normalizedDomain(rawUrl) {
 			// Update floating button with entry count
 			createFloatingButton(entries);
 		} catch (error) {
-			console.log("Auto-fill check failed:", error);
+			console.warn("Auto-fill check failed:", error);
 		}
 	}
 

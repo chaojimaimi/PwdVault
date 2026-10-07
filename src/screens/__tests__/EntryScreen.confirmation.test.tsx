@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { vi, test, expect } from "vitest";
-import EntryScreen from "../EntryScreen";
+import { EntryScreen } from "../EntryScreen";
 
 // Lightweight smoke test: EntryScreen mounts without crashing when its
 // contexts return empty state. Detailed confirmation behaviour is covered

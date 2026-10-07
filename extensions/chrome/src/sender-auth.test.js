@@ -37,6 +37,18 @@ describe('extension sender authorization', () => {
     expect(entryMatchesSenderUrl({ url: null }, 'https://example.com/login')).toBe(false);
   });
 
+  it('matches scheme-less stored entry URLs on the content path (v1.2.4)', () => {
+    // Same scheme-padding semantics as entryMatchesPageUrl — a scheme-less
+    // entry must not be invisible to auto-fill while the popup can fill it.
+    expect(entryMatchesSenderUrl({ url: 'github.com/acme' }, 'https://github.com/login')).toBe(true);
+    expect(entryMatchesSenderUrl({ url: 'other.test/login' }, 'https://github.com/login')).toBe(false);
+    // Empty entryUrl stays REJECTED — intentional divergence from
+    // entryMatchesPageUrl: auto-fill without a user click needs a URL to
+    // compare against.
+    expect(entryMatchesSenderUrl({ url: '' }, 'https://example.com/login')).toBe(false);
+    expect(entryMatchesSenderUrl({}, 'https://example.com/login')).toBe(false);
+  });
+
   it('accepts the popup but rejects another extension identity', () => {
     const popup = {
       id: RUNTIME_ID,

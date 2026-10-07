@@ -127,7 +127,7 @@ export interface VaultContextValue {
 	};
 }
 
-export const VaultContext = createContext<VaultContextValue | null>(null);
+const VaultContext = createContext<VaultContextValue | null>(null);
 
 export function VaultProvider({ children }: { children: ReactNode }) {
 	const [state, dispatch] = useReducer(vaultReducer, initialVaultState);
