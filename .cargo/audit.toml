@@ -13,12 +13,16 @@
 
 [advisories]
 ignore = [
-    # zip 4.x (transitive of tauri-plugin-updater 2.11.0) — update-archive
+    # zip 4.x (transitive of tauri-plugin-updater) — update-archive
     # extraction symlink permission escape / SUID+SGID preservation. Fix
-    # requires zip >= 9, which drags wry 0.54 -> 0.57 (webview major jump);
-    # deferred to the next minor (v1.4.x/v1.5.x). Exploit requires breaking
-    # the minisign signature chain (golden_contract byte-pinned in CI) or an
-    # https downgrade. Expiry 2026-12-31.
+    # requires zip >= 9, but per the 2026-10-25 crates.io check every
+    # released tauri-plugin-updater version (2.x incl. 2.14.0 AND
+    # 3.0.0-alpha.3) pins zip ^4 — zip >= 9 does not exist upstream, so
+    # v1.4.0 took the 2.x-latest plugin (2.14.0, wry 0.54 -> 0.57) and the
+    # allowlist rides on with a new expiry. Exploit requires breaking the
+    # minisign signature chain (golden_contract byte-pinned in CI) or an
+    # https downgrade. Expiry 2027-06-30: remove in the next minor once any
+    # Tauri version line ships zip >= 9.
     "RUSTSEC-2026-0367",
     "RUSTSEC-2026-0368",
     "RUSTSEC-2026-0369",

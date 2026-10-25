@@ -25,6 +25,10 @@ import { useAuth } from "./AuthContext";
 
 export interface VaultState {
 	entries: EntrySummary[];
+	/** v1.4.0: trash rows (tombstones visible to the user). Not searched, not
+	 * sorted — a simple list the trash view owns. */
+	deletedEntries: EntrySummary[];
+	deletedStatus: ResourceStatus;
 	groups: Group[];
 	selectedGroupId: string | null;
 	selectedEntry: EntrySummary | null;
@@ -37,6 +41,11 @@ export interface VaultState {
 
 type VaultAction =
 	| { type: "SET_ENTRIES"; payload: EntrySummary[] }
+	| { type: "SET_DELETED_ENTRIES"; payload: EntrySummary[] }
+	| {
+			type: "SET_DELETED_RESOURCE";
+			payload: { status: ResourceStatus };
+	  }
 	| { type: "SET_GROUPS"; payload: Group[] }
 	| { type: "SET_SELECTED_GROUP"; payload: string | null }
 	| { type: "SET_SELECTED_ENTRY"; payload: EntrySummary | null }
@@ -56,6 +65,8 @@ type VaultAction =
 
 const initialVaultState: VaultState = {
 	entries: [],
+	deletedEntries: [],
+	deletedStatus: "idle",
 	groups: [],
 	selectedGroupId: null,
 	selectedEntry: null,
@@ -70,6 +81,10 @@ function vaultReducer(state: VaultState, action: VaultAction): VaultState {
 	switch (action.type) {
 		case "SET_ENTRIES":
 			return { ...state, entries: action.payload };
+		case "SET_DELETED_ENTRIES":
+			return { ...state, deletedEntries: action.payload };
+		case "SET_DELETED_RESOURCE":
+			return { ...state, deletedStatus: action.payload.status };
 		case "SET_GROUPS":
 			return { ...state, groups: action.payload };
 		case "SET_SELECTED_GROUP":
@@ -127,6 +142,10 @@ export interface VaultContextValue {
 			data: Parameters<typeof api.updateEntry>[1],
 		) => Promise<EntrySummary>;
 		deleteEntry: (id: string) => Promise<void>;
+		loadDeletedEntries: () => Promise<void>;
+		restoreEntry: (id: string) => Promise<void>;
+		purgeEntry: (id: string) => Promise<void>;
+		emptyTrash: () => Promise<void>;
 		setSearchQuery: (query: string) => void;
 		exportVault: (password: string) => Promise<VaultBackup>;
 		importVault: (
@@ -272,6 +291,48 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 				await api.removeEntry(id);
 				dispatch({ type: "SET_SELECTED_ENTRY", payload: null });
 				await actions.loadEntries();
+			},
+
+			loadDeletedEntries: async () => {
+				dispatch({
+					type: "SET_DELETED_RESOURCE",
+					payload: { status: "loading" },
+				});
+				try {
+					const deleted = await api.listDeletedEntries();
+					dispatch({ type: "SET_DELETED_ENTRIES", payload: deleted });
+					dispatch({
+						type: "SET_DELETED_RESOURCE",
+						payload: { status: "success" },
+					});
+				} catch (error) {
+					dispatch({
+						type: "SET_DELETED_RESOURCE",
+						payload: { status: "error" },
+					});
+					throw error;
+				}
+			},
+
+			restoreEntry: async (id: string) => {
+				await api.restoreEntry(id);
+				// Both lists change: the row leaves the trash and re-enters the
+				// live list (with its updated_at bump). The live reload failure
+				// must not mask the successful restore.
+				await Promise.all([
+					actions.loadEntries().catch(() => {}),
+					actions.loadDeletedEntries(),
+				]);
+			},
+
+			purgeEntry: async (id: string) => {
+				await api.purgeEntry(id);
+				await actions.loadDeletedEntries();
+			},
+
+			emptyTrash: async () => {
+				await api.emptyTrash();
+				await actions.loadDeletedEntries();
 			},
 
 			setSearchQuery: (query: string) => {

@@ -636,3 +636,64 @@ fn legacy_fixtures_full_chain_round_trip() {
         "fixture-password-0"
     );
 }
+
+// ---------------------------------------------------------------------------
+// v1.4.0 (WP5): boot settings load applies the global-shortcut config
+// ---------------------------------------------------------------------------
+
+/// `setup_vault`'s settings load must drive the apply_global_shortcut
+/// callback with the persisted values — this is how a disabled/customized
+/// binding replaces the boot default right after the DB opens.
+#[test]
+fn setup_vault_applies_persisted_shortcut_config() {
+    use pwdvault_infrastructure::crypto::{create_verification_header, kdf::AdaptiveParams};
+    use std::sync::Mutex;
+
+    let temp = TempDir::new().unwrap();
+    let db_path = temp.path().join("shortcut-vault.db");
+    let params = AdaptiveParams {
+        m_cost: 16384,
+        t_cost: 1,
+        p_cost: 1,
+    };
+    let (master_key, _) = pwdvault_infrastructure::crypto::kdf::derive_key_with_params(
+        TEST_PASSWORD,
+        &TEST_SALT,
+        &params,
+    )
+    .unwrap();
+    let verification = create_verification_header(&master_key, TEST_SALT, params).unwrap();
+    {
+        let db = database::init_database(&db_path).unwrap();
+        database::save_verification_data(&db, &verification).unwrap();
+        database::save_settings(
+            &db,
+            &pwdvault_infrastructure::database::Settings {
+                global_shortcut_enabled: false,
+                global_shortcut: "CmdOrCtrl+P".to_string(),
+                ..pwdvault_infrastructure::database::Settings::default()
+            },
+        )
+        .unwrap();
+    }
+
+    let state = Arc::new(AppState::default());
+    let applied: Arc<Mutex<Vec<(bool, String)>>> = Arc::new(Mutex::new(Vec::new()));
+    let applied_clone = applied.clone();
+    *state.apply_global_shortcut_fn.lock().unwrap() =
+        Some(Box::new(move |enabled, accelerator| {
+            applied_clone
+                .lock()
+                .unwrap()
+                .push((enabled, accelerator.to_string()));
+            Ok(())
+        }));
+
+    assert!(setup_vault_at(&db_path, &state).unwrap());
+    let calls = applied.lock().unwrap();
+    assert_eq!(
+        calls.as_slice(),
+        &[(false, "CmdOrCtrl+P".to_string())],
+        "boot settings load must re-apply the persisted shortcut config"
+    );
+}

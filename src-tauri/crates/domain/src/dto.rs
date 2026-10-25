@@ -80,6 +80,11 @@ pub struct TotpCodeResponse {
 }
 
 /// Summary of password entry (without decrypted password).
+///
+/// v1.4.0: `last_used_at` powers the "Recent" vault sort; `deleted_at` is
+/// `Some` only in `list_deleted_entries` (trash) responses. Both are
+/// device-local / tombstone metadata and are ignored by the sync domain
+/// (`SyncEntry` carries neither).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EntrySummary {
     pub id: String,
@@ -90,6 +95,9 @@ pub struct EntrySummary {
     pub group_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    pub last_used_at: Option<i64>,
+    #[serde(default)]
+    pub deleted_at: Option<i64>,
 }
 
 impl From<PasswordEntry> for EntrySummary {
@@ -103,6 +111,8 @@ impl From<PasswordEntry> for EntrySummary {
             group_id: entry.group_id,
             created_at: entry.created_at,
             updated_at: entry.updated_at,
+            last_used_at: entry.last_used_at,
+            deleted_at: entry.deleted_at,
         }
     }
 }

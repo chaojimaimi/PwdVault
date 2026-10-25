@@ -29,6 +29,21 @@ pub const ENTRIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("en
 pub const GROUPS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("groups");
 pub const SETTINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("settings");
 
+/// Purge ledger (v1.4.0): entry ids the user permanently deleted, with the
+/// purge timestamp as the value (FIFO eviction order). Bookkeeping only —
+/// deliberately NOT covered by the integrity digest (compute_db_digest walks
+/// the four user-data tables): tampering with it can at worst re-expose or
+/// hide tombstones in the trash UI, never secrets, and keeping it outside
+/// the digest lets older builds open the same database without digest
+/// churn. Never synced.
+pub const PURGED_ENTRIES_TABLE: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("purged_entries");
+
+/// FIFO cap for the purge ledger. Overflow is a documented trade-off: the
+/// oldest id leaves the ledger, so its remote tombstone can reappear in the
+/// trash and the user can purge it again.
+pub const MAX_PURGED_LEDGER: usize = 500;
+
 pub mod entry_codec;
 pub mod group_codec;
 pub mod integrity;
@@ -162,6 +177,11 @@ fn upgrade_legacy_settings(legacy: LegacySettingsV1) -> Settings {
         default_include_numbers: legacy.default_include_numbers,
         default_include_symbols: legacy.default_include_symbols,
         check_updates: true,
+        // The legacy six-field row predates all three: defaults match the
+        // serde defaults a missing-field JSON row would receive.
+        sort_mode: "recent".to_string(),
+        global_shortcut_enabled: true,
+        global_shortcut: "CmdOrCtrl+Shift+Space".to_string(),
     }
 }
 
@@ -518,6 +538,39 @@ mod tests {
         assert!(load_entry(&db, &TEST_KEY, &entry.id, false)
             .unwrap()
             .is_none());
+    }
+
+    /// v1.4.0 settings fields: a pre-v1.4.0 JSON row (no sort_mode /
+    /// global_shortcut_* keys) reads with the documented defaults, and the
+    /// new fields round-trip through the normal save/load path.
+    #[test]
+    fn settings_without_v140_fields_get_defaults_and_round_trip() {
+        let (db, _temp) = get_test_db();
+        let legacy_json = br#"{"auto_lock_secs":600,"default_length":16,
+            "default_include_uppercase":true,"default_include_lowercase":true,
+            "default_include_numbers":true,"default_include_symbols":true,
+            "check_updates":true}"#;
+        let txn = db.begin_write().unwrap();
+        {
+            let mut table = txn.open_table(SETTINGS_TABLE).unwrap();
+            table.insert("current", &legacy_json[..]).unwrap();
+        }
+        txn.commit().unwrap();
+
+        let loaded = load_settings(&db).unwrap();
+        assert_eq!(loaded.sort_mode, "recent");
+        assert!(loaded.global_shortcut_enabled);
+        assert_eq!(loaded.global_shortcut, "CmdOrCtrl+Shift+Space");
+
+        let mut updated = loaded;
+        updated.sort_mode = "alpha".to_string();
+        updated.global_shortcut_enabled = false;
+        updated.global_shortcut = "CmdOrCtrl+P".to_string();
+        save_settings(&db, &updated).unwrap();
+        let reloaded = load_settings(&db).unwrap();
+        assert_eq!(reloaded.sort_mode, "alpha");
+        assert!(!reloaded.global_shortcut_enabled);
+        assert_eq!(reloaded.global_shortcut, "CmdOrCtrl+P");
     }
 
     #[test]

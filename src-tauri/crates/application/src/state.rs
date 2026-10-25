@@ -23,6 +23,11 @@ use crate::session::{SessionLease, VaultSession};
 
 pub type UpdateLockMenuFn = Box<dyn Fn(&str) + Send + Sync>;
 pub type ReloadWindowFn = Box<dyn Fn() + Send + Sync>;
+/// v1.4.0 (WP5): (re)register the global shortcut. Implemented by the
+/// tauri-app adapter (shortcuts.rs); the application layer calls it whenever
+/// persisted settings could change the binding (boot settings load, settings
+/// save). Errors carry a user-presentable message.
+pub type ApplyGlobalShortcutFn = Box<dyn Fn(bool, &str) -> Result<(), String> + Send + Sync>;
 
 /// One-shot parking gate for the D8-window regression tests (test-only).
 ///
@@ -104,6 +109,9 @@ pub struct AppState {
     pub update_lock_menu_fn: Mutex<Option<UpdateLockMenuFn>>,
     /// Closure to reload the main window (for auto-lock).
     pub reload_window_fn: Mutex<Option<ReloadWindowFn>>,
+    /// v1.4.0 (WP5): closure to (re)register the global shortcut — see
+    /// [`ApplyGlobalShortcutFn`].
+    pub apply_global_shortcut_fn: Mutex<Option<ApplyGlobalShortcutFn>>,
     /// Dynamic auto-lock timeout in seconds (loaded from settings).
     pub auto_lock_secs: Mutex<u64>,
     /// Number of consecutive failed unlock attempts.
@@ -170,6 +178,25 @@ impl AppState {
         }
     }
 
+    /// v1.4.0 (WP5): apply the persisted global-shortcut configuration.
+    /// Success no-op when no callback is installed (tests / NM-only
+    /// processes — the shortcut is a desktop-UI-only feature); registration
+    /// failures are logged and swallowed here: the interactive validation
+    /// path is the `register_global_shortcut` command, which returns the
+    /// error to the settings page, while settings saves must not fail after
+    /// the row is already persisted.
+    pub fn apply_global_shortcut(&self, enabled: bool, accelerator: &str) {
+        let guard = self
+            .apply_global_shortcut_fn
+            .lock()
+            .expect("shortcut lock poisoned");
+        if let Some(apply) = guard.as_ref() {
+            if let Err(error) = apply(enabled, accelerator) {
+                tracing::warn!("global shortcut registration failed: {error}");
+            }
+        }
+    }
+
     /// Check if the vault is unlocked.
     pub fn is_unlocked(&self) -> bool {
         self.session.is_unlocked()
@@ -204,6 +231,7 @@ impl Default for AppState {
             session: VaultSession::new(),
             update_lock_menu_fn: Mutex::new(None),
             reload_window_fn: Mutex::new(None),
+            apply_global_shortcut_fn: Mutex::new(None),
             auto_lock_secs: Mutex::new(AUTO_LOCK_SECS),
             failed_unlock_attempts: Mutex::new(0),
             lockout_until: Mutex::new(None),

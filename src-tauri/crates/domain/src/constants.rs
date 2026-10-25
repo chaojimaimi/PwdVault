@@ -40,6 +40,12 @@ pub const NATIVE_PROTOCOL_VERSION: u16 = 1;
 /// Default auto-lock timeout in seconds (10 minutes).
 pub const AUTO_LOCK_SECS: u64 = 600;
 
+/// Minimum interval (seconds) between two persisted `last_used_at` bumps for
+/// the same entry (v1.4.0). Bounds the write amplification §5.1.2 originally
+/// removed the persistence for: at most one re-seal + digest refresh per
+/// entry per minute of active use.
+pub const LAST_USED_BUMP_THROTTLE_SECS: i64 = 60;
+
 /// Grace window (seconds) that any explicit vault operation — desktop IPC or
 /// browser-extension request alike — adds to the auto-lock deadline
 /// (v1.2.0 SEC-L5). The deadline is `max(last_local_activity + auto_lock,

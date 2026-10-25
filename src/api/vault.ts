@@ -52,6 +52,11 @@ export async function generatePassword(options: PasswordGeneratorOptions): Promi
     includeLowercase: options.includeLowercase,
     includeNumbers: options.includeNumbers,
     includeSymbols: options.includeSymbols,
+    mode: options.mode ?? 'password',
+    words: options.words ?? null,
+    separator: options.separator ?? null,
+    capitalize: options.capitalize ?? null,
+    appendNumber: options.appendNumber ?? null,
   });
 }
 
@@ -79,6 +84,25 @@ export async function updateEntry(id: string, request: UpdateEntryRequest): Prom
 
 export async function removeEntry(id: string): Promise<boolean> {
   return invoke('remove_entry', { id });
+}
+
+// Trash (v1.4.0) — desktop-only commands (the extension bridge has none of
+// these; D6).
+
+export async function listDeletedEntries(): Promise<EntrySummary[]> {
+  return invoke('list_deleted_entries');
+}
+
+export async function restoreEntry(id: string): Promise<EntrySummary> {
+  return invoke('restore_entry', { id });
+}
+
+export async function purgeEntry(id: string): Promise<boolean> {
+  return invoke('purge_entry', { id });
+}
+
+export async function emptyTrash(): Promise<number> {
+  return invoke('empty_trash');
 }
 
 // Group Management
@@ -111,6 +135,14 @@ export async function updateSettings(settings: Settings): Promise<Settings> {
 
 export async function revokeExtensionAccess(): Promise<boolean> {
   return invoke('revoke_extension_access');
+}
+
+/** v1.4.0: (re)register the global shortcut — validation errors surface here. */
+export async function registerGlobalShortcut(
+  enabled: boolean,
+  shortcut: string,
+): Promise<void> {
+  return invoke('register_global_shortcut', { enabled, shortcut });
 }
 
 // Import/Export

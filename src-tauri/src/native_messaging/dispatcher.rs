@@ -15,7 +15,7 @@ use pwdvault_domain::constants;
 use pwdvault_domain::Settings;
 use pwdvault_infrastructure::auth;
 
-use super::protocol::{enforce_pair_rate_limit, GeneratorOptions, NativeRequest};
+use super::protocol::{enforce_pair_rate_limit, GeneratorMode, NativeRequest};
 
 /// Convert a `VaultError` into a sanitized user-facing error message for HTTP
 /// responses. Internal details (paths, serialization errors, etc.) are stripped.
@@ -174,20 +174,29 @@ pub(super) fn execute_command(
         }
 
         "generate_password" => {
-            let options = req.options.unwrap_or(GeneratorOptions {
-                length: 16,
-                include_uppercase: true,
-                include_lowercase: true,
-                include_numbers: true,
-                include_symbols: true,
-            });
-            service::generate_password(
-                options.length,
-                options.include_uppercase,
-                options.include_lowercase,
-                options.include_numbers,
-                options.include_symbols,
-            )
+            let options = req.options.unwrap_or_default();
+            // v1.4.0: one command, three backends. `mode` defaults to
+            // Password (serde default) so pre-v1.4.0 payloads are untouched.
+            match options.mode {
+                GeneratorMode::Password => service::generate_password(
+                    options.length,
+                    options.include_uppercase,
+                    options.include_lowercase,
+                    options.include_numbers,
+                    options.include_symbols,
+                ),
+                GeneratorMode::Passphrase => service::generate_passphrase(
+                    options.words,
+                    options.separator.as_deref().unwrap_or("-"),
+                    options.capitalize,
+                    options.append_number,
+                ),
+                // PIN reuses the shared `length` field (saturating cast; the
+                // domain validation rejects anything outside 4..=16).
+                GeneratorMode::Pin => {
+                    service::generate_pin(options.length.min(u8::MAX as usize) as u8)
+                }
+            }
             .map(|password| serde_json::to_value(password).expect("password serializable"))
             .map_err(vault_error_to_message)
         }

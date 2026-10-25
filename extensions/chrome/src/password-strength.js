@@ -96,3 +96,66 @@ export function getPasswordStrength(password) {
 
 	return { score, label };
 }
+
+/**
+ * Mode-aware generator strength (v1.4.0) — byte-parity port of
+ * src/utils/passwordStrength.ts `getGeneratorStrength` (the desktop is the
+ * source of truth; the parity test pins both entry points).
+ *
+ * Charset passwords go through the heuristic scorer above; passphrase and
+ * PIN entropy is computed from the PARAMETERS exactly like the Rust
+ * generator: passphrase = words*log2(1296) (+ log2(100) with the appendix
+ * number), pin = len*log2(10).
+ */
+export function getGeneratorStrength(
+	mode,
+	value,
+	params = {},
+) {
+	if (mode === 'password') return getPasswordStrength(value);
+	if (!value) return { score: 0, label: '' };
+
+	let bits;
+	if (mode === 'passphrase') {
+		const words = Math.max(0, params.words ?? 0);
+		bits = words * Math.log2(1296) + (params.appendNumber ? Math.log2(100) : 0);
+	} else {
+		bits = Math.max(0, params.length ?? 0) * Math.log2(10);
+	}
+
+	// Piecewise anchors (bits → score): linear between points.
+	const anchors = [
+		[0, 0],
+		[28, 20],
+		[45, 40],
+		[60, 60],
+		[80, 80],
+		[110, 100],
+	];
+	let score = 100;
+	for (let i = 1; i < anchors.length; i += 1) {
+		const [hiBits, hiScore] = anchors[i];
+		if (bits <= hiBits) {
+			const [loBits, loScore] = anchors[i - 1];
+			score =
+				loScore + ((bits - loBits) / (hiBits - loBits)) * (hiScore - loScore);
+			break;
+		}
+	}
+	score = Math.max(0, Math.min(100, Math.round(score)));
+
+	let label;
+	if (score <= 20) {
+		label = 'Very Weak';
+	} else if (score <= 40) {
+		label = 'Weak';
+	} else if (score <= 60) {
+		label = 'Fair';
+	} else if (score <= 80) {
+		label = 'Strong';
+	} else {
+		label = 'Very Strong';
+	}
+
+	return { score, label };
+}

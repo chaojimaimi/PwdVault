@@ -1,7 +1,7 @@
 // PwdVault Popup Script - Enhanced with Groups, Generator UI, and Theme Switching
 import Fuse from "./fuse.min.mjs";
 import { entryMatchesPageUrl } from "../sender-auth.js";
-import { getPasswordStrength } from "../password-strength.js";
+import { getGeneratorStrength } from "../password-strength.js";
 import { CLIPBOARD_CLEAR_DELAY_MS, digestText } from "../clipboard-clear.js";
 
 // Handle of the pending toast hide timer. A new toast cancels the previous
@@ -38,8 +38,9 @@ class PopupApp {
 			expandedEntryId: null,
 			visiblePasswords: new Set(),
 			theme: "light",
-			// Generator state
+			// Generator state (v1.4.0: three modes)
 			generatedPassword: "",
+			generatorMode: "password",
 			generatorOptions: {
 				length: 16,
 				includeUppercase: true,
@@ -47,6 +48,13 @@ class PopupApp {
 				includeNumbers: true,
 				includeSymbols: true,
 			},
+			passphraseOptions: {
+				words: 6,
+				separator: "-",
+				capitalize: false,
+				appendNumber: false,
+			},
+			pinLength: 6,
 			generatorCopied: false,
 			// Pairing state
 			pairingStarted: false,
@@ -347,8 +355,17 @@ class PopupApp {
 			return { score: 0, label: "", color: "var(--color-text-muted)" };
 		// Same scoring engine as the desktop (src/utils/passwordStrength.ts,
 		// ported in ../password-strength.js) so both UIs agree on the number
-		// and the five-tier label.
-		const { score, label } = getPasswordStrength(password);
+		// and the five-tier label. v1.4.0: the generator screen is mode-aware
+		// — passphrase/PIN score from their parameters, exactly like the
+		// Rust generator's entropy accounting.
+		const mode = this.state.generatorMode;
+		const { score, label } = getGeneratorStrength(
+			mode,
+			password,
+			mode === "passphrase"
+				? this.state.passphraseOptions
+				: { length: this.state.pinLength },
+		);
 		return {
 			score,
 			label,
@@ -692,34 +709,16 @@ class PopupApp {
 
 	renderGenerator() {
 		const opts = this.state.generatorOptions;
+		const pass = this.state.passphraseOptions;
+		const mode = this.state.generatorMode;
 		const password = this.state.generatedPassword;
 		const strength = this.getPasswordStrength(password);
 		const copied = this.state.generatorCopied;
 
-		return `
-      <div class="header">
-        <div class="header-brand">
-          <button class="icon-btn" id="back-btn" title="Back" aria-label="Go back">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="15 18 9 12 15 6"/>
-            </svg>
-          </button>
-          <h1>Password Generator</h1>
-        </div>
-      </div>
+		const modeTab = (id, label) => `
+        <button class="mode-tab ${mode === id ? "active" : ""}" data-mode="${id}" role="tab" aria-selected="${mode === id}">${label}</button>`;
 
-      <div class="generator-content">
-        <div class="password-preview" id="password-preview">
-          ${password ? this.escapeHtml(password) : "Generating..."}
-        </div>
-
-        <div class="strength-meter" role="meter" aria-label="Password strength: ${this.escapeHtml(strength.label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${strength.score}">
-          <div class="strength-bar">
-            <div class="strength-bar-fill" style="width: ${strength.score}%; background-color: ${strength.color}"></div>
-          </div>
-          <span class="strength-label" style="color: ${strength.color}">${strength.label}</span>
-        </div>
-
+		const passwordOptions = `
         <div class="option-group">
           <div class="option-row">
             <label id="gen-length-label">Length: ${opts.length}</label>
@@ -746,7 +745,84 @@ class PopupApp {
             <input type="checkbox" id="gen-symbols" ${opts.includeSymbols ? "checked" : ""} />
             <label for="gen-symbols">Symbols (!@#$...)</label>
           </div>
+        </div>`;
+
+		const passphraseOptions = `
+        <div class="option-group">
+          <div class="option-row">
+            <label id="gen-words-label">Words: ${pass.words}</label>
+          </div>
+          <div class="length-control">
+            <input type="range" id="gen-words" min="3" max="10" value="${pass.words}" />
+          </div>
+          <div class="option-row">
+            <label for="gen-separator">Separator</label>
+            <select id="gen-separator" class="form-select">
+              <option value="-" ${pass.separator === "-" ? "selected" : ""}>Hyphen (-)</option>
+              <option value=" " ${pass.separator === " " ? "selected" : ""}>Space</option>
+              <option value="." ${pass.separator === "." ? "selected" : ""}>Period (.)</option>
+              <option value="_" ${pass.separator === "_" ? "selected" : ""}>Underscore (_)</option>
+              <option value="" ${pass.separator === "" ? "selected" : ""}>None</option>
+            </select>
+          </div>
+          <div class="checkbox-wrapper">
+            <input type="checkbox" id="gen-capitalize" ${pass.capitalize ? "checked" : ""} />
+            <label for="gen-capitalize">Capitalize words</label>
+          </div>
+          <div class="checkbox-wrapper">
+            <input type="checkbox" id="gen-append-number" ${pass.appendNumber ? "checked" : ""} />
+            <label for="gen-append-number">Append number (0-99)</label>
+          </div>
+        </div>`;
+
+		const pinOptions = `
+        <div class="option-group">
+          <div class="option-row">
+            <label id="gen-pin-length-label">PIN length: ${this.state.pinLength}</label>
+          </div>
+          <div class="length-control">
+            <input type="range" id="gen-pin-length" min="4" max="16" value="${this.state.pinLength}" />
+          </div>
+        </div>`;
+
+		const modeOptions =
+			mode === "passphrase"
+				? passphraseOptions
+				: mode === "pin"
+					? pinOptions
+					: passwordOptions;
+
+		return `
+      <div class="header">
+        <div class="header-brand">
+          <button class="icon-btn" id="back-btn" title="Back" aria-label="Go back">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+          </button>
+          <h1>Password Generator</h1>
         </div>
+      </div>
+
+      <div class="generator-content">
+        <div class="mode-tabs" role="tablist" aria-label="Generator mode">
+          ${modeTab("password", "Password")}
+          ${modeTab("passphrase", "Passphrase")}
+          ${modeTab("pin", "PIN")}
+        </div>
+
+        <div class="password-preview" id="password-preview">
+          ${password ? this.escapeHtml(password) : "Generating..."}
+        </div>
+
+        <div class="strength-meter" role="meter" aria-label="Password strength: ${this.escapeHtml(strength.label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${strength.score}">
+          <div class="strength-bar">
+            <div class="strength-bar-fill" style="width: ${strength.score}%; background-color: ${strength.color}"></div>
+          </div>
+          <span class="strength-label" style="color: ${strength.color}">${strength.label}</span>
+        </div>
+
+        ${modeOptions}
 
         <button class="btn btn-secondary" id="gen-regenerate">Generate New Password</button>
       </div>
@@ -1296,6 +1372,71 @@ class PopupApp {
 			};
 		}
 
+		// v1.4.0: mode tabs — switching re-renders (options differ per mode)
+		// and generates for the newly selected backend.
+		document.querySelectorAll(".mode-tab").forEach((tab) => {
+			tab.onclick = () => {
+				const next = tab.dataset.mode;
+				if (!next || next === this.state.generatorMode) return;
+				this.state.generatorMode = next;
+				this.state.generatedPassword = "";
+				this.render();
+				if (!this.state.generatedPassword) {
+					this.handleGenerate();
+				}
+			};
+		});
+
+		// Passphrase words slider (input=display only, change=generate —
+		// same drag discipline as the password length slider below).
+		const wordsSlider = document.getElementById("gen-words");
+		if (wordsSlider) {
+			wordsSlider.oninput = (e) => {
+				this.state.passphraseOptions.words = parseInt(e.target.value);
+				const label = document.getElementById("gen-words-label");
+				if (label) {
+					label.textContent = `Words: ${this.state.passphraseOptions.words}`;
+				}
+			};
+			wordsSlider.onchange = () => this.handleGenerate();
+		}
+
+		const separatorSelect = document.getElementById("gen-separator");
+		if (separatorSelect) {
+			separatorSelect.onchange = (e) => {
+				this.state.passphraseOptions.separator = e.target.value;
+				this.handleGenerate();
+			};
+		}
+
+		const capitalizeBox = document.getElementById("gen-capitalize");
+		if (capitalizeBox) {
+			capitalizeBox.onchange = (e) => {
+				this.state.passphraseOptions.capitalize = e.target.checked;
+				this.handleGenerate();
+			};
+		}
+
+		const appendNumberBox = document.getElementById("gen-append-number");
+		if (appendNumberBox) {
+			appendNumberBox.onchange = (e) => {
+				this.state.passphraseOptions.appendNumber = e.target.checked;
+				this.handleGenerate();
+			};
+		}
+
+		const pinSlider = document.getElementById("gen-pin-length");
+		if (pinSlider) {
+			pinSlider.oninput = (e) => {
+				this.state.pinLength = parseInt(e.target.value);
+				const label = document.getElementById("gen-pin-length-label");
+				if (label) {
+					label.textContent = `PIN length: ${this.state.pinLength}`;
+				}
+			};
+			pinSlider.onchange = () => this.handleGenerate();
+		}
+
 		// Length slider — while dragging, only update the display and state.
 		// Generation fires on `change` (release): every `input` event used to
 		// spawn a native-messaging host process, one per pixel of drag.
@@ -1370,15 +1511,26 @@ class PopupApp {
 	async handleGenerate() {
 		try {
 			const opts = this.state.generatorOptions;
+			const mode = this.state.generatorMode;
+			const options =
+				mode === "passphrase"
+					? {
+							mode,
+							...this.state.passphraseOptions,
+						}
+					: mode === "pin"
+						? { mode, length: this.state.pinLength }
+						: {
+								mode,
+								length: opts.length,
+								uppercase: opts.includeUppercase,
+								lowercase: opts.includeLowercase,
+								numbers: opts.includeNumbers,
+								symbols: opts.includeSymbols,
+							};
 			const password = await this.sendMessage({
 				type: "GENERATE_PASSWORD",
-				options: {
-					length: opts.length,
-					uppercase: opts.includeUppercase,
-					lowercase: opts.includeLowercase,
-					numbers: opts.includeNumbers,
-					symbols: opts.includeSymbols,
-				},
+				options,
 			});
 
 			if (password) {
@@ -1404,7 +1556,7 @@ class PopupApp {
 					label.style.color = strength.color;
 				}
 
-				// Update length label
+				// Update length label (password mode only)
 				const lengthLabel = document.getElementById("gen-length-label");
 				if (lengthLabel) {
 					lengthLabel.textContent = `Length: ${opts.length}`;

@@ -64,6 +64,13 @@ pub fn touch_activity(state: State<'_, AppHandle>) {
     state.inner().touch_activity();
 }
 
+/// v1.4.0: one command, three generator backends (`mode` =
+/// "password" | "passphrase" | "pin"). Every new parameter is `Option` so a
+/// missing argument defaults instead of failing the IPC contract — callers
+/// that only send the five legacy password parameters keep working
+/// unchanged. The argument count is the deliberate price of that additive
+/// wire contract (hence the allow below).
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn generate_password(
     length: usize,
@@ -71,14 +78,34 @@ pub fn generate_password(
     include_lowercase: bool,
     include_numbers: bool,
     include_symbols: bool,
+    mode: Option<String>,
+    words: Option<u8>,
+    separator: Option<String>,
+    capitalize: Option<bool>,
+    append_number: Option<bool>,
 ) -> Result<String, VaultError> {
-    app::generate_password(
-        length,
-        include_uppercase,
-        include_lowercase,
-        include_numbers,
-        include_symbols,
-    )
+    match mode.as_deref().unwrap_or("password") {
+        "password" => app::generate_password(
+            length,
+            include_uppercase,
+            include_lowercase,
+            include_numbers,
+            include_symbols,
+        ),
+        "passphrase" => app::generate_passphrase(
+            words.unwrap_or(6),
+            separator.as_deref().unwrap_or("-"),
+            capitalize.unwrap_or(false),
+            append_number.unwrap_or(false),
+        ),
+        // PIN reuses the shared length parameter (saturating cast; domain
+        // validation rejects anything outside 4..=16 with a clear error).
+        "pin" => app::generate_pin(length.min(u8::MAX as usize) as u8),
+        other => Err(VaultError::InvalidInput {
+            code: "INVALID_GENERATOR_MODE".into(),
+            message: format!("Unknown generator mode: {other}"),
+        }),
+    }
 }
 
 #[tauri::command]
@@ -140,6 +167,36 @@ pub fn get_entry_count(state: State<'_, AppHandle>) -> Result<usize, VaultError>
     app::get_entry_count(state.inner())
 }
 
+// ---------------------------------------------------------------------------
+// Trash (v1.4.0) — Tauri IPC only (D6): the browser-extension bridge never
+// sees soft-deleted entries or physical deletes.
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn list_deleted_entries(
+    state: State<'_, AppHandle>,
+) -> Result<Vec<pwdvault_domain::EntrySummary>, VaultError> {
+    app::list_deleted_entries(state.inner())
+}
+
+#[tauri::command]
+pub fn restore_entry(
+    id: String,
+    state: State<'_, AppHandle>,
+) -> Result<pwdvault_domain::EntrySummary, VaultError> {
+    app::restore_entry(state.inner(), id)
+}
+
+#[tauri::command]
+pub fn purge_entry(id: String, state: State<'_, AppHandle>) -> Result<bool, VaultError> {
+    app::purge_entry(state.inner(), id)
+}
+
+#[tauri::command]
+pub fn empty_trash(state: State<'_, AppHandle>) -> Result<usize, VaultError> {
+    app::empty_trash(state.inner())
+}
+
 /// P2.4 (D6): Tauri-only — generate the current TOTP code for an entry. The
 /// browser-extension bridge does not expose TOTP codes (touch_activity
 /// precedent for desktop-only commands).
@@ -199,6 +256,26 @@ pub fn update_settings(
     state: State<'_, AppHandle>,
 ) -> Result<pwdvault_domain::Settings, VaultError> {
     app::update_settings(state.inner(), settings)
+}
+
+/// v1.4.0 (WP5): (re)register the global shortcut. Registration happens in
+/// Rust (shortcuts.rs) so the webview needs no global-shortcut JS API; this
+/// command is the settings page's interactive validation path — errors
+/// surface verbatim so the UI can show the red hint and keep the previous
+/// binding. Persistence flows through `update_settings` (which also
+/// re-registers) — this command intentionally does not store anything.
+#[tauri::command]
+pub fn register_global_shortcut(
+    app: tauri::AppHandle,
+    enabled: bool,
+    shortcut: String,
+) -> Result<(), VaultError> {
+    crate::shortcuts::apply_global_shortcut(&app, enabled, &shortcut).map_err(|message| {
+        VaultError::InvalidInput {
+            code: "GLOBAL_SHORTCUT_REGISTER_FAILED".into(),
+            message,
+        }
+    })
 }
 
 /// CQ-P3a: delegate to the shared application service so the desktop IPC

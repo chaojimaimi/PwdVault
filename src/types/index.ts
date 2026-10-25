@@ -46,6 +46,10 @@ export interface EntrySummary {
   group_id?: string | null;
   created_at: number;
   updated_at: number;
+  /** v1.4.0: device-local usage stamp (drives the "Recent" sort). */
+  last_used_at?: number | null;
+  /** v1.4.0: set only on trash (list_deleted_entries) rows. */
+  deleted_at?: number | null;
 }
 
 export interface Group {
@@ -146,13 +150,26 @@ export interface BaiduAuthStart {
   auth_url: string;
 }
 
+export type GeneratorMode = "password" | "passphrase" | "pin";
+
 export interface PasswordGeneratorOptions {
   length: number;
   includeUppercase: boolean;
   includeLowercase: boolean;
   includeNumbers: boolean;
   includeSymbols: boolean;
+  /** v1.4.0: selects the generator backend; omitted on legacy callers = password. */
+  mode?: GeneratorMode;
+  /** Passphrase word count (3-10, EFF short list). */
+  words?: number;
+  /** Passphrase separator; empty string allowed (no separator). */
+  separator?: string;
+  capitalize?: boolean;
+  appendNumber?: boolean;
 }
+
+/** Sort modes for the vault list (persisted in Settings, v1.4.0). */
+export type SortMode = "recent" | "updated" | "alpha";
 
 export interface Settings {
   auto_lock_secs: number;
@@ -162,6 +179,11 @@ export interface Settings {
   default_include_numbers: boolean;
   default_include_symbols: boolean;
   check_updates: boolean;
+  /** Vault list ordering (v1.4.0). Unknown values fall back to "recent". */
+  sort_mode: SortMode;
+  /** Global show-vault shortcut (v1.4.0). Registration lives in Rust. */
+  global_shortcut_enabled: boolean;
+  global_shortcut: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -172,6 +194,9 @@ export const DEFAULT_SETTINGS: Settings = {
   default_include_numbers: true,
   default_include_symbols: true,
   check_updates: true,
+  sort_mode: "recent",
+  global_shortcut_enabled: true,
+  global_shortcut: "CmdOrCtrl+Shift+Space",
 };
 
 // Backup/Restore Types

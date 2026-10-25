@@ -223,3 +223,16 @@
   font-size: var(--text-mono);
   color: var(--color-text);
 }
+
+/* v1.4.0: text input for the global shortcut accelerator. */
+.settings-input {
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-input);
+  color: var(--color-text);
+  font-size: var(--text-body);
+  font-family: monospace;
+  min-width: 0;
+  flex: 1;
+}

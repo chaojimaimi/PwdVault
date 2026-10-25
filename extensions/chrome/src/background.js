@@ -498,31 +498,44 @@ async function getEntryForSender(id, senderUrl) {
 
 async function getEntriesForUrl(url) {
 	const entries = await getEntries();
-	const urlObj = new URL(url);
-	// Anchored so only a leading "www." is stripped (matches sender-auth.js).
-	const domain = urlObj.hostname.replace(/^www\./, "");
-
-	return entries.filter((entry) => {
-		if (!entry.url) return false;
-		try {
-			const entryDomain = new URL(entry.url).hostname.replace(/^www\./, "");
-			return entryDomain === domain;
-		} catch {
-			return false;
-		}
-	});
+	// v1.4.0: the third hand-rolled hostname comparison is gone — this filter
+	// delegates to the STRICT gate (entryMatchesSenderUrl), not the wide one.
+	// The strict gate rejects an empty entry.url, so generic entries (no
+	// stored URL) can never appear in an auto-fill list — the invariant the
+	// callers below rely on ("non-empty URL, fail closed") — and non-empty
+	// URLs compare by registrable domain (eTLD+1) exactly like the
+	// content-script path.
+	return entries.filter((entry) => entryMatchesSenderUrl(entry, url));
 }
 
 async function generatePassword(options = {}) {
-	return sendToApp("generate_password", {
-		options: {
-			length: options.length || 16,
-			include_uppercase: options.uppercase !== false,
-			include_lowercase: options.lowercase !== false,
-			include_numbers: options.numbers !== false,
-			include_symbols: options.symbols !== false,
-		},
-	});
+	// v1.4.0: the same command now dispatches on `mode` (password default —
+	// old callers that never send a mode keep the historical behavior).
+	// Passphrase/PIN-specific fields are forwarded when present; the desktop
+	// applies its own serde defaults for anything absent.
+	const generatorOptions = {
+		length: options.length || 16,
+		include_uppercase: options.uppercase !== false,
+		include_lowercase: options.lowercase !== false,
+		include_numbers: options.numbers !== false,
+		include_symbols: options.symbols !== false,
+	};
+	if (options.mode) {
+		generatorOptions.mode = options.mode;
+	}
+	if (options.words !== undefined) {
+		generatorOptions.words = options.words;
+	}
+	if (options.separator !== undefined) {
+		generatorOptions.separator = options.separator;
+	}
+	if (options.capitalize !== undefined) {
+		generatorOptions.capitalize = options.capitalize;
+	}
+	if (options.appendNumber !== undefined) {
+		generatorOptions.append_number = options.appendNumber;
+	}
+	return sendToApp("generate_password", { options: generatorOptions });
 }
 
 // ============================================================================

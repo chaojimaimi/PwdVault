@@ -9,6 +9,7 @@
 
 mod commands;
 pub mod native_messaging;
+pub mod shortcuts;
 
 // Re-export the application layer so external callers (tests, benches) can
 // still write `pwdvault_lib::AppState`, `pwdvault_lib::VaultError`, etc.
@@ -30,7 +31,7 @@ use tauri::{
 };
 
 use pwdvault_domain::constants;
-use pwdvault_infrastructure::{native_host_setup, paths};
+use pwdvault_infrastructure::{database, native_host_setup, paths};
 
 // ---------------------------------------------------------------------------
 // Auto-Lock background thread
@@ -164,6 +165,31 @@ fn load_extension_ids() -> native_host_setup::ExtensionIds {
 // Entry point
 // ---------------------------------------------------------------------------
 
+/// Read the persisted global-shortcut config at boot (best-effort). Only
+/// touches an EXISTING database file — creating one here would race the
+/// first-run setup flow.
+fn boot_shortcut_config() -> (bool, String) {
+    let db_path = paths::get_db_path();
+    if !db_path.exists() {
+        return (true, shortcuts::DEFAULT_GLOBAL_SHORTCUT.to_string());
+    }
+    match database::init_database(&db_path) {
+        Ok(db) => {
+            match database::load_settings(&db) {
+                Ok(settings) => (settings.global_shortcut_enabled, settings.global_shortcut),
+                Err(error) => {
+                    tracing::warn!("could not load settings for the global shortcut, keeping the default: {error}");
+                    (true, shortcuts::DEFAULT_GLOBAL_SHORTCUT.to_string())
+                }
+            }
+        }
+        Err(error) => {
+            tracing::warn!("could not open the vault for the global shortcut config, keeping the default: {error}");
+            (true, shortcuts::DEFAULT_GLOBAL_SHORTCUT.to_string())
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let file_appender = tracing_appender::rolling::daily(paths::log_dir(), "pwdvault.log");
@@ -191,6 +217,10 @@ pub fn run() {
         // capabilities file grants `updater:default` + `process:allow-restart`.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // WP5 (v1.4.0): global show-vault shortcut. Registration is driven
+        // from Rust (shortcuts.rs); the capability file grants the plugin's
+        // register/unregister/is-registered permissions only.
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(state.clone())
         .setup(move |app| {
             // Start native messaging server in background thread.
@@ -238,6 +268,32 @@ pub fn run() {
                             let _ = window.eval("window.location.reload()");
                         }
                     }));
+            }
+
+            // WP5 (v1.4.0): the application layer asks us to (re)register the
+            // shortcut whenever persisted settings say so (boot settings load
+            // in setup_vault, settings saves).
+            {
+                let app_handle = app.handle().clone();
+                *state
+                    .apply_global_shortcut_fn
+                    .lock()
+                    .expect("shortcut lock poisoned") =
+                    Some(Box::new(move |enabled, accelerator| {
+                        shortcuts::apply_global_shortcut(&app_handle, enabled, accelerator)
+                    }));
+            }
+            // Boot registration. Prefer the persisted config: the settings
+            // row is read through a short-lived database handle (dropped
+            // before setup_vault re-opens the file) so a disabled/customized
+            // shortcut never fires, not even between boot and unlock. Any
+            // read problem falls back to the default binding — setup_vault
+            // re-applies the real settings when the frontend boots.
+            let (boot_enabled, boot_accelerator) = boot_shortcut_config();
+            if let Err(error) =
+                shortcuts::apply_global_shortcut(app.handle(), boot_enabled, &boot_accelerator)
+            {
+                tracing::warn!("global shortcut could not be registered: {error}");
             }
 
             start_auto_lock_thread(state.clone());
@@ -324,6 +380,12 @@ pub fn run() {
             commands::update_entry,
             commands::remove_entry,
             commands::get_entry_count,
+            // v1.4.0 trash — Tauri IPC only (D6): the extension bridge never
+            // sees soft-deleted entries or physical deletes.
+            commands::list_deleted_entries,
+            commands::restore_entry,
+            commands::purge_entry,
+            commands::empty_trash,
             // P2.4 (D6): Tauri-only TOTP code generation.
             commands::totp_code,
             commands::create_group,
@@ -332,6 +394,8 @@ pub fn run() {
             commands::update_group,
             commands::get_settings,
             commands::update_settings,
+            // WP5 (v1.4.0): settings-page-driven global shortcut registration.
+            commands::register_global_shortcut,
             commands::revoke_extension_access,
             commands::export_vault,
             commands::import_vault,

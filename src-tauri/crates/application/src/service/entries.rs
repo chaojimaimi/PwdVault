@@ -6,6 +6,7 @@ use crate::{
     validation, AppState, CreateEntryRequest, EntrySecretResponse, EntrySummary,
     UpdateEntryRequest, VaultError,
 };
+use pwdvault_domain::constants::LAST_USED_BUMP_THROTTLE_SECS;
 use pwdvault_infrastructure::crypto::{
     bc_deserialize, bc_serialize, decrypt, encrypt, EncryptedData,
 };
@@ -92,7 +93,7 @@ pub fn get_entry_secret(
     let lease = state.lease()?;
     let db = get_db(state)?;
     let key = lease.enc_key()?;
-    let entry = load_entry(&db, key, &id, false)?.ok_or(VaultError::EntryNotFound)?;
+    let mut entry = load_entry(&db, key, &id, false)?.ok_or(VaultError::EntryNotFound)?;
     // Soft delete (P2.2): a tombstoned entry must not give up its secrets —
     // same filter as get_entry_meta (this is the extension's secret-fetch
     // path; the row survives for merge/reseal, but reads must 404).
@@ -134,11 +135,33 @@ pub fn get_entry_secret(
     // Zeroize intermediate password bytes
     password_bytes.zeroize();
 
-    // §5.1.2: Removed last_used_at persistence side-effect.
-    // The frontend does not use this field, and persisting it caused
-    // write amplification (entry re-seal + full digest refresh) on every
-    // secret read. last_used_at is now only returned from the in-memory
-    // entry without being written back.
+    // v1.4.0: restored the last_used_at persistence that §5.1.2 removed,
+    // behind a 60-second write throttle. §5.1.2's complaint was write
+    // amplification (every fetch = entry re-seal + full digest refresh); the
+    // throttle reduces that to at most one write per entry per minute, gated
+    // by the CURRENT stored value alone (no extra state).
+    // SYNC SEMANTICS (deliberate, review-verified): the bump explicitly does
+    // NOT touch updated_at. last_used_at is device-local metadata —
+    // `SyncEntry` has no such field (sync/mod.rs), so a pure bump never
+    // changes the sync payload, never triggers a push, and never moves the
+    // LWW fingerprint. When a merge DOES rewrite a row, the winner's payload
+    // carries last_used_at=None and the local value resets — accepted
+    // best-effort behavior for a device-local field. Pinned by tests:
+    // `get_entry_secret_throttles_last_used_at_writes` (service) and the NM
+    // contract test.
+    let now = chrono::Utc::now().timestamp();
+    if entry
+        .last_used_at
+        .is_none_or(|last| now - last > LAST_USED_BUMP_THROTTLE_SECS)
+    {
+        entry.last_used_at = Some(now);
+        let mac_key = lease.mac_key()?;
+        // Single transaction: bump + digest refresh (§5.1.2 pattern).
+        vault_store::VaultStore::new(&db).write(mac_key, |txn| {
+            vault_store::save_entry_in_txn(txn, key, &entry)?;
+            Ok(())
+        })?;
+    }
 
     lease.touch_remote_activity();
 
@@ -156,16 +179,203 @@ pub fn list_all_entries(state: &Arc<AppState>) -> Result<Vec<EntrySummary>, Vaul
 
     // §5.6.2: single read transaction bulk scan instead of 1+N.
     // Soft delete (P2.2): the infra bulk scan is raw (reseal_vault depends on
-    // it); the service layer filters tombstones out here.
+    // it); the service layer filters tombstones out here. The filter is
+    // tombstone-only and deliberately ignores the purge ledger — a LIVE row
+    // is served no matter what the ledger says.
     let entries = list_all_entries_bulk(&db, key, None)?
         .into_iter()
         .filter(|entry| entry.deleted_at.is_none())
+        .collect::<Vec<_>>();
+
+    // Purge-ledger reconciliation (v1.4.0): a LIVE row whose id is recorded
+    // proves a merge revival / import resurrected the entry after a purge.
+    // The row was served above (no live-row filtering); here the stale
+    // ledger records are dropped so a LATER tombstone shows up in the trash
+    // again — otherwise every sync would re-suppress it (= silent data
+    // loss). Best-effort: a failed reconciliation only delays the cleanup to
+    // the next successful list.
+    reconcile_purged_ledger(&db, &lease, &entries)?;
+
+    let summaries: Vec<EntrySummary> = entries.into_iter().map(Into::into).collect();
+
+    lease.touch_remote_activity();
+
+    Ok(summaries)
+}
+
+/// Drop ledger records for ids that now exist as LIVE rows (see
+/// [`list_all_entries`]). Errors are logged and swallowed: the ledger is
+/// local bookkeeping, the caller's read result stays valid either way.
+fn reconcile_purged_ledger(
+    db: &Arc<redb::Database>,
+    lease: &crate::session::SessionLease<'_>,
+    live_entries: &[PasswordEntry],
+) -> Result<(), VaultError> {
+    let purged = vault_store::purged_entry_ids(db)?;
+    let stale_ids: Vec<String> = live_entries
+        .iter()
+        .filter(|entry| purged.contains(&entry.id))
+        .map(|entry| entry.id.clone())
+        .collect();
+    if stale_ids.is_empty() {
+        return Ok(());
+    }
+    let mac_key = lease.mac_key()?;
+    let outcome = vault_store::VaultStore::new(db).write(mac_key, |txn| {
+        for id in &stale_ids {
+            vault_store::remove_purged_entry_in_txn(txn, id)?;
+        }
+        Ok(())
+    });
+    if let Err(error) = outcome {
+        tracing::warn!("purge-ledger reconciliation failed: {error}");
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Trash (v1.4.0): soft-deleted entries. Tauri IPC only — the browser
+// extension never sees the trash (D6, touch_activity precedent).
+// ---------------------------------------------------------------------------
+
+/// Tombstoned entries still visible in the trash: `deleted_at` set AND the id
+/// not recorded in the purge ledger (ledger entries are rows a sync cycle
+/// re-inserted after a physical delete — invisible by design).
+pub fn list_deleted_entries(state: &Arc<AppState>) -> Result<Vec<EntrySummary>, VaultError> {
+    let lease = state.lease()?;
+    let db = get_db(state)?;
+    let key = lease.enc_key()?;
+
+    let purged = vault_store::purged_entry_ids(&db)?;
+    let entries = list_all_entries_bulk(&db, key, None)?
+        .into_iter()
+        .filter(|entry| entry.deleted_at.is_some())
+        .filter(|entry| !purged.contains(&entry.id))
         .collect::<Vec<_>>();
     let summaries: Vec<EntrySummary> = entries.into_iter().map(Into::into).collect();
 
     lease.touch_remote_activity();
 
     Ok(summaries)
+}
+
+/// Restore a tombstoned entry. The `updated_at` bump is REQUIRED, not
+/// cosmetic: LWW arbitration (merge.rs `merge_entry_pair`) lets a tombstone
+/// win only when `deleted_at >= loser.updated_at` — the restore must present
+/// itself as the newest change so a remote tombstone loses and the revival
+/// sticks through the next sync.
+pub fn restore_entry(state: &Arc<AppState>, id: String) -> Result<EntrySummary, VaultError> {
+    validation::id(&id)?;
+    let lease = state.lease()?;
+    let db = get_db(state)?;
+    let key = lease.enc_key()?;
+    let mac_key = lease.mac_key()?;
+
+    let mut entry = load_entry(&db, key, &id, false)?.ok_or(VaultError::EntryNotFound)?;
+    // Restoring a live entry is a caller bug, not a no-op.
+    if entry.deleted_at.is_none() {
+        return Err(VaultError::InvalidInput {
+            code: "ENTRY_NOT_DELETED".into(),
+            message: "Entry is not in the trash".into(),
+        });
+    }
+
+    entry.deleted_at = None;
+    entry.updated_at = chrono::Utc::now().timestamp();
+
+    // Single transaction: revival + digest refresh + ledger cleanup (the row
+    // is live again, so any stale purge record must go with it).
+    let store = vault_store::VaultStore::new(&db);
+    store.write(mac_key, |txn| {
+        vault_store::save_entry_in_txn(txn, key, &entry)?;
+        vault_store::remove_purged_entry_in_txn(txn, &entry.id)?;
+        Ok(())
+    })?;
+
+    lease.touch_remote_activity();
+
+    Ok(entry.into())
+}
+
+/// Physically delete one tombstoned row and record the id in the purge
+/// ledger (same transaction — a crash must never leave a deleted row without
+/// its ledger record, or the next sync refills the trash). Purging a LIVE
+/// entry is refused: the trash flow only ever offers tombstones.
+pub fn purge_entry(state: &Arc<AppState>, id: String) -> Result<bool, VaultError> {
+    validation::id(&id)?;
+    let lease = state.lease()?;
+    let db = get_db(state)?;
+    let key = lease.enc_key()?;
+    let mac_key = lease.mac_key()?;
+
+    let entry = load_entry(&db, key, &id, false)?;
+    match entry {
+        None => {
+            // Row already gone: idempotent success only if this exact id was
+            // purged before; a never-seen id is a caller bug.
+            if vault_store::purged_entry_ids(&db)?.contains(&id) {
+                Ok(false)
+            } else {
+                Err(VaultError::EntryNotFound)
+            }
+        }
+        Some(entry) => {
+            if entry.deleted_at.is_none() {
+                return Err(VaultError::InvalidInput {
+                    code: "ENTRY_NOT_DELETED".into(),
+                    message: "Only deleted entries can be purged".into(),
+                });
+            }
+            let now = chrono::Utc::now().timestamp();
+            let entry_id = entry.id.clone();
+            let store = vault_store::VaultStore::new(&db);
+            store.write(mac_key, |txn| {
+                vault_store::remove_entry_in_txn(txn, &entry_id)?;
+                vault_store::record_purged_entries_in_txn(
+                    txn,
+                    std::slice::from_ref(&entry_id),
+                    now,
+                )?;
+                Ok(())
+            })?;
+            lease.touch_remote_activity();
+            Ok(true)
+        }
+    }
+}
+
+/// Physically delete EVERY tombstoned row (including ledger-suppressed ones
+/// — their rows are sync refills that would otherwise linger forever) and
+/// record all ids. Returns the number of rows removed.
+pub fn empty_trash(state: &Arc<AppState>) -> Result<usize, VaultError> {
+    let lease = state.lease()?;
+    let db = get_db(state)?;
+    let key = lease.enc_key()?;
+    let mac_key = lease.mac_key()?;
+
+    let tombstone_ids: Vec<String> = list_all_entries_bulk(&db, key, None)?
+        .into_iter()
+        .filter(|entry| entry.deleted_at.is_some())
+        .map(|entry| entry.id)
+        .collect();
+    if tombstone_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let now = chrono::Utc::now().timestamp();
+    let count = tombstone_ids.len();
+    let store = vault_store::VaultStore::new(&db);
+    store.write(mac_key, |txn| {
+        for id in &tombstone_ids {
+            vault_store::remove_entry_in_txn(txn, id)?;
+        }
+        vault_store::record_purged_entries_in_txn(txn, &tombstone_ids, now)?;
+        Ok(())
+    })?;
+
+    lease.touch_remote_activity();
+
+    Ok(count)
 }
 
 pub fn update_entry<R: Into<UpdateEntryRequest>>(
@@ -557,5 +767,245 @@ mod tests {
 
         let response = totp_code(&state, entry.id.clone()).unwrap();
         assert_eq!(response.code.len(), 6);
+    }
+
+    // -------------------------------------------------------------------
+    // v1.4.0: last_used_at restore + 60s throttle
+    // -------------------------------------------------------------------
+
+    fn raw_row(state: &Arc<AppState>, id: &str) -> PasswordEntry {
+        let db = get_db(state).unwrap();
+        load_entry(&db, &state.session.get_enc_key().unwrap(), id, false)
+            .unwrap()
+            .expect("row exists")
+    }
+
+    /// The restored persistence: a fetch stamps last_used_at on disk WITHOUT
+    /// touching updated_at (device-local metadata, never a sync-relevant
+    /// edit), and a second fetch inside the 60s throttle window does not
+    /// write again.
+    #[test]
+    fn get_entry_secret_throttles_last_used_at_writes() {
+        let (state, _dir) = unlocked_state();
+        let entry = create_test_entry(&state, "Throttled");
+        let updated_at_before = raw_row(&state, &entry.id).updated_at;
+
+        let first = get_entry_secret(&state, entry.id.clone()).unwrap();
+        let stamped = first.last_used_at.expect("first fetch stamps a value");
+        let row = raw_row(&state, &entry.id);
+        assert_eq!(row.last_used_at, Some(stamped), "bump persisted");
+        assert_eq!(
+            row.updated_at, updated_at_before,
+            "the bump must not move updated_at (sync-invisible)"
+        );
+
+        // Cross a full second: a second-granularity re-bump would be
+        // observable as stamped+1.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let second = get_entry_secret(&state, entry.id.clone()).unwrap();
+        assert_eq!(
+            second.last_used_at,
+            Some(stamped),
+            "fetch within the 60s throttle window must not re-bump"
+        );
+        assert_eq!(raw_row(&state, &entry.id).last_used_at, Some(stamped));
+    }
+
+    // -------------------------------------------------------------------
+    // v1.4.0: trash (list / restore / purge / empty) + purge ledger
+    // -------------------------------------------------------------------
+
+    /// Re-insert a row directly through the infra layer — the stand-in for
+    /// "the sync cycle wrote back a remote copy" (write_merged_back upserts
+    /// rows verbatim, so a raw save is an exact simulation).
+    fn reinsert_row(state: &Arc<AppState>, entry: &PasswordEntry) {
+        let db = get_db(state).unwrap();
+        let key = state.session.get_enc_key().unwrap();
+        let mac_key = state.session.get_mac_key().unwrap();
+        vault_store::VaultStore::new(&db)
+            .write(&mac_key, |txn| {
+                vault_store::save_entry_in_txn(txn, &key, entry)?;
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn deleted_entries_are_listed_in_trash_only() {
+        let (state, _dir) = unlocked_state();
+        let keep = create_test_entry(&state, "Keep");
+        let gone = create_test_entry(&state, "Gone");
+        remove_entry(&state, gone.id.clone()).unwrap();
+
+        let trash = list_deleted_entries(&state).unwrap();
+        assert_eq!(trash.len(), 1);
+        assert_eq!(trash[0].id, gone.id);
+        assert!(trash[0].deleted_at.is_some(), "trash rows carry deleted_at");
+
+        let live = list_all_entries(&state).unwrap();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].id, keep.id);
+        assert!(live[0].deleted_at.is_none());
+    }
+
+    #[test]
+    fn restore_entry_revives_with_updated_at_bump() {
+        let (state, _dir) = unlocked_state();
+        let entry = create_test_entry(&state, "Restore me");
+        remove_entry(&state, entry.id.clone()).unwrap();
+        let tombstoned_updated_at = raw_row(&state, &entry.id).updated_at;
+
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let restored = restore_entry(&state, entry.id.clone()).unwrap();
+        assert!(restored.deleted_at.is_none());
+        // REQUIRED for LWW survival: the restore must present itself as the
+        // newest change, otherwise a remote tombstone with
+        // deleted_at >= restored.updated_at would delete it again at the
+        // next sync.
+        assert!(
+            restored.updated_at > tombstoned_updated_at,
+            "restore bumps updated_at: {} -> {}",
+            tombstoned_updated_at,
+            restored.updated_at
+        );
+        // The restored entry is the vault's only entry — and it is live again.
+        assert_eq!(list_all_entries(&state).unwrap().len(), 1);
+        assert!(list_deleted_entries(&state).unwrap().is_empty());
+
+        // Restoring a live entry is a caller error, not a no-op.
+        assert!(matches!(
+            restore_entry(&state, entry.id.clone()),
+            Err(VaultError::InvalidInput { .. })
+        ));
+    }
+
+    /// THE purge-reflow test: a physically deleted row whose tombstone comes
+    /// back from the remote container must stay invisible (trash AND live
+    /// list), while the ledger record suppresses exactly that tombstone.
+    #[test]
+    fn purged_entry_stays_hidden_when_remote_tombstone_reflows() {
+        let (state, _dir) = unlocked_state();
+        let entry = create_test_entry(&state, "Purge + reflow");
+        remove_entry(&state, entry.id.clone()).unwrap();
+        let tombstone = raw_row(&state, &entry.id);
+        assert!(tombstone.deleted_at.is_some());
+
+        assert!(purge_entry(&state, entry.id.clone()).unwrap());
+        // Row is physically gone; the id is on the ledger.
+        assert!(load_entry(
+            &get_db(&state).unwrap(),
+            &state.session.get_enc_key().unwrap(),
+            &entry.id,
+            false
+        )
+        .unwrap()
+        .is_none());
+
+        // Remote tombstone reflows on the next sync (merge rule 1: single
+        // side present → adopted as-is; write_merged_back upserts it).
+        reinsert_row(&state, &tombstone);
+
+        assert!(list_all_entries(&state).unwrap().is_empty());
+        assert!(
+            list_deleted_entries(&state).unwrap().is_empty(),
+            "reflowed tombstone must not refill the trash"
+        );
+    }
+
+    /// The other direction: a purged id that comes back LIVE (merge revival
+    /// / import) must be served AND its ledger record dropped — otherwise
+    /// every later tombstone would be silently swallowed forever.
+    #[test]
+    fn purged_id_returning_as_live_row_is_served_and_cleared_from_ledger() {
+        let (state, _dir) = unlocked_state();
+        let entry = create_test_entry(&state, "Purge + revive");
+        remove_entry(&state, entry.id.clone()).unwrap();
+        let tombstone = raw_row(&state, &entry.id);
+        assert!(purge_entry(&state, entry.id.clone()).unwrap());
+
+        // Remote-side edit beats the old tombstone (merge revival rule):
+        // the revived row comes back live with a bumped updated_at.
+        let mut revived = tombstone.clone();
+        revived.deleted_at = None;
+        revived.updated_at = tombstone.updated_at + 3_600;
+        reinsert_row(&state, &revived);
+
+        // list_all_entries both serves the row and reconciles the ledger.
+        let live = list_all_entries(&state).unwrap();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].id, entry.id);
+
+        let db = get_db(&state).unwrap();
+        assert!(
+            !vault_store::purged_entry_ids(&db)
+                .unwrap()
+                .contains(&entry.id),
+            "the ledger record for the revived id must be dropped"
+        );
+
+        // And a LATER tombstone of the same id shows up in the trash again.
+        remove_entry(&state, entry.id.clone()).unwrap();
+        let trash = list_deleted_entries(&state).unwrap();
+        assert_eq!(trash.len(), 1);
+        assert_eq!(trash[0].id, entry.id);
+    }
+
+    #[test]
+    fn purge_is_idempotent_and_refuses_live_rows() {
+        let (state, _dir) = unlocked_state();
+        let entry = create_test_entry(&state, "Idempotent purge");
+
+        // A LIVE entry cannot be purged through the trash path.
+        assert!(matches!(
+            purge_entry(&state, entry.id.clone()),
+            Err(VaultError::InvalidInput { .. })
+        ));
+
+        remove_entry(&state, entry.id.clone()).unwrap();
+        assert!(purge_entry(&state, entry.id.clone()).unwrap());
+        // Already purged → idempotent success-shaped no-op.
+        assert!(!purge_entry(&state, entry.id.clone()).unwrap());
+        // A never-seen id is a caller bug.
+        assert!(matches!(
+            purge_entry(&state, "missing-entry-id".to_string()),
+            Err(VaultError::EntryNotFound)
+        ));
+    }
+
+    #[test]
+    fn empty_trash_removes_all_tombstones_including_ledger_suppressed() {
+        let (state, _dir) = unlocked_state();
+        let a = create_test_entry(&state, "Trash A");
+        let b = create_test_entry(&state, "Trash B");
+        let live = create_test_entry(&state, "Live");
+        remove_entry(&state, a.id.clone()).unwrap();
+        remove_entry(&state, b.id.clone()).unwrap();
+        // A reflowed tombstone whose id is already ledgered: empty_trash
+        // must still remove the ROW (otherwise it lingers forever) and keep
+        // the ledger record.
+        remove_entry(&state, a.id.clone()).unwrap(); // no-op tombstone refresh
+        let a_row = raw_row(&state, &a.id);
+        assert!(purge_entry(&state, a.id.clone()).unwrap());
+        reinsert_row(&state, &a_row); // sync refill of the purged tombstone
+                                      // The refilled 'a' stays hidden (ledgered); 'b' remains visible.
+        let trash_before = list_deleted_entries(&state).unwrap();
+        assert_eq!(trash_before.len(), 1);
+        assert_eq!(trash_before[0].id, b.id);
+
+        let removed = empty_trash(&state).unwrap();
+        assert_eq!(removed, 2, "both tombstone rows are removed");
+
+        assert!(list_all_entries(&state).unwrap().len() == 1);
+        assert_eq!(list_all_entries(&state).unwrap()[0].id, live.id);
+        assert!(list_deleted_entries(&state).unwrap().is_empty());
+
+        // Ledger still holds both ids (refilled tombstones stay hidden).
+        let db = get_db(&state).unwrap();
+        let ledger = vault_store::purged_entry_ids(&db);
+        assert!(ledger.as_ref().unwrap().contains(&a.id));
+        assert!(ledger.as_ref().unwrap().contains(&b.id));
+
+        // Emptying an already-empty trash is a 0.
+        assert_eq!(empty_trash(&state).unwrap(), 0);
     }
 }

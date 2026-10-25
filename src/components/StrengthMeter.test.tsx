@@ -5,7 +5,11 @@ import { StrengthMeter } from './StrengthMeter';
 const mockedStrength = vi.hoisted(() => ({ score: 20, label: 'Weak' }));
 
 vi.mock('../utils/passwordStrength', () => ({
+  // v1.4.0: the meter routes through the mode-aware entry now — the mock
+  // covers both exports and ignores the extra arguments.
   getPasswordStrength: () => mockedStrength,
+  getGeneratorStrength: (_mode: string, _value: string, _params: unknown) =>
+    mockedStrength,
 }));
 
 describe('StrengthMeter', () => {

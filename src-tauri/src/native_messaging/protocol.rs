@@ -79,6 +79,51 @@ pub struct GeneratorOptions {
     pub include_numbers: bool,
     #[serde(default = "default_true")]
     pub include_symbols: bool,
+    /// v1.4.0: selects the generator backend. `#[serde(default)]` pins the
+    /// wire contract for payloads written before the field existed: an old
+    /// extension (or an old pinned request) without `mode` keeps landing on
+    /// the password path — see the no-mode contract test in tests.rs.
+    #[serde(default)]
+    pub mode: GeneratorMode,
+    /// Passphrase word count (3-10; EFF short list). Ignored outside
+    /// passphrase mode.
+    #[serde(default = "default_words")]
+    pub words: u8,
+    /// Passphrase separator; `None` falls back to "-" in the dispatcher.
+    #[serde(default)]
+    pub separator: Option<String>,
+    #[serde(default)]
+    pub capitalize: bool,
+    #[serde(default)]
+    pub append_number: bool,
+}
+
+impl Default for GeneratorOptions {
+    fn default() -> Self {
+        Self {
+            length: default_length(),
+            include_uppercase: true,
+            include_lowercase: true,
+            include_numbers: true,
+            include_symbols: true,
+            mode: GeneratorMode::default(),
+            words: default_words(),
+            separator: None,
+            capitalize: false,
+            append_number: false,
+        }
+    }
+}
+
+/// Generator backend selector (v1.4.0). Unknown strings fail the request
+/// deserialization (fail closed) instead of silently degrading to passwords.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GeneratorMode {
+    #[default]
+    Password,
+    Passphrase,
+    Pin,
 }
 
 fn default_length() -> usize {
@@ -86,6 +131,9 @@ fn default_length() -> usize {
 }
 fn default_true() -> bool {
     true
+}
+fn default_words() -> u8 {
+    6
 }
 
 /// Native messaging response

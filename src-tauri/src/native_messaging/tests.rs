@@ -343,19 +343,40 @@ fn test_get_entry_meta_and_secret() {
     assert!(meta["password"].is_null());
     assert!(meta["notes"].is_null());
 
-    // Secret endpoint returns decrypted password/notes and updates last_used_at
+    // Secret endpoint returns decrypted password/notes AND bumps last_used_at
+    // (v1.4.0 restored the persistence with a 60s write throttle).
     let secret_req = NativeRequest {
         id: 3,
         command: "get_entry_secret".to_string(),
-        id_param: Some(entry_id),
+        id_param: Some(entry_id.clone()),
         ..make_request("get_entry_secret", 3)
     };
-    let secret = execute_command(secret_req, state, None, None).unwrap();
+    let secret = execute_command(secret_req, state.clone(), None, None).unwrap();
     assert_eq!(secret["password"], "my_password");
     assert_eq!(secret["notes"], "some notes");
-    // §5.1.2: last_used_at is no longer persisted on secret access.
-    // It returns the value from the stored entry (None for new entries).
-    assert!(secret["last_used_at"].is_null());
+    let bumped = secret["last_used_at"]
+        .as_i64()
+        .expect("last_used_at bumped");
+    assert!(bumped > 0, "first fetch stamps a fresh timestamp");
+
+    // A second fetch within the 60s throttle window must not re-bump. The
+    // sleep crosses a full second so a (second-granularity) re-bump would be
+    // observable, and each fetch re-reads the row from disk — equality of
+    // the two responses proves both the persistence (v1.4.0 restored it) and
+    // the throttle in one assertion pair.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let secret_req2 = NativeRequest {
+        id: 4,
+        command: "get_entry_secret".to_string(),
+        id_param: Some(entry_id),
+        ..make_request("get_entry_secret", 4)
+    };
+    let secret2 = execute_command(secret_req2, state, None, None).unwrap();
+    assert_eq!(
+        secret2["last_used_at"].as_i64(),
+        Some(bumped),
+        "fetch within the 60s throttle window must not re-bump last_used_at"
+    );
 }
 
 // ---- list_all_entries ----
@@ -578,6 +599,75 @@ fn test_get_entry_count() {
 }
 
 // ---- generate_password ----
+// ---- generate_password ----
+
+/// v1.4.0 wire contract: a payload written before the `mode` field existed
+/// (old extension / pinned request) must keep landing on the password path
+/// with the historical parameter defaults — `#[serde(default)]` on
+/// `GeneratorOptions.mode`.
+#[test]
+fn generate_password_options_without_mode_deserialize_as_password() {
+    let options: GeneratorOptions = serde_json::from_str("{}").expect("empty object is valid");
+    assert_eq!(options.mode, GeneratorMode::Password);
+    assert_eq!(options.length, 16);
+    assert!(options.include_uppercase && options.include_lowercase);
+    assert!(options.include_numbers && options.include_symbols);
+    assert_eq!(options.words, 6);
+    assert!(options.separator.is_none());
+    assert!(!options.capitalize && !options.append_number);
+
+    // An explicit legacy-shaped payload (exactly the five v1.3.x fields).
+    let legacy: GeneratorOptions = serde_json::from_str(
+        r#"{"length": 20, "include_uppercase": true, "include_lowercase": false,
+            "include_numbers": true, "include_symbols": true}"#,
+    )
+    .expect("legacy payload is valid");
+    assert_eq!(legacy.mode, GeneratorMode::Password);
+    assert_eq!(legacy.length, 20);
+    assert!(!legacy.include_lowercase);
+
+    // An unknown mode fails the request deserialization (fail closed) —
+    // it must NOT silently degrade to the password generator.
+    assert!(serde_json::from_str::<GeneratorOptions>(r#"{"mode": "haiku"}"#).is_err());
+}
+
+/// v1.4.0 dispatcher: mode selects the backend over the same command.
+#[test]
+fn generate_password_dispatches_passphrase_and_pin_modes() {
+    let (state, _temp) = setup_test_state();
+    init_test_vault(&state, "master123");
+
+    let mut req = make_request("generate_password", 1);
+    req.options = Some(
+        serde_json::from_str(
+            r#"{"mode": "passphrase", "words": 5, "separator": ".", "capitalize": true,
+            "append_number": true}"#,
+        )
+        .unwrap(),
+    );
+    let value = execute_command(req, state.clone(), None, None).unwrap();
+    let passphrase = value.as_str().unwrap();
+    // 4 dots = 5 words; the trailing 0-99 number glues onto the last word.
+    assert_eq!(passphrase.matches('.').count(), 4, "{passphrase}");
+    let without_number = passphrase.trim_end_matches(|c: char| c.is_ascii_digit());
+    let words: Vec<&str> = without_number.split('.').collect();
+    assert_eq!(words.len(), 5);
+    assert!(
+        words.iter().all(|w| {
+            w.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+                // '-' allows the EFF list's single hyphenated word ("yo-yo").
+                && w.chars().skip(1).all(|c| c.is_ascii_lowercase() || c == '-')
+        }),
+        "{passphrase}"
+    );
+
+    let mut pin_req = make_request("generate_password", 2);
+    pin_req.options = Some(serde_json::from_str(r#"{"mode": "pin", "length": 6}"#).unwrap());
+    let pin = execute_command(pin_req, state, None, None).unwrap();
+    let pin = pin.as_str().unwrap();
+    assert_eq!(pin.len(), 6);
+    assert!(pin.chars().all(|c| c.is_ascii_digit()));
+}
 
 #[test]
 fn test_generate_password_default() {
@@ -611,6 +701,7 @@ fn test_generate_password_custom_length() {
             include_lowercase: true,
             include_numbers: true,
             include_symbols: false,
+            ..GeneratorOptions::default()
         }),
         name: None,
         group_id: None,
@@ -647,6 +738,7 @@ fn test_generate_password_guarantees_all_types() {
             include_lowercase: true,
             include_numbers: true,
             include_symbols: true,
+            ..GeneratorOptions::default()
         }),
         name: None,
         group_id: None,
@@ -696,6 +788,7 @@ fn test_generate_password_short_guarantees_all_types() {
                 include_lowercase: true,
                 include_numbers: true,
                 include_symbols: true,
+                ..GeneratorOptions::default()
             }),
             name: None,
             group_id: None,

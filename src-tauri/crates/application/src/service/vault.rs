@@ -389,6 +389,12 @@ pub(crate) fn backup_db_file(reason: &str) {
 }
 
 pub fn setup_vault(state: &Arc<AppState>) -> Result<bool, VaultError> {
+    setup_vault_at(&paths::get_db_path(), state)
+}
+
+/// Path-injected variant of [`setup_vault`] (same test seam as
+/// [`init_vault_at`]); carries all of the production behavior.
+fn setup_vault_at(db_path: &std::path::Path, state: &Arc<AppState>) -> Result<bool, VaultError> {
     // Check if database is already loaded in state
     {
         let db_guard = state.database.lock().expect("db lock poisoned");
@@ -403,13 +409,11 @@ pub fn setup_vault(state: &Arc<AppState>) -> Result<bool, VaultError> {
         }
     }
 
-    let db_path = paths::get_db_path();
-
     if !db_path.exists() {
         return Ok(false);
     }
 
-    let db = Arc::new(database::init_database(&db_path)?);
+    let db = Arc::new(database::init_database(db_path)?);
     *state.database.lock().expect("db lock poisoned") = Some(db.clone());
 
     let verification_data = database::load_verification_data(&db)?;
@@ -426,6 +430,15 @@ pub fn setup_vault(state: &Arc<AppState>) -> Result<bool, VaultError> {
             Ok(settings) => {
                 *state.auto_lock_secs.lock().expect("timeout lock poisoned") =
                     settings.auto_lock_secs;
+                // v1.4.0 (WP5): the persisted global-shortcut config replaces
+                // the default binding registered at boot. Registration
+                // failures are logged inside apply_global_shortcut (bookkeeping
+                // must not fail the boot path); the interactive validation is
+                // the register_global_shortcut command.
+                state.apply_global_shortcut(
+                    settings.global_shortcut_enabled,
+                    &settings.global_shortcut,
+                );
             }
             Err(error) => tracing::warn!(
                 "could not load settings for the auto-lock timeout, keeping the default: {}",

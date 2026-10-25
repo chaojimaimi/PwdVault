@@ -104,6 +104,18 @@ pub struct Settings {
     pub default_include_symbols: bool,
     #[serde(default = "default_true")]
     pub check_updates: bool,
+    /// Vault-list sort mode ("recent" | "updated" | "alpha"), persisted so
+    /// the chosen ordering survives restarts (v1.4.0). Unknown values fall
+    /// back to "recent" at the consumption site.
+    #[serde(default = "default_sort_mode")]
+    pub sort_mode: String,
+    /// Global shortcut toggle + accelerator (v1.4.0). Registration happens
+    /// in the tauri-app layer (register_global_shortcut command); these
+    /// fields only persist the user's choice.
+    #[serde(default = "default_true")]
+    pub global_shortcut_enabled: bool,
+    #[serde(default = "default_global_shortcut")]
+    pub global_shortcut: String,
 }
 
 impl Default for Settings {
@@ -116,8 +128,21 @@ impl Default for Settings {
             default_include_numbers: true,
             default_include_symbols: true,
             check_updates: true,
+            sort_mode: default_sort_mode(),
+            global_shortcut_enabled: true,
+            global_shortcut: default_global_shortcut(),
         }
     }
+}
+
+fn default_sort_mode() -> String {
+    "recent".to_string()
+}
+
+/// Default global accelerator: CmdOrCtrl+Shift+Space (maps to Cmd on macOS,
+/// Ctrl on Windows/Linux).
+fn default_global_shortcut() -> String {
+    "CmdOrCtrl+Shift+Space".to_string()
 }
 
 fn default_true() -> bool {

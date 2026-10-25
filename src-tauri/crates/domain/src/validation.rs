@@ -20,6 +20,8 @@ pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_BACKUP_ENTRIES: usize = 100_000;
 pub const MAX_BACKUP_GROUPS: usize = 10_000;
 pub const MAX_BACKUP_DECODED_BYTES: usize = 10 * 1024 * 1024;
+/// Storage cap for the global-shortcut accelerator string (v1.4.0).
+pub const MAX_GLOBAL_SHORTCUT_BYTES: usize = 128;
 
 /// Public facade re-exported by the crate so call sites can write
 /// `pwdvault_domain::ValidationPolicy::master_password(...)`.
@@ -194,7 +196,25 @@ pub fn settings(value: &Settings) -> Result<(), DomainError> {
         value.default_include_lowercase,
         value.default_include_numbers,
         value.default_include_symbols,
-    )
+    )?;
+    // v1.4.0 global shortcut: an enabled shortcut needs an accelerator
+    // string (syntax itself is validated by the plugin's parser at
+    // registration time — see the tauri-app shortcuts module); the length
+    // cap only bounds storage. Disabled shortcuts may keep their string so
+    // re-enabling restores the last binding.
+    if value.global_shortcut.len() > MAX_GLOBAL_SHORTCUT_BYTES {
+        return Err(invalid(
+            "INVALID_GLOBAL_SHORTCUT",
+            "Global shortcut is too long",
+        ));
+    }
+    if value.global_shortcut_enabled && value.global_shortcut.trim().is_empty() {
+        return Err(invalid(
+            "INVALID_GLOBAL_SHORTCUT",
+            "Enabled global shortcut needs an accelerator string",
+        ));
+    }
+    Ok(())
 }
 
 pub fn generator(
@@ -218,6 +238,36 @@ pub fn generator(
         return Err(invalid(
             "INVALID_GENERATOR_CHARSETS",
             "Select at least one character type and allow one character per selected type",
+        ));
+    }
+    Ok(())
+}
+
+/// Passphrase parameters (v1.4.0): 3-10 words over the EFF short list
+/// (3 words ≈ 31 bits is the practical floor; 10 ≈ 103 bits), separator
+/// capped so a hostile client cannot smuggle megabytes through it.
+pub fn passphrase(words: u8, separator: &str) -> Result<(), DomainError> {
+    if !(3..=10).contains(&words) {
+        return Err(invalid(
+            "INVALID_GENERATOR_WORDS",
+            "Passphrase word count must be between 3 and 10",
+        ));
+    }
+    if separator.len() > 4 || !separator.bytes().all(|b| (0x20..=0x7e).contains(&b)) {
+        return Err(invalid(
+            "INVALID_GENERATOR_SEPARATOR",
+            "Passphrase separator must be at most 4 printable ASCII characters",
+        ));
+    }
+    Ok(())
+}
+
+/// PIN parameters (v1.4.0): 4-16 digits.
+pub fn pin(len: u8) -> Result<(), DomainError> {
+    if !(4..=16).contains(&len) {
+        return Err(invalid(
+            "INVALID_GENERATOR_PIN",
+            "PIN length must be between 4 and 16",
         ));
     }
     Ok(())

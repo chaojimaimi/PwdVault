@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth, useSettings } from "../context/AppContext";
 import { useTheme } from "../hooks/useTheme";
 import { showToast } from "../utils/toast";
+import { errorMessage } from "../utils/errorMessage";
 import { BackHeader } from "../components/BackHeader";
 import type { Settings } from "../types";
 import { UnsavedChangesModal } from "../components/UnsavedChangesModal";
-import { revokeExtensionAccess } from "../api/vault";
+import { registerGlobalShortcut, revokeExtensionAccess } from "../api/vault";
 import { AccessibleDialog } from "../components/AccessibleDialog";
 import { UpdateNotification } from "../components/UpdateNotification";
 import { SecuritySettingsSection } from "../components/SecuritySettingsSection";
@@ -31,6 +32,9 @@ export function SettingsScreen() {
 	const [showUnsaved, setShowUnsaved] = useState(false);
 	const [showRevoke, setShowRevoke] = useState(false);
 	const [revoking, setRevoking] = useState(false);
+	// v1.4.0: red registration-failure hint for the global shortcut — set when
+	// the Rust re-registration rejects the accelerator (conflict/bad string).
+	const [shortcutError, setShortcutError] = useState<string | null>(null);
 	const charsetValid =
 		settings.default_include_uppercase ||
 		settings.default_include_lowercase ||
@@ -65,6 +69,33 @@ export function SettingsScreen() {
 		if (saving || state.status !== "success" || !charsetValid) return;
 		setSaving(true);
 		try {
+			// v1.4.0: a changed shortcut binding is validated by actually
+			// registering it (Rust command) BEFORE persisting. On failure the
+			// previous binding is kept (revert the two fields to the loaded
+			// values) and the error shows inline in red.
+			const shortcutChanged =
+				settings.global_shortcut_enabled !==
+					state.settings.global_shortcut_enabled ||
+				settings.global_shortcut !== state.settings.global_shortcut;
+			if (shortcutChanged) {
+				try {
+					await registerGlobalShortcut(
+						settings.global_shortcut_enabled,
+						settings.global_shortcut,
+					);
+					setShortcutError(null);
+				} catch (error) {
+					const message = errorMessage(error, "Could not register shortcut");
+					setShortcutError(message);
+					setSettings((current) => ({
+						...current,
+						global_shortcut_enabled: state.settings.global_shortcut_enabled,
+						global_shortcut: state.settings.global_shortcut,
+					}));
+					showToast("Shortcut not saved — keeping the previous binding");
+					return;
+				}
+			}
 			await actions.updateSettings(settings);
 			showToast("Settings saved");
 			authActions.navigate("vault");
@@ -196,6 +227,55 @@ export function SettingsScreen() {
 							</select>
 						</div>
 						<p className="settings-hint">Vault locks automatically when idle</p>
+					</div>
+
+					<div className="settings-divider" />
+
+					<div className="settings-section">
+						<h3 className="settings-section-title">Global Shortcut</h3>
+						<div className="option-row">
+							<label htmlFor="global-shortcut-enabled">
+								Enable global shortcut
+							</label>
+							<input
+								id="global-shortcut-enabled"
+								type="checkbox"
+								className="checkbox"
+								checked={settings.global_shortcut_enabled}
+								onChange={(e) =>
+									setSettings({
+										...settings,
+										global_shortcut_enabled: e.target.checked,
+									})
+								}
+							/>
+						</div>
+						<div className="option-row">
+							<label htmlFor="global-shortcut">Shortcut</label>
+							<input
+								id="global-shortcut"
+								type="text"
+								className="settings-input"
+								spellCheck={false}
+								placeholder="CmdOrCtrl+Shift+Space"
+								value={settings.global_shortcut}
+								onChange={(e) =>
+									setSettings({
+										...settings,
+										global_shortcut: e.target.value,
+									})
+								}
+							/>
+						</div>
+						<p className="settings-hint">
+							Shows and focuses PwdVault from anywhere. Example:
+							CmdOrCtrl+Shift+Space. Takes effect on save.
+						</p>
+						{shortcutError && (
+							<p className="error-message" role="alert">
+								{shortcutError}
+							</p>
+						)}
 					</div>
 
 					<div className="settings-divider" />

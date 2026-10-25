@@ -87,6 +87,15 @@ fn tauri_ipc_commands() -> HashSet<&'static str> {
         // never be reachable from the browser extension.
         "change_password",
         "biometric_status",
+        // v1.4.0 trash — Tauri IPC only (D6): the extension bridge never sees
+        // soft-deleted entries or physical deletes.
+        "list_deleted_entries",
+        "restore_entry",
+        "purge_entry",
+        "empty_trash",
+        // v1.4.0 global shortcut — settings-page-driven Rust registration
+        // (shortcuts.rs); the webview never calls the plugin JS API.
+        "register_global_shortcut",
         "enable_biometric",
         "disable_biometric",
         "unlock_biometric",
@@ -190,15 +199,20 @@ fn adapter_only_commands_are_documented() {
             &"change_password",
             &"disable_biometric",
             &"disable_recovery",
+            &"empty_trash",
             &"enable_biometric",
             &"enable_recovery",
             &"export_vault_file",
             &"get_entry_meta",
             &"is_vault_initialized",
             &"is_vault_unlocked",
+            &"list_deleted_entries",
+            &"purge_entry",
             &"read_backup_file",
             &"recover_vault",
             &"recovery_status",
+            &"register_global_shortcut",
+            &"restore_entry",
             &"sync_connect",
             &"sync_disconnect",
             &"sync_now",

@@ -5,7 +5,7 @@
 //! This eliminates the crash window where the business write has committed
 //! but the digest hasn't been refreshed yet.
 
-use redb::{Database, WriteTransaction};
+use redb::{Database, ReadableTable, ReadableTableMetadata, TableHandle, WriteTransaction};
 
 use crate::crypto::bc_serialize;
 
@@ -167,6 +167,108 @@ pub fn remove_blob_in_txn(txn: &WriteTransaction, key: &str) -> Result<bool, Dat
     let mut table = txn.open_table(super::VAULT_TABLE)?;
     let existed = table.remove(key)?.is_some();
     Ok(existed)
+}
+
+/// Remove an entry row within an existing write transaction. Returns whether
+/// the row existed. Use through [`VaultStore::write`].
+pub fn remove_entry_in_txn(txn: &WriteTransaction, entry_id: &str) -> Result<bool, DatabaseError> {
+    let mut table = txn.open_table(ENTRIES_TABLE)?;
+    let existed = table.remove(entry_id)?.is_some();
+    Ok(existed)
+}
+
+// ---------------------------------------------------------------------------
+// Purge ledger (v1.4.0): local-only bookkeeping of permanently deleted ids.
+//
+// The ledger exists so a physical delete survives the sync cycle: a remote
+// container still holding the tombstone would re-insert the row on the next
+// merge (single-side rule) and refill the trash behind the user's back.
+// Reads that filter the trash consult this table; LIVE rows must NEVER be
+// filtered by it (a merge-revived row wins over the old tombstone — see the
+// service layer, which also removes stale ledger ids when it meets a live
+// row). Never synced; deliberately outside the integrity digest (see the
+// PURGED_ENTRIES_TABLE comment in database/mod.rs).
+// ---------------------------------------------------------------------------
+
+/// Record ids as purged within an existing write transaction. Re-recording
+/// an id refreshes its timestamp. Enforces the FIFO cap
+/// ([`super::MAX_PURGED_LEDGER`]) by evicting the oldest purge timestamps —
+/// a documented trade-off: an evicted id's remote tombstone may reappear in
+/// the trash and can be purged again.
+pub fn record_purged_entries_in_txn(
+    txn: &WriteTransaction,
+    ids: &[String],
+    purged_at: i64,
+) -> Result<(), DatabaseError> {
+    {
+        let mut table = txn.open_table(super::PURGED_ENTRIES_TABLE)?;
+        for id in ids {
+            table.insert(id.as_str(), purged_at.to_le_bytes().as_slice())?;
+        }
+    }
+    // Evict one oldest entry per pass until under the cap (tables are
+    // re-opened per pass: redb borrows make iteration and removal mutually
+    // exclusive).
+    loop {
+        let mut table = txn.open_table(super::PURGED_ENTRIES_TABLE)?;
+        if table.len()? as usize <= super::MAX_PURGED_LEDGER {
+            break;
+        }
+        let oldest = {
+            let mut rows: Vec<(String, i64)> = Vec::with_capacity(table.len()? as usize);
+            for row in table.iter()? {
+                let (key, value) = row?;
+                let bytes: [u8; 8] = value
+                    .value()
+                    .try_into()
+                    .expect("ledger value is an 8-byte timestamp");
+                rows.push((key.value().to_string(), i64::from_le_bytes(bytes)));
+            }
+            rows.into_iter()
+                .min_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)))
+        };
+        match oldest {
+            Some((id, _)) => {
+                table.remove(id.as_str())?;
+            }
+            None => break,
+        }
+    }
+    Ok(())
+}
+
+/// Drop an id from the purge ledger within an existing write transaction.
+/// Returns whether a record existed. Used when a purged id returns as a LIVE
+/// row (merge revival / import) or when the user restores the entry.
+pub fn remove_purged_entry_in_txn(
+    txn: &WriteTransaction,
+    entry_id: &str,
+) -> Result<bool, DatabaseError> {
+    let mut table = txn.open_table(super::PURGED_ENTRIES_TABLE)?;
+    let existed = table.remove(entry_id)?.is_some();
+    Ok(existed)
+}
+
+/// Ids currently recorded in the purge ledger (read side).
+///
+/// A database that never purged anything has no ledger table yet — reads
+/// must treat that as "empty ledger", not an error: every trash/list call
+/// consults this helper and pre-v1.4.0 databases start without the table.
+pub fn purged_entry_ids(db: &Database) -> Result<std::collections::HashSet<String>, DatabaseError> {
+    let read_txn = db.begin_read()?;
+    if !read_txn
+        .list_tables()?
+        .any(|table| table.name() == super::PURGED_ENTRIES_TABLE.name())
+    {
+        return Ok(std::collections::HashSet::new());
+    }
+    let table = read_txn.open_table(super::PURGED_ENTRIES_TABLE)?;
+    let mut ids = std::collections::HashSet::new();
+    for row in table.iter()? {
+        let (key, _) = row?;
+        ids.insert(key.value().to_string());
+    }
+    Ok(ids)
 }
 
 #[cfg(test)]
@@ -365,6 +467,50 @@ mod tests {
 
         assert!(integrity::has_digest(&db).unwrap());
         assert!(integrity::verify_integrity(&db, &TEST_MAC_KEY).unwrap());
+    }
+
+    /// Purge ledger (v1.4.0): record + remove round trip, FIFO cap at
+    /// MAX_PURGED_LEDGER (oldest timestamps evicted first), and reads on a
+    /// database without a ledger table are an empty set (pre-v1.4.0 files).
+    #[test]
+    fn purge_ledger_records_evicts_and_reads_empty() {
+        let temp = NamedTempFile::new().unwrap();
+        let db = super::super::init_database(temp.path()).unwrap();
+        let store = VaultStore::new(&db);
+
+        // A fresh database has no ledger table: the read side is empty, not
+        // an error (every trash/list call consults it).
+        assert!(purged_entry_ids(&db).unwrap().is_empty());
+
+        let ids: Vec<String> = (0..(super::super::MAX_PURGED_LEDGER + 20))
+            .map(|i| format!("purged-{i:04}"))
+            .collect();
+        store
+            .write(&TEST_MAC_KEY, |txn| {
+                record_purged_entries_in_txn(txn, &ids, 1_000)?;
+                Ok(())
+            })
+            .unwrap();
+
+        let ledger = purged_entry_ids(&db).unwrap();
+        assert_eq!(ledger.len(), super::super::MAX_PURGED_LEDGER);
+        // Oldest timestamps (first 20 recorded ids) were evicted.
+        for i in 0..20 {
+            assert!(!ledger.contains(&format!("purged-{i:04}")));
+        }
+        assert!(ledger.contains("purged-0020"));
+
+        // Re-recording refreshes (no duplicates possible in a redb table).
+        store
+            .write(&TEST_MAC_KEY, |txn| {
+                record_purged_entries_in_txn(txn, &["purged-0020".to_string()], 2_000)?;
+                remove_purged_entry_in_txn(txn, "purged-0021")?;
+                Ok(())
+            })
+            .unwrap();
+        let ledger = purged_entry_ids(&db).unwrap();
+        assert!(ledger.contains("purged-0020"));
+        assert!(!ledger.contains("purged-0021"));
     }
 
     /// A stored digest whose VERSION is below the current one is a

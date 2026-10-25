@@ -196,3 +196,71 @@
   flex: 1;
   accent-color: var(--color-primary);
 }
+
+/* --- v1.4.0: generator mode tabs + session history --- */
+
+.mode-tabs {
+  display: flex;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-xs);
+  background: var(--color-input);
+}
+
+.mode-tab {
+  flex: 1;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-label);
+  cursor: pointer;
+}
+
+.mode-tab.active {
+  /* Same active-tab treatment as the vault group tabs (DESIGN.md tokens). */
+  background: var(--color-primary-dim);
+  border-color: var(--color-primary-border);
+  color: var(--color-primary);
+}
+
+.generator-history .history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-input);
+  color: var(--color-text);
+  font-size: var(--text-label);
+  cursor: pointer;
+  text-align: left;
+}
+
+.history-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+}
+
+.history-time {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-micro);
+}

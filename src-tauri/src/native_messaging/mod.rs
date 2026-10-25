@@ -15,7 +15,7 @@ mod dispatcher;
 mod protocol;
 mod server;
 
-pub use protocol::{GeneratorOptions, NativeRequest, NativeResponse};
+pub use protocol::{GeneratorMode, GeneratorOptions, NativeRequest, NativeResponse};
 pub use server::start_server;
 
 #[cfg(test)]

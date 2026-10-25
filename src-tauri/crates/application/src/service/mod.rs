@@ -14,8 +14,8 @@ pub mod vault;
 
 pub use backup::{export_vault, import_vault, parse_backup_file_bytes};
 pub use entries::{
-    create_entry, get_entry_count, get_entry_meta, get_entry_secret, list_all_entries,
-    remove_entry, update_entry,
+    create_entry, empty_trash, get_entry_count, get_entry_meta, get_entry_secret, list_all_entries,
+    list_deleted_entries, purge_entry, remove_entry, restore_entry, update_entry,
 };
 pub use extension::revoke_extension_access;
 pub use groups::{create_group, list_all_groups, remove_group, update_group};
@@ -32,7 +32,7 @@ pub use sync::engine::{
     SyncStatusResponse,
 };
 pub use totp::totp_code;
-pub use utils::generate_password;
+pub use utils::{generate_passphrase, generate_password, generate_pin};
 pub use vault::{
     check_rate_limit, init_vault, is_initialized, is_unlocked, lock_vault, record_failed_attempt,
     reset_rate_limit, setup_vault, unlock_vault,

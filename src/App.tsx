@@ -76,6 +76,31 @@ function AppContent() {
 	// A1: keep the auto-lock timer alive on local user input while unlocked.
 	useAutoLockActivity(state.isUnlocked, settingsState.settings.auto_lock_secs);
 
+	// v1.4.0 (WP5): the Rust-side global shortcut shows + focuses the window
+	// and emits this event; while the vault is unlocked we complete the
+	// action by routing to the vault screen and focusing the search input.
+	// The listener is only armed while unlocked — before unlock, the
+	// show+focus from Rust already lands the user on the unlock screen.
+	useEffect(() => {
+		if (!state.isUnlocked) return;
+		let unlisten: (() => void) | undefined;
+		let disposed = false;
+		listen("global-shortcut-vault", () => {
+			actions.navigate("vault");
+			// Wait one frame so the vault screen (and its search input) exists.
+			requestAnimationFrame(() => {
+				document.querySelector<HTMLInputElement>(".search-input")?.focus();
+			});
+		}).then((stop) => {
+			if (disposed) stop();
+			else unlisten = stop;
+		});
+		return () => {
+			disposed = true;
+			unlisten?.();
+		};
+	}, [state.isUnlocked, actions]);
+
 	if (state.isLoading) {
 		return (
 			<div className="screen">

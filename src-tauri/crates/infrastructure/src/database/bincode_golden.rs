@@ -54,11 +54,20 @@ const GROUP_MINIMAL_HEX: &str =
 /// `Group` with UTF-8 id/name, `created_at = i64::MIN`, tombstone `i64::MAX`.
 const GROUP_FULL_EXTREMES_HEX: &str = "0f0000000000000067726f75702d757569642df09f8eaf1200000000000000e5b7a5e4bd9c2fe4b8aae4baba2d42616e6b000000000000008000f153650000000001ffffffffffffff7f";
 
-/// `Settings::default()` (600s / 16 / all-true).
-const SETTINGS_DEFAULT_HEX: &str = "580200000000000010000000000000000101010101";
+/// `Settings::default()` (600s / 16 / all-true / "recent" / shortcut on +
+/// "CmdOrCtrl+Shift+Space").
+///
+/// v1.4.0 DELIBERATE UPDATE: the Settings struct gained `sort_mode`,
+/// `global_shortcut_enabled`, `global_shortcut` (all `#[serde(default)]`).
+/// This re-captured fixture pins the CURRENT shape; the legacy READ path is
+/// unaffected (old rows go through `LegacySettingsV1`/bincode fallbacks in
+/// `database::load_settings`, whose shapes did not change, and the current
+/// write path stores JSON anyway).
+const SETTINGS_DEFAULT_HEX: &str = "5802000000000000100000000000000001010101010600000000000000726563656e74011500000000000000436d644f724374726c2b53686966742b5370616365";
 
 /// `Settings` at `u64::MAX` / `usize::MAX` / all-false.
-const SETTINGS_EXTREMES_HEX: &str = "ffffffffffffffffffffffffffffffff0000000000";
+const SETTINGS_EXTREMES_HEX: &str =
+    "ffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000";
 
 /// `VerificationData` with zero salt, default params, empty header blob.
 const VERIFICATION_DATA_BASELINE_HEX: &str =
@@ -231,6 +240,9 @@ fn settings_extremes() {
         default_include_numbers: false,
         default_include_symbols: false,
         check_updates: false,
+        sort_mode: String::new(),
+        global_shortcut_enabled: false,
+        global_shortcut: String::new(),
     };
     assert_golden(SETTINGS_EXTREMES_HEX, &settings);
 }
