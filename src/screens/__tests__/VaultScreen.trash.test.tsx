@@ -128,11 +128,7 @@ vi.mock("react-virtuoso", () => ({
 	}: {
 		data: unknown[];
 		itemContent: (index: number, item: unknown) => React.ReactElement;
-	}) => (
-		<div>
-			{data.map((item, index) => itemContent(index, item))}
-		</div>
-	),
+	}) => <div>{data.map((item, index) => itemContent(index, item))}</div>,
 }));
 
 beforeEach(() => {
@@ -174,7 +170,9 @@ describe("VaultScreen trash (v1.4.0)", () => {
 		await screen.findByText("Old Site");
 
 		fireEvent.click(screen.getAllByRole("button", { name: "Restore" })[0]);
-		await waitFor(() => expect(actions.restoreEntry).toHaveBeenCalledWith("dead-1"));
+		await waitFor(() =>
+			expect(actions.restoreEntry).toHaveBeenCalledWith("dead-1"),
+		);
 	});
 
 	it("routes permanent deletion through the danger confirmation modal", async () => {
@@ -183,14 +181,18 @@ describe("VaultScreen trash (v1.4.0)", () => {
 		fireEvent.click(screen.getByLabelText("Open trash"));
 		await screen.findByText("Old Site");
 
-		fireEvent.click(screen.getAllByRole("button", { name: "Delete forever" })[0]);
+		fireEvent.click(
+			screen.getAllByRole("button", { name: "Delete forever" })[0],
+		);
 		// The confirm modal names the victim before anything is purged.
 		expect(await screen.findByText("Confirm Delete")).toBeTruthy();
 		expect(screen.getByText(/Permanently delete "Old Site"/)).toBeTruthy();
 		expect(actions.purgeEntry).not.toHaveBeenCalled();
 
 		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-		await waitFor(() => expect(actions.purgeEntry).toHaveBeenCalledWith("dead-1"));
+		await waitFor(() =>
+			expect(actions.purgeEntry).toHaveBeenCalledWith("dead-1"),
+		);
 	});
 
 	it("empties the trash from the header button", async () => {

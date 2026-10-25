@@ -16,50 +16,154 @@
 // these suffixes the registrable domain is three labels (example.co.uk is
 // one registrable domain; evil.co.uk must never collapse into it).
 const MULTI_LABEL_SUFFIXES = new Set([
-  // uk
-  'co.uk', 'org.uk', 'me.uk', 'ac.uk', 'gov.uk', 'net.uk', 'sch.uk', 'ltd.uk', 'plc.uk',
-  // jp
-  'co.jp', 'ne.jp', 'or.jp', 'ac.jp', 'ad.jp', 'ed.jp', 'go.jp', 'gr.jp', 'lg.jp',
-  // au
-  'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au', 'asn.au', 'id.au',
-  // nz
-  'co.nz', 'net.nz', 'org.nz', 'govt.nz', 'ac.nz', 'school.nz',
-  // br
-  'com.br', 'net.br', 'org.br', 'gov.br', 'edu.br',
-  // mx
-  'com.mx', 'net.mx', 'org.mx', 'gob.mx', 'edu.mx',
-  // in
-  'co.in', 'net.in', 'org.in', 'firm.in', 'gen.in', 'ind.in', 'ac.in', 'edu.in', 'gov.in',
-  // za
-  'co.za', 'net.za', 'org.za', 'web.za', 'ac.za', 'gov.za',
-  // sg
-  'com.sg', 'net.sg', 'org.sg', 'gov.sg', 'edu.sg',
-  // hk
-  'com.hk', 'net.hk', 'org.hk', 'gov.hk', 'edu.hk', 'idv.hk',
-  // tw
-  'com.tw', 'net.tw', 'org.tw', 'gov.tw', 'edu.tw', 'idv.tw',
-  // cn
-  'com.cn', 'net.cn', 'org.cn', 'gov.cn', 'edu.cn', 'ac.cn', 'mil.cn',
-  // kr
-  'co.kr', 'ne.kr', 'or.kr', 'go.kr', 'ac.kr', 'pe.kr',
-  // tr
-  'com.tr', 'net.tr', 'org.tr', 'gov.tr', 'edu.tr',
-  // ua
-  'com.ua', 'net.ua', 'org.ua', 'gov.ua', 'edu.ua',
-  // il
-  'co.il', 'org.il', 'net.il', 'ac.il', 'gov.il',
-  // co
-  'com.co', 'net.co', 'org.co', 'edu.co', 'gov.co',
-  // id
-  'co.id', 'net.id', 'or.id', 'web.id', 'ac.id',
-  // my
-  'com.my', 'net.my', 'org.my', 'edu.my', 'gov.my',
-  // ae
-  'co.ae', 'net.ae', 'org.ae', 'ac.ae', 'gov.ae',
-  // pl
-  'com.pl', 'net.pl', 'org.pl', 'gov.pl',
-  // ca
-  'gc.ca',
+	// uk
+	"co.uk",
+	"org.uk",
+	"me.uk",
+	"ac.uk",
+	"gov.uk",
+	"net.uk",
+	"sch.uk",
+	"ltd.uk",
+	"plc.uk",
+	// jp
+	"co.jp",
+	"ne.jp",
+	"or.jp",
+	"ac.jp",
+	"ad.jp",
+	"ed.jp",
+	"go.jp",
+	"gr.jp",
+	"lg.jp",
+	// au
+	"com.au",
+	"net.au",
+	"org.au",
+	"edu.au",
+	"gov.au",
+	"asn.au",
+	"id.au",
+	// nz
+	"co.nz",
+	"net.nz",
+	"org.nz",
+	"govt.nz",
+	"ac.nz",
+	"school.nz",
+	// br
+	"com.br",
+	"net.br",
+	"org.br",
+	"gov.br",
+	"edu.br",
+	// mx
+	"com.mx",
+	"net.mx",
+	"org.mx",
+	"gob.mx",
+	"edu.mx",
+	// in
+	"co.in",
+	"net.in",
+	"org.in",
+	"firm.in",
+	"gen.in",
+	"ind.in",
+	"ac.in",
+	"edu.in",
+	"gov.in",
+	// za
+	"co.za",
+	"net.za",
+	"org.za",
+	"web.za",
+	"ac.za",
+	"gov.za",
+	// sg
+	"com.sg",
+	"net.sg",
+	"org.sg",
+	"gov.sg",
+	"edu.sg",
+	// hk
+	"com.hk",
+	"net.hk",
+	"org.hk",
+	"gov.hk",
+	"edu.hk",
+	"idv.hk",
+	// tw
+	"com.tw",
+	"net.tw",
+	"org.tw",
+	"gov.tw",
+	"edu.tw",
+	"idv.tw",
+	// cn
+	"com.cn",
+	"net.cn",
+	"org.cn",
+	"gov.cn",
+	"edu.cn",
+	"ac.cn",
+	"mil.cn",
+	// kr
+	"co.kr",
+	"ne.kr",
+	"or.kr",
+	"go.kr",
+	"ac.kr",
+	"pe.kr",
+	// tr
+	"com.tr",
+	"net.tr",
+	"org.tr",
+	"gov.tr",
+	"edu.tr",
+	// ua
+	"com.ua",
+	"net.ua",
+	"org.ua",
+	"gov.ua",
+	"edu.ua",
+	// il
+	"co.il",
+	"org.il",
+	"net.il",
+	"ac.il",
+	"gov.il",
+	// co
+	"com.co",
+	"net.co",
+	"org.co",
+	"edu.co",
+	"gov.co",
+	// id
+	"co.id",
+	"net.id",
+	"or.id",
+	"web.id",
+	"ac.id",
+	// my
+	"com.my",
+	"net.my",
+	"org.my",
+	"edu.my",
+	"gov.my",
+	// ae
+	"co.ae",
+	"net.ae",
+	"org.ae",
+	"ac.ae",
+	"gov.ae",
+	// pl
+	"com.pl",
+	"net.pl",
+	"org.pl",
+	"gov.pl",
+	// ca
+	"gc.ca",
 ]);
 
 // Registrable domain (eTLD+1) of `host` (expected lowercase, www already
@@ -75,45 +179,45 @@ const MULTI_LABEL_SUFFIXES = new Set([
 //    → full hostname, so only an exact host match passes.
 // Single-letter / exotic TLDs behave as plain eTLD+1 via the tail-2 path.
 function registeredDomain(host) {
-  if (!host) return null;
-  const labels = host.split('.');
-  if (labels.length <= 2) return host;
-  const lastTwo = labels.slice(-2).join('.');
-  if (MULTI_LABEL_SUFFIXES.has(lastTwo)) {
-    return labels.slice(-3).join('.');
-  }
-  const lastLabel = labels[labels.length - 1];
-  if (lastLabel.length === 2) return host;
-  return lastTwo;
+	if (!host) return null;
+	const labels = host.split(".");
+	if (labels.length <= 2) return host;
+	const lastTwo = labels.slice(-2).join(".");
+	if (MULTI_LABEL_SUFFIXES.has(lastTwo)) {
+		return labels.slice(-3).join(".");
+	}
+	const lastLabel = labels[labels.length - 1];
+	if (lastLabel.length === 2) return host;
+	return lastTwo;
 }
 
 function normalizedDomain(rawUrl) {
-  try {
-    return registeredDomain(
-      new URL(rawUrl).hostname.toLowerCase().replace(/^www\./, ''),
-    );
-  } catch {
-    return null;
-  }
+	try {
+		return registeredDomain(
+			new URL(rawUrl).hostname.toLowerCase().replace(/^www\./, ""),
+		);
+	} catch {
+		return null;
+	}
 }
 
 function entryMatchesSenderUrl(entry, senderUrl) {
-  const senderDomain = normalizedDomain(senderUrl);
-  // Empty entryUrl is REJECTED here — INTENTIONALLY different from
-  // entryMatchesPageUrl below (which allows generic entries on an explicit
-  // popup fill): the content-script path auto-fills without a per-entry user
-  // click, so a stored URL must exist to compare against the sender frame.
-  const rawEntryUrl = typeof entry?.url === 'string' ? entry.url : '';
-  if (!senderDomain || !rawEntryUrl) return false;
-  // Entries are often stored scheme-less ("github.com/acme"); pad https://
-  // exactly like entryMatchesPageUrl before parsing, otherwise such entries
-  // would be invisible to the content-script path while the popup could
-  // still fill them — a pointless semantics split.
-  const withScheme = /^https?:\/\//i.test(rawEntryUrl)
-    ? rawEntryUrl
-    : `https://${rawEntryUrl}`;
-  const entryDomain = normalizedDomain(withScheme);
-  return Boolean(entryDomain) && entryDomain === senderDomain;
+	const senderDomain = normalizedDomain(senderUrl);
+	// Empty entryUrl is REJECTED here — INTENTIONALLY different from
+	// entryMatchesPageUrl below (which allows generic entries on an explicit
+	// popup fill): the content-script path auto-fills without a per-entry user
+	// click, so a stored URL must exist to compare against the sender frame.
+	const rawEntryUrl = typeof entry?.url === "string" ? entry.url : "";
+	if (!senderDomain || !rawEntryUrl) return false;
+	// Entries are often stored scheme-less ("github.com/acme"); pad https://
+	// exactly like entryMatchesPageUrl before parsing, otherwise such entries
+	// would be invisible to the content-script path while the popup could
+	// still fill them — a pointless semantics split.
+	const withScheme = /^https?:\/\//i.test(rawEntryUrl)
+		? rawEntryUrl
+		: `https://${rawEntryUrl}`;
+	const entryDomain = normalizedDomain(withScheme);
+	return Boolean(entryDomain) && entryDomain === senderDomain;
 }
 
 // Single source of truth for "may this entry be filled on this page?".
@@ -127,20 +231,20 @@ function entryMatchesSenderUrl(entry, senderUrl) {
 // scripts are classic scripts and cannot import ES modules. Keep the copies
 // byte-identical; the guard test in sender-auth.test.js enforces it.
 function entryMatchesPageUrl(entryUrl, pageUrl) {
-  // Empty entryUrl = generic entry (no stored URL); an explicit popup fill is
-  // a deliberate user action, so allow it. Empty pageUrl = cannot judge.
-  if (!entryUrl) return true;
-  if (!pageUrl) return false;
-  // Entries are often stored scheme-less ("github.com/acme"); pad https://
-  // exactly like popup.js formatUrl before parsing, otherwise such entries
-  // would be rejected here despite being fillable nowhere else.
-  const withScheme = /^https?:\/\//i.test(entryUrl)
-    ? entryUrl
-    : `https://${entryUrl}`;
-  const entryDomain = normalizedDomain(withScheme);
-  const pageDomain = normalizedDomain(pageUrl);
-  // A parse failure yields null (cannot judge) → reject.
-  return Boolean(entryDomain && pageDomain && entryDomain === pageDomain);
+	// Empty entryUrl = generic entry (no stored URL); an explicit popup fill is
+	// a deliberate user action, so allow it. Empty pageUrl = cannot judge.
+	if (!entryUrl) return true;
+	if (!pageUrl) return false;
+	// Entries are often stored scheme-less ("github.com/acme"); pad https://
+	// exactly like popup.js formatUrl before parsing, otherwise such entries
+	// would be rejected here despite being fillable nowhere else.
+	const withScheme = /^https?:\/\//i.test(entryUrl)
+		? entryUrl
+		: `https://${entryUrl}`;
+	const entryDomain = normalizedDomain(withScheme);
+	const pageDomain = normalizedDomain(pageUrl);
+	// A parse failure yields null (cannot judge) → reject.
+	return Boolean(entryDomain && pageDomain && entryDomain === pageDomain);
 }
 // === END VERBATIM DOMAIN-MATCH BLOCK ===
 
@@ -988,8 +1092,7 @@ function entryMatchesPageUrl(entryUrl, pageUrl) {
 					showAutoFillPromptError(
 						full && full.error && /lock/i.test(full.error)
 							? "Vault is locked — unlock PwdVault and try again"
-							: (full && full.error) ||
-									"Failed to fetch the entry. Try again.",
+							: (full && full.error) || "Failed to fetch the entry. Try again.",
 					);
 					return;
 				}

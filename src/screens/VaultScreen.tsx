@@ -336,18 +336,18 @@ export function VaultScreen() {
 							</ul>
 						)}
 					</div>
-						{/* Permanent delete is the one destructive trash action, so it
+					{/* Permanent delete is the one destructive trash action, so it
 						    goes through the shared danger-confirmation modal. */}
-						<DeleteConfirmModal
-							isOpen={emptyConfirm}
-							message={`Permanently delete all ${trashList.length} item${trashList.length === 1 ? "" : "s"} in the trash? This cannot be undone.`}
-							onConfirm={() => {
-								setEmptyConfirm(false);
-								void handleEmptyTrash();
-							}}
-							onCancel={() => setEmptyConfirm(false)}
-							isDeleting={trashBusy}
-						/>
+					<DeleteConfirmModal
+						isOpen={emptyConfirm}
+						message={`Permanently delete all ${trashList.length} item${trashList.length === 1 ? "" : "s"} in the trash? This cannot be undone.`}
+						onConfirm={() => {
+							setEmptyConfirm(false);
+							void handleEmptyTrash();
+						}}
+						onCancel={() => setEmptyConfirm(false)}
+						isDeleting={trashBusy}
+					/>
 					<DeleteConfirmModal
 						isOpen={purgeTarget !== null}
 						message={`Permanently delete "${purgeTarget?.title || "Untitled"}"? This cannot be undone.`}
@@ -450,7 +450,8 @@ export function VaultScreen() {
 					)}
 
 					<div className="entry-list screen-scroll-region" role="list">
-						{state.entriesStatus === "idle" || state.entriesStatus === "loading" ? (
+						{state.entriesStatus === "idle" ||
+						state.entriesStatus === "loading" ? (
 							<div className="loading" role="status">
 								<span className="spinner" />
 								<span>Loading passwords…</span>

@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `accounts.example.com` now matches on `example.com` (and vice versa).
   Matching runs over a curated 126-entry multi-label public-suffix table
   with fail-closed degradation — an unlisted ccTLD (e.g. `co.xx`) falls
-  back to exact-hostname matching, so a miss can only *skip* a fill,
+  back to exact-hostname matching, so a miss can only _skip_ a fill,
   never leak a credential across registrants. All five matching sites
   (both content-script gates, popup, background list) consolidate onto
   one source; generic entries (no stored URL) still never appear in
