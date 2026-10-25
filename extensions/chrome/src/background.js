@@ -7,6 +7,11 @@ import { authorizeMessage, entryMatchesSenderUrl } from "./sender-auth.js";
 import { createTokenStorage } from "./token-storage.js";
 import { createPairNonceStorage } from "./pair-nonce-storage.js";
 import {
+	armClipboardClear,
+	createClipboardArmStorage,
+	handleClipboardClearAlarm,
+} from "./clipboard-clear.js";
+import {
 	friendlyConnectionError,
 	isAuthenticationError,
 } from "./connection-errors.js";
@@ -33,6 +38,28 @@ const pairNonceStoragePromise = createPairNonceStorage(
 	chrome.storage,
 	PAIR_NONCE_STORAGE_KEY,
 );
+
+// The clipboard auto-clear arm record (digest + deadline) is also
+// session-backed so the deadline alarm can still verify the clipboard after
+// this service worker was killed and restarted in the meantime.
+const clipboardArmStoragePromise = createClipboardArmStorage(chrome.storage);
+
+// Injected browser APIs for the clipboard-clear engine. `offscreen` exists
+// only on Chrome (109+); Firefox takes the event-page execCommand path.
+// `document` exists only in the Firefox event page, not in a Chrome service
+// worker.
+function clipboardClearDeps() {
+	return clipboardArmStoragePromise.then((storage) => ({
+		storage,
+		alarms: chrome.alarms,
+		runtime: chrome.runtime,
+		offscreen:
+			typeof chrome.offscreen?.createDocument === "function"
+				? chrome.offscreen
+				: null,
+		document: typeof document === "undefined" ? null : document,
+	}));
+}
 
 let connectionStatus = "disconnected";
 let requestId = 0;
@@ -728,10 +755,44 @@ async function handleMessage(message, sender) {
 				fresh: await pendingPairingFresh(),
 			};
 
+		case "CLIPBOARD_ARM_CLEAR": {
+			// Purely internal message from the popup: schedule the 30s
+			// digest-checked clipboard clear in this background context. It
+			// must never touch the desktop native-messaging channel. Popup-only
+			// senders are enforced by sender-auth.js (content scripts cannot
+			// reach this case).
+			return armClipboardClear(await clipboardClearDeps(), {
+				digest: message.digest,
+				deadline: message.deadline,
+			});
+		}
+
+		case "CONSUME_CLIPBOARD_CLEAR_FAILURE": {
+			// Notify-once read-and-clear of the sticky "last auto-clear failed"
+			// marker; the popup toasts when `failed` is true.
+			const storage = await clipboardArmStoragePromise;
+			return { failed: await storage.consumeClearFailed() };
+		}
+
 		default:
 			throw new Error(`Unknown message type: ${message.type}`);
 	}
 }
+
+// ============================================================================
+// Clipboard Auto-Clear Alarm
+// ============================================================================
+
+// Wakes for both the 30s deadline and the 5s single retry (see
+// clipboard-clear.js). The alarm listener is what keeps the clear alive
+// across service-worker suspensions — an alarm firing wakes this worker.
+chrome.alarms.onAlarm.addListener((alarm) => {
+	clipboardClearDeps()
+		.then((deps) => handleClipboardClearAlarm(deps, alarm?.name))
+		.catch((error) =>
+			console.error("PwdVault: clipboard auto-clear failed:", error),
+		);
+});
 
 // ============================================================================
 // Keyboard Shortcuts

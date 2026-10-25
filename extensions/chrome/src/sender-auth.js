@@ -3,6 +3,15 @@ const CONTENT_SCRIPT_COMMANDS = new Set([
   'GET_ENTRY',
 ]);
 
+// Commands that only the popup may send. They schedule clipboard destruction
+// or control its failure reporting, so a content script (i.e. page-reachable
+// code) must never reach them; the check below is fail-closed and kept
+// explicit so the invariant survives future command additions.
+const POPUP_ONLY_COMMANDS = new Set([
+  'CLIPBOARD_ARM_CLEAR',
+  'CONSUME_CLIPBOARD_CLEAR_FAILURE',
+]);
+
 export function classifySender(sender, runtimeId) {
   if (!sender || sender.id !== runtimeId) return 'untrusted';
   if (sender.tab && typeof sender.tab.url === 'string') return 'content';
@@ -22,7 +31,11 @@ export function classifySender(sender, runtimeId) {
 export function authorizeMessage(message, sender, runtimeId) {
   const senderKind = classifySender(sender, runtimeId);
   if (senderKind === 'popup') return { senderKind, senderUrl: null };
-  if (senderKind === 'content' && CONTENT_SCRIPT_COMMANDS.has(message?.type)) {
+  if (
+    senderKind === 'content' &&
+    !POPUP_ONLY_COMMANDS.has(message?.type) &&
+    CONTENT_SCRIPT_COMMANDS.has(message?.type)
+  ) {
     // Authorize against the frame URL (sender.url) — the document that
     // actually sent the message. For top-level frames it equals tab.url, and
     // if all_frames is ever enabled the authorization stays on the right

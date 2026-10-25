@@ -2,11 +2,7 @@
 import Fuse from "./fuse.min.mjs";
 import { entryMatchesPageUrl } from "../sender-auth.js";
 import { getPasswordStrength } from "../password-strength.js";
-
-// Handle of the pending clipboard auto-clear timer. Copying again cancels
-// the previous timer so the 30s window restarts from the most recent copy
-// (same pattern as the desktop app's clipboard utility).
-let activeClearTimer = null;
+import { CLIPBOARD_CLEAR_DELAY_MS, digestText } from "../clipboard-clear.js";
 
 // Handle of the pending toast hide timer. A new toast cancels the previous
 // one's timer so an early toast is never hidden by a stale 2s timeout.
@@ -100,6 +96,7 @@ class PopupApp {
 	// === Init ===
 
 	async init() {
+		await this.consumeClipboardClearFailure();
 		try {
 			const status = await this.sendMessage({ type: "GET_STATUS" });
 
@@ -223,17 +220,16 @@ class PopupApp {
 			await navigator.clipboard.writeText(text);
 
 			if (autoClear) {
-				if (activeClearTimer) clearTimeout(activeClearTimer);
-				const expectedDigest = await this.digestText(text);
-				activeClearTimer = setTimeout(async () => {
-					try {
-						const current = await navigator.clipboard.readText();
-						if ((await this.digestText(current)) === expectedDigest) {
-							await navigator.clipboard.writeText("");
-						}
-					} catch {}
-				}, 30000);
-				this.showToast(label + " (auto-clears in 30s)");
+				// The clear itself lives in the background (alarm + offscreen /
+				// event-page DOM) because this popup dies as soon as it closes —
+				// a local timer never survived long enough to fire. Only promise
+				// the auto-clear when the background actually accepted the arm.
+				const armed = await this.armClipboardClear(text);
+				if (armed) {
+					this.showToast(label + " (auto-clears in 30s)");
+				} else {
+					this.showToast(label);
+				}
 			} else {
 				this.showToast(label);
 			}
@@ -244,12 +240,40 @@ class PopupApp {
 		}
 	}
 
-	async digestText(text) {
-		const bytes = new TextEncoder().encode(text);
-		const digest = await crypto.subtle.digest("SHA-256", bytes);
-		return Array.from(new Uint8Array(digest), (byte) =>
-			byte.toString(16).padStart(2, "0"),
-		).join("");
+	// Ask the background to schedule the digest-checked 30s clear. Returns
+	// false when the arm is refused (unreachable service worker, bad payload)
+	// — the caller then shows a plain "copied" toast instead of promising a
+	// clear that will never happen.
+	async armClipboardClear(text) {
+		try {
+			const digest = await digestText(text);
+			const result = await this.sendMessage({
+				type: "CLIPBOARD_ARM_CLEAR",
+				digest,
+				deadline: Date.now() + CLIPBOARD_CLEAR_DELAY_MS,
+			});
+			return result?.armed === true;
+		} catch (error) {
+			console.warn("PwdVault: clipboard auto-clear arm failed:", error);
+			return false;
+		}
+	}
+
+	// Consume the background's sticky "last clear failed" marker (notify-once,
+	// same contract as the desktop app's clipboard utility): toast once, then
+	// the marker is gone for good.
+	async consumeClipboardClearFailure() {
+		try {
+			const result = await this.sendMessage({
+				type: "CONSUME_CLIPBOARD_CLEAR_FAILURE",
+			});
+			if (result?.failed) {
+				this.showToast("Previous clipboard auto-clear failed");
+			}
+		} catch {
+			// Service worker unreachable — nothing to consume; never block
+			// popup startup on this.
+		}
 	}
 
 	// === Auto-fill ===
@@ -1493,5 +1517,12 @@ class PopupApp {
 	}
 }
 
-// Initialize app
-new PopupApp();
+// Initialize app. Exported (and auto-init skipped) under vitest so tests can
+// drive isolated instances with stubbed chrome APIs. The extension ships as
+// plain ES modules — build.sh copies sources, there is no vite build — so
+// import.meta.env is undefined in the browser; optional chaining keeps
+// auto-init live there while the guard still short-circuits under vitest.
+export { PopupApp };
+if (!import.meta.env?.VITEST) {
+	new PopupApp();
+}

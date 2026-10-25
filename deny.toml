@@ -21,6 +21,19 @@ ignore = [
     # format-level development starts. Routine review: 2027-10. Tracked in
     # docs/SECURITY-ADVISORY-ALLOWLIST.md.
     { id = "RUSTSEC-2025-0141", reason = "bincode unmaintained (crate-level, covers 2.x); on bincode 2.0.1 final API with golden-byte guardrail and single serialization seam; postcard migration only changes the seam" },
+    # zip — RUSTSEC-2026-0367/0368/0369 all clear only at zip >= 9.0.0, and
+    # zip 4.x is a transitive of tauri-plugin-updater 2.11.0: bumping it
+    # inside a patch release drags wry 0.54 -> 0.57 (webview major jump),
+    # so this rides the next minor (v1.4.x/v1.5.x) instead. The vulnerable
+    # path is the updater's update-archive extraction (symlink permission
+    # escape / SUID+SGID preservation, ZipStreamReader::extract); exploiting
+    # it requires first breaking the minisign signature chain (trust anchor
+    # byte-pinned by golden_contract in CI) or an https downgrade. Expiry
+    # 2026-12-31 — upgrade as soon as tauri-plugin-updater ships zip >= 9.
+    # Tracked in docs/SECURITY-ADVISORY-ALLOWLIST.md.
+    { id = "RUSTSEC-2026-0367", reason = "zip preserves SUID/SGID bits on extraction (fix = zip 9); transitive of tauri-plugin-updater 2.11.0 — fix drags wry 0.54->0.57, deferred to next minor; exploit needs a broken minisign chain (golden_contract-pinned) or https downgrade" },
+    { id = "RUSTSEC-2026-0368", reason = "zip ZipArchive::extract creates symlinks with targets outside the destination (fix = zip 9); transitive of tauri-plugin-updater 2.11.0 — fix drags wry 0.54->0.57, deferred to next minor; exploit needs a broken minisign chain (golden_contract-pinned) or https downgrade" },
+    { id = "RUSTSEC-2026-0369", reason = "zip extract applies Unix permissions through symlinks without confining the target (critical, fix = zip 9); transitive of tauri-plugin-updater 2.11.0 — fix drags wry 0.54->0.57, deferred to next minor; exploit needs a broken minisign chain (golden_contract-pinned) or https downgrade" },
 ]
 # Transitive unmaintained crates are reported as warnings. Direct workspace
 # dependencies remain blocking unless explicitly reviewed above.

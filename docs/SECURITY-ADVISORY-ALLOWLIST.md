@@ -10,6 +10,7 @@
 | RUSTSEC ID | Package | Reason | Expiry | Owner |
 |------------|---------|--------|--------|-------|
 | RUSTSEC-2025-0141 | bincode 2.0.1 | Unmaintained — advisory is crate-level (no patched version), covers 1.x and 2.x alike, so the v1.3.0 swap to the final 2.0.1 API cannot clear it. Kept: golden byte fixtures pin the legacy disk format and a single serialization seam (`crypto::codec` bc_serialize/bc_deserialize) means a postcard migration touches one place. Re-evaluate on a real bincode CVE or the next format-level development | 2027-10-31 | backend |
+| RUSTSEC-2026-0367 / 0368 / 0369 | zip 4.6.1 | Vulnerable code path is tauri-plugin-updater's update-archive extraction — symlink permission escape (`ZipStreamReader::extract`), plus SUID/SGID-bit preservation (0367) and unconfined symlink targets (0368). Exploitation requires first breaking the minisign signature chain (trust anchor is byte-pinned by golden_contract in CI) or an https downgrade. Fix needs zip >= 9, which is a tauri-plugin-updater major bump dragging wry 0.54 -> 0.57 (webview major jump) — not acceptable in a patch release. Trigger: upgrade in the next minor (v1.4.x/v1.5.x) as soon as tauri-plugin-updater ships a version on zip >= 9 | 2026-12-31 | backend |
 
 ## Review process
 

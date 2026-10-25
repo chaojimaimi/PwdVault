@@ -103,6 +103,41 @@ describe('entryMatchesPageUrl', () => {
   });
 });
 
+describe('popup-only clipboard commands (v1.3.1)', () => {
+  // The clipboard auto-clear arm and its failure-marker consumption schedule
+  // clipboard destruction / reporting. They are internal popup↔background
+  // messages: a content script (page-reachable code) must never reach them,
+  // and they must never touch the desktop native-messaging channel.
+  const popup = {
+    id: RUNTIME_ID,
+    url: `chrome-extension://${RUNTIME_ID}/src/popup/popup.html`,
+  };
+  const content = { id: RUNTIME_ID, tab: { url: 'https://example.com/login' } };
+
+  it('accepts both commands from the popup', () => {
+    expect(
+      authorizeMessage(
+        { type: 'CLIPBOARD_ARM_CLEAR', digest: 'ab'.repeat(32), deadline: 123 },
+        popup,
+        RUNTIME_ID,
+      ).senderKind,
+    ).toBe('popup');
+    expect(
+      authorizeMessage({ type: 'CONSUME_CLIPBOARD_CLEAR_FAILURE' }, popup, RUNTIME_ID)
+        .senderKind,
+    ).toBe('popup');
+  });
+
+  it('fails closed when a content script sends them', () => {
+    expect(() =>
+      authorizeMessage({ type: 'CLIPBOARD_ARM_CLEAR' }, content, RUNTIME_ID),
+    ).toThrow();
+    expect(() =>
+      authorizeMessage({ type: 'CONSUME_CLIPBOARD_CLEAR_FAILURE' }, content, RUNTIME_ID),
+    ).toThrow();
+  });
+});
+
 describe('content.js verbatim copy guard', () => {
   // content.js is a classic script and cannot import this module; it carries
   // a hand-maintained copy of entryMatchesPageUrl. This test fails when the

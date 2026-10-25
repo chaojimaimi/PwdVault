@@ -17,6 +17,8 @@
     "storage",
     "contextMenus",
     "clipboardWrite",
+    "clipboardRead",
+    "alarms",
     "nativeMessaging"
   ],
   "background": {

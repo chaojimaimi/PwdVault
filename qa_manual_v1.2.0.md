@@ -111,3 +111,39 @@
 1. Entries → 编辑条目 → Group 下拉形态：select 占满行宽，"New" 缩为内容宽度，同一行内比例正常。
 2. 点击 "New" → 内联新建形态：输入框占满行宽，Add / Cancel 为内容宽度按钮，三元素同一行；新建成功后回到 select 形态且自动选中新组。
 3. GroupManager 页内新建分组行不受本次修复影响（该页布局独立），正常增删改。
+
+---
+
+# v1.3.1 验证小节（2026-10-25）
+
+## T24 `.screen` 短内容居中回归
+
+1. 全新数据目录启动应用（无金库）→ Setup 屏在正常窗口尺寸下视觉居中。
+2. 已有金库启动 → Unlock 屏居中；Settings → Recovery（或锁屏入口）进入恢复密钥展示前的短内容状态时居中。
+3. App 启动 loading 态（进入解锁前的短暂加载画面）文字/图标居中（该态与三屏共用 `.screen` 容器，原本依赖 justify-content: center）。
+4. Dark/Light 两主题各过一遍 1–3。
+
+## T25 `.screen` 溢出可达性（500px 最小高度）
+
+1. 把窗口高度拖到最小（500px），打开恢复密钥流程：展示密钥 + 确认输入两屏的**首屏字段完整可见**（不再被裁出视口顶部）。
+2. 内容超出视口时可从顶部开始向下滚动（此前居中裁切导致顶部不可达）。
+3. 回归：内容正常（不超高）时仍居中显示（`:only-child` auto-margin 生效）；`.screen-shell` 包裹的其余 6 屏（Vault/Entry/Generator/Settings 等）布局无变化。
+
+## T26 Chrome 剪贴板自动清除端到端
+
+1. popup 复制一个密码 → **立即关闭 popup** → 等 30s → 外部任意应用粘贴 → 应为空（清除由 background 执行，popup 已关也必须生效）。
+2. 反向用例（digest 保护）：复制密码后 10s 内手动复制其他文本 → 30s 到点后粘贴 → **用户新复制的内容完好**，不被误清。
+3. popup 复制后 toast 应显示 "...(auto-clears in 30s)"；若 background 未达（不可达场景）则降级为普通 "Password copied!" 且不承诺清除。
+4. 实施备注：offscreen `reasons:['CLIPBOARD']` 有已知 Chromium bug 330570363；若本用例失败，先对照该 issue 的现象再定性。
+
+## T27 Firefox 剪贴板自动清除端到端
+
+1. about:debugging → This Firefox → Load Temporary Add-on 加载 firefox/ 目录 manifest。
+2. 重复 T26 的两个用例（30s 清空生效；10s 内新复制内容不被误清）。Firefox 走 event page 隐藏 textarea + execCommand paste/copy 路径，无 offscreen。
+
+## T28 Service Worker 被杀后 alarm 唤醒
+
+1. popup 复制密码完成 arm → 打开 chrome://serviceworker-internals 手动 Stop 该扩展的 Service Worker（等价入口：chrome://extensions → 该扩展卡片上的 "Service Worker" 链接，二选一）。
+2. 等 30s → 到点 alarm 应唤醒 Service Worker 并完成清除 → 外部粘贴为空。
+3. 对照（可选）：arm 后立即 Stop SW，再于到点前保持浏览器活跃，确认 alarm 仍按期触发（alarm 由浏览器调度，不依赖 SW 常驻）。
+4. 已知偏差（v1.3.1 评审备注）：Chrome 120+ 会把 <30s 的 alarm 延迟钳到 30s——失败后的 5s 重试实际会在 ~30s 后发生；arm 记录持久 + digest 校验保证晚到的清除依然安全，仅时间推迟。

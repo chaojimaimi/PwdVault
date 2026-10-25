@@ -1,0 +1,13 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>PwdVault clipboard clear</title>
+	</head>
+	<body>
+		<!-- Offscreen worker for the 30s clipboard auto-clear: a service worker
+		     has no clipboard-readable DOM, this document does. Created on demand
+		     by background.js with reason "CLIPBOARD". -->
+		<script type="module" src="clipboard.js"></script>
+	</body>
+</html>

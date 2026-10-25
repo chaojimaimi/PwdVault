@@ -1,0 +1,25 @@
+# cargo-audit configuration (read from the CURRENT WORKING DIRECTORY only —
+# no parent search — so every `cargo audit` invocation must run from the repo
+# root with an explicit `--file <path>/Cargo.lock`, as both quality.yml and
+# release.yml do).
+#
+# Rationale and expiry live in docs/SECURITY-ADVISORY-ALLOWLIST.md; the
+# machine-checked allowlist for cargo-deny lives in deny.toml
+# ([advisories].ignore). Keep all three in sync.
+#
+# Run: cargo audit --file src-tauri/Cargo.lock
+#      cargo audit --file extensions/native-host/Cargo.lock
+# Docs: https://rustsec.org/ (cargo-audit book: audit.toml semantics)
+
+[advisories]
+ignore = [
+    # zip 4.x (transitive of tauri-plugin-updater 2.11.0) — update-archive
+    # extraction symlink permission escape / SUID+SGID preservation. Fix
+    # requires zip >= 9, which drags wry 0.54 -> 0.57 (webview major jump);
+    # deferred to the next minor (v1.4.x/v1.5.x). Exploit requires breaking
+    # the minisign signature chain (golden_contract byte-pinned in CI) or an
+    # https downgrade. Expiry 2026-12-31.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+]

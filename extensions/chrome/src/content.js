@@ -8,30 +8,30 @@
 // in sender-auth.test.js fails when the two drift apart. Hoisted, so the IIFE
 // below can use it.
 function entryMatchesPageUrl(entryUrl, pageUrl) {
-  // Empty entryUrl = generic entry (no stored URL); an explicit popup fill is
-  // a deliberate user action, so allow it. Empty pageUrl = cannot judge.
-  if (!entryUrl) return true;
-  if (!pageUrl) return false;
-  // Entries are often stored scheme-less ("github.com/acme"); pad https://
-  // exactly like popup.js formatUrl before parsing, otherwise such entries
-  // would be rejected here despite being fillable nowhere else.
-  const withScheme = /^https?:\/\//i.test(entryUrl)
-    ? entryUrl
-    : `https://${entryUrl}`;
-  const entryDomain = normalizedDomain(withScheme);
-  const pageDomain = normalizedDomain(pageUrl);
-  // A parse failure yields null (cannot judge) → reject.
-  return Boolean(entryDomain && pageDomain && entryDomain === pageDomain);
+	// Empty entryUrl = generic entry (no stored URL); an explicit popup fill is
+	// a deliberate user action, so allow it. Empty pageUrl = cannot judge.
+	if (!entryUrl) return true;
+	if (!pageUrl) return false;
+	// Entries are often stored scheme-less ("github.com/acme"); pad https://
+	// exactly like popup.js formatUrl before parsing, otherwise such entries
+	// would be rejected here despite being fillable nowhere else.
+	const withScheme = /^https?:\/\//i.test(entryUrl)
+		? entryUrl
+		: `https://${entryUrl}`;
+	const entryDomain = normalizedDomain(withScheme);
+	const pageDomain = normalizedDomain(pageUrl);
+	// A parse failure yields null (cannot judge) → reject.
+	return Boolean(entryDomain && pageDomain && entryDomain === pageDomain);
 }
 
 // Verbatim copy of the normalizedDomain helper from sender-auth.js — the
 // copied predicate above calls it. Keep in sync with sender-auth.js.
 function normalizedDomain(rawUrl) {
-  try {
-    return new URL(rawUrl).hostname.toLowerCase().replace(/^www\./, '');
-  } catch {
-    return null;
-  }
+	try {
+		return new URL(rawUrl).hostname.toLowerCase().replace(/^www\./, "");
+	} catch {
+		return null;
+	}
 }
 
 (function () {
@@ -600,7 +600,10 @@ function normalizedDomain(rawUrl) {
 		// load never pulls plaintext credentials into the content script.
 		notificationBar
 			.querySelector("#pv-fill")
-			.addEventListener("click", async () => {
+			.addEventListener("click", async (e) => {
+				// Synthetic events dispatched by page scripts must never pull
+				// credentials (isTrusted is false for script-made events).
+				if (!e.isTrusted) return;
 				const fillBtn =
 					notificationBar && notificationBar.querySelector("#pv-fill");
 				if (fillBtn) fillBtn.disabled = true;
@@ -945,6 +948,8 @@ function normalizedDomain(rawUrl) {
 
 			// Click to fill
 			item.addEventListener("click", (e) => {
+				// Synthetic click guard: selectEntry pulls the entry's secret.
+				if (!e.isTrusted) return;
 				if (!e.target.closest(".pwdvault-action-btn")) {
 					selectEntry(entry.id);
 				}
@@ -952,6 +957,8 @@ function normalizedDomain(rawUrl) {
 
 			// Copy button
 			copyBtn.addEventListener("click", async (e) => {
+				// Synthetic click guard: copyEntryPassword pulls the secret.
+				if (!e.isTrusted) return;
 				e.stopPropagation();
 				await copyEntryPassword(entry.id);
 			});
@@ -1242,6 +1249,8 @@ function normalizedDomain(rawUrl) {
 	// ============================================================================
 
 	document.addEventListener("keydown", (e) => {
+		// Synthetic key guard: this path opens the credential overlay.
+		if (!e.isTrusted) return;
 		// Ctrl+Shift+L (Cmd+Shift+L on Mac) to trigger manual fill
 		if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "l") {
 			e.preventDefault();
@@ -1331,9 +1340,12 @@ function normalizedDomain(rawUrl) {
 				break;
 
 			default:
-				sendResponse({ error: "Unknown message type" });
+				// Unknown type: stay silent and close synchronously (return false
+				// = no response). chrome.runtime.sendMessage broadcasts never
+				// reach content scripts, but silence costs nothing and keeps this
+				// listener from racing any future broadcast's intended receiver.
+				return false;
 		}
-		return true;
 	});
 
 	// ============================================================================
