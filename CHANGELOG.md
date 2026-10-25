@@ -4,6 +4,52 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.4.0] - 2026-10-25
+
+### Added
+
+- **Auto-fill matching relaxed to the registrable domain (eTLD+1)**:
+  `accounts.example.com` now matches on `example.com` (and vice versa).
+  Matching runs over a curated 126-entry multi-label public-suffix table
+  with fail-closed degradation — an unlisted ccTLD (e.g. `co.xx`) falls
+  back to exact-hostname matching, so a miss can only *skip* a fill,
+  never leak a credential across registrants. All five matching sites
+  (both content-script gates, popup, background list) consolidate onto
+  one source; generic entries (no stored URL) still never appear in
+  auto-fill lists.
+- **Generator passphrase & PIN modes** on the shared Rust path: EFF
+  short wordlist (1296 words, rejection-sampled — zero modulo bias),
+  word count / separator / capitalization / trailing-number options,
+  PIN 4-16, session history of the last 10 generations (never written
+  to disk), mode-aware strength meter. Browser popup gains the same
+  modes; the native-messaging contract stays back-compatible.
+- **Recently-used sorting**: copying or filling an entry now records
+  usage (throttled to once per 60s, device-local metadata — it never
+  bumps `updated_at` and never syncs). New sort control in the vault:
+  Recent (default) / Recently updated / A–Z, persisted in settings.
+- **Recycle bin**: deleted entries are now visible and recoverable —
+  restore (revives across devices via the existing LWW revival rules),
+  permanent delete and empty-trash (both behind danger confirmation).
+  Purged entries are bookkept locally so remote tombstones cannot
+  refill the bin, while legitimate live revivals still come through.
+- **Global shortcut** (default `CmdOrCtrl+Shift+Space`, configurable in
+  Settings): shows and focuses the vault search from anywhere.
+  Registration conflicts surface in Settings with a fallback to the
+  previous shortcut.
+
+### Changed
+
+- **Updater stack modernized**: tauri-plugin-updater 2.14.0,
+  tauri 2.12.5, wry 0.54.4 → 0.57.1 (webview layer) plus ~60 transitive
+  updates. The zip advisory allowlist is extended to 2027-06-30 with
+  updated upstream evidence: as of 2026-10-25 every released
+  tauri-plugin-updater (including 3.0.0-alpha.3) still pins `zip ^4`,
+  so zip ≥ 9 does not exist in the plugin ecosystem yet; the allowlist
+  is to be removed in the first minor after Tauri ships zip ≥ 9.
+- Settings golden fixtures recaptured for the three new setting fields;
+  `MockCloudBackend`-style cleanup continues: entry summaries now carry
+  `last_used_at`/`deleted_at`.
+
 ## [1.3.2] - 2026-10-25
 
 ### Security
