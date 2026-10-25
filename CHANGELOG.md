@@ -4,6 +4,63 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.3.1] - 2026-10-25
+
+### Security
+
+- Rustls updated 0.23.45 → 0.23.46 (with rustls-webpki 0.103.16,
+  webpki-roots / webpki-root-certs 1.0.11 and clipboard-win 5.4.3
+  follow-ups), clearing RUSTSEC-2026-0346/0347/0348/0349.
+- zip 4.6.1 (transitive of tauri-plugin-updater) is explicitly allow-listed
+  for RUSTSEC-2026-0367/0368/0369 with an expiry of 2026-12-31. The
+  vulnerable code path is the updater's update-archive extraction (symlink
+  permission escape via `ZipStreamReader::extract`); exploiting it requires
+  first breaking the minisign signature chain (the trust anchor is
+  byte-pinned by golden_contract in CI) or an https downgrade. The fix
+  ships only in zip ≥ 9, which drags tauri-plugin-updater — and with it
+  wry 0.54 → 0.57, a webview major jump — so it rides the next minor
+  (v1.4.x/v1.5.x) instead of this patch. Upgrading as soon as the plugin
+  offers a zip ≥ 9 version is mandatory (see
+  docs/SECURITY-ADVISORY-ALLOWLIST.md).
+- The browser extension's clipboard auto-clear was redesigned: the 30s
+  clear is now scheduled and executed by the background service worker /
+  event page (alarm + session-stored digest) instead of a popup-local
+  timer, and every overwrite is verified against a SHA-256 digest so
+  content the user copied in the meantime is never destroyed. This adds
+  the `clipboardRead` permission — a deliberate permission expansion: the
+  digest check is what prevents blind-clearing newer user content (data
+  destruction is worse for a password manager than the read scope, which
+  is confined to the extension's own contexts and never touches page
+  content). Bitwarden ships blind clearing without clipboardRead; this
+  design intentionally differs.
+- All four content-script credential triggers (auto-fill button, overlay
+  entry click, overlay copy button, Ctrl+Shift+L) now ignore synthetic
+  events (`isTrusted` gate) — malicious page scripts can no longer pull
+  credentials by dispatching fake interactions.
+
+### Fixed
+
+- Browser extension: the promised 30s clipboard auto-clear never fired —
+  the popup's timer died the moment the popup closed. The clear now lives
+  in the background (retry once on transient failure; a persistent failure
+  toasts once on the next popup open instead of failing silently).
+- Setup / Unlock / Recovery screens whose content is taller than the
+  viewport (e.g. at the 500px minimum window height) were clipped by the
+  centered flex layout — the top of the form could not be scrolled into
+  view. Short content stays centered via an auto-margin.
+
+### Changed
+
+- Extension manifests: Chrome additionally requests `alarms`, `offscreen`
+  and `clipboardRead`, and pins `minimum_chrome_version: 109` (offscreen
+  API availability); Firefox additionally requests `alarms` and
+  `clipboardRead`.
+- Known residual risks (accepted, in line with comparable password
+  managers): quitting the whole browser within the 30s window kills the
+  alarm together with the session storage, leaving the password on the
+  clipboard; and closing the popup immediately after copying can lose the
+  arm message in a small race window — the toast is then never shown and
+  no clear was promised.
 
 ## [1.3.0] - 2026-10-07
 
