@@ -73,15 +73,27 @@ pub fn apply_global_shortcut(
 mod tests {
     use super::*;
 
-    /// The default binding parses and normalizes to the super/meta modifier.
+    /// The default binding parses and normalizes with the platform's
+    /// command/control modifier plus Shift and the main key. `CmdOrCtrl` is
+    /// platform-dependent (Cmd on macOS, Ctrl on Windows/Linux — the
+    /// global-hotkey crate resolves it), so the assertion accepts the whole
+    /// family instead of pinning one platform's spelling.
     #[test]
     fn default_accelerator_parses() {
         let shortcut = parse_accelerator(DEFAULT_GLOBAL_SHORTCUT).expect("default parses");
-        let text = shortcut.to_string();
+        let text = shortcut.to_string().to_lowercase();
+        let command_ish = ["super", "cmd", "control", "ctrl"]
+            .iter()
+            .any(|modifier| text.contains(modifier));
         assert!(
-            text.to_lowercase().contains("super") || text.to_lowercase().contains("cmd"),
-            "CmdOrCtrl maps to a command-ish modifier, got: {text}"
+            command_ish,
+            "CmdOrCtrl must resolve to a command/control modifier, got: {text}"
         );
+        assert!(
+            text.contains("shift"),
+            "shift must survive normalization: {text}"
+        );
+        assert!(text.contains("space"), "the main key must survive: {text}");
     }
 
     /// Garbage accelerators fail the parse (the settings page reverts on
