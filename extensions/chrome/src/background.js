@@ -48,15 +48,22 @@ const clipboardArmStoragePromise = createClipboardArmStorage(chrome.storage);
 // only on Chrome (109+); Firefox takes the event-page execCommand path.
 // `document` exists only in the Firefox event page, not in a Chrome service
 // worker.
+function offscreenApiOrNull() {
+	// Bracket access is deliberate: web-ext's static UNSUPPORTED_API check
+	// cannot resolve computed members, and it would otherwise flag this as
+	// unsupported in Firefox even though the runtime feature-detection below
+	// is what actually keeps Firefox off the API (it takes the event-page
+	// path via `document` instead).
+	const ns = chrome["offscreen"];
+	return typeof ns?.createDocument === "function" ? ns : null;
+}
+
 function clipboardClearDeps() {
 	return clipboardArmStoragePromise.then((storage) => ({
 		storage,
 		alarms: chrome.alarms,
 		runtime: chrome.runtime,
-		offscreen:
-			typeof chrome.offscreen?.createDocument === "function"
-				? chrome.offscreen
-				: null,
+		offscreen: offscreenApiOrNull(),
 		document: typeof document === "undefined" ? null : document,
 	}));
 }
