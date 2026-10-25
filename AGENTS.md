@@ -192,16 +192,16 @@ PwdVault/
 
 **Test Suite Summary** (counts from actual test output, 2026-10-05):
 
-| Module                    | Tests                                          | Command                                   |
-| ------------------------- | ---------------------------------------------- | ----------------------------------------- |
-| Rust tauri-app lib        | 33                                             | `cd src-tauri && cargo test`              |
-| Rust capability contract  | 1                                              | (same run)                                |
-| Rust golden contract      | 3                                              | (same run)                                |
-| Rust application crate    | 166                                            | `cd src-tauri && cargo test --workspace`  |
-| Rust infrastructure crate | 121 (+1 ignored keychain SecItem smoke, CI 跑) | (same run)                                |
-| Rust domain crate         | 4                                              | (same run)                                |
-| Rust native-host          | 23                                             | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 295 (51 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`            |
+| Module                    | Tests                                                                                                                          | Command                                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| Rust tauri-app lib        | 33                                                                                                                             | `cd src-tauri && cargo test`              |
+| Rust capability contract  | 1                                                                                                                              | (same run)                                |
+| Rust golden contract      | 3                                                                                                                              | (same run)                                |
+| Rust application crate    | 166                                                                                                                            | `cd src-tauri && cargo test --workspace`  |
+| Rust infrastructure crate | 121 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                 | (same run)                                |
+| Rust domain crate         | 4                                                                                                                              | (same run)                                |
+| Rust native-host          | 23                                                                                                                             | `cd extensions/native-host && cargo test` |
+| Frontend (total)          | 295 (51 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -379,6 +379,7 @@ action. Test baseline after: 328 Rust (+1 ignored) + 23 native-host +
 270 frontend. Plan: fix_impl_plan_v1.3.0.md (R2).
 
 ### 2026-10-07 (v1.2.4 — audit-polish integration batch)
+
 ### 2026-10-07 (v1.2.4 — audit-polish integration batch)
 
 Standard pipeline over the consolidated backlog from the audit ledger
