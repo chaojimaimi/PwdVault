@@ -4,8 +4,8 @@ A secure, local-first password manager built with Tauri + React.
 
 **Last Updated**: 2026-10-25
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.3.2
-**Current Version**: `v1.3.2` — 2026-10-25 audit P2 batch (extension injected UI migrated to closed Shadow DOM with navy/teal re-theme, IPC errors sanitized via public_message, handshake version disclosure removed, VaultScreen async toasts, UI AA-contrast tokens, extensions under ESLint) on top of v1.3.1 clipboard/background redesign + rustls bump + v1.3.0 bincode 1→2 serialization swap + trust anchor pinned + v1.1.9/v1.2.0 hardening + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.4.0
+**Current Version**: `v1.4.0` — 2026-10-25 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) on top of v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -201,7 +201,7 @@ PwdVault/
 | Rust infrastructure crate | 121 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                 | (same run)                                |
 | Rust domain crate         | 4                                                                                                                              | (same run)                                |
 | Rust native-host          | 23                                                                                                                             | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 308 (54 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
+| Frontend (total)          | 387 (61 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -315,6 +315,45 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-10-25 (v1.4.0 — S-tier product batch + updater/wry modernization)
+
+Pipeline: recon (crates.io verification exposed the WP1 premise break —
+no tauri-plugin-updater release ships zip ≥9, incl. 3.0.0-alpha.3, so the
+promised "upgrade clears the advisories" was impossible; user informed,
+pivot approved into the plan) → plan R1 → plan-reviewer REVISE (P0: a
+suffix-table miss degrades matching LOOSER — fail-closed ccTLD fallback
+mandated; 4×P1: fifth matching gate entryMatchesSenderUrl,
+getEntriesForUrl empty-entryUrl invariant, purge tombstone reflow,
+last_used_at write amplification) → R2 → re-review REVISE (R2's purge
+ledger would swallow legitimate live revivals) → R3 → **PASS** →
+ds-worker (10 documented deviations, all sound — EntrySummary also gained
+deleted_at, sortMode rides settings instead of a new context field,
+BEGIN/END verbatim markers instead of fragile regex extraction, Settings
+golden fixtures recaptured for the 3 new fields) → 3-way review (rust
+REQUEST CHANGES on a genuinely flaky test — append_number yields a
+1-digit suffix ~10% of the time and the shape test pinned exactly 2;
+react APPROVE; extension APPROVE with a suffix-count comment fix
+121→126) → main-agent fixes (flaky test relaxed+strengthened with a
+digit-stripped word-count assertion, empty-trash routed behind the
+danger modal, suffix comment synced both files) → clean-worktree full
+gates (sidecar pre-step) → release. Shipped: eTLD+1 matching (126-entry
+curated suffix table, fail-closed ccTLD degradation, two gates unified,
+five sites → one source + verbatim copy, generic-entry invariant
+preserved); passphrase/PIN generator (EFF short list via include_str!,
+rejection sampling u16/64800, session history never persisted, NM
+serde(default) back-compat); recently-used sort (60s-throttled
+last_used_at, device-local: never bumps updated_at nor syncs — SyncEntry
+verified field-free); recycle bin (restore/purge/empty + local
+purged-id ledger filtered to tombstones only — live revivals pass
+through and clear the ledger); global shortcut (CmdOrCtrl+Shift+Space
+default, Rust-command re-registration, Pressed guard for tauri#10025);
+updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to
+2027-06-30 with upstream evidence (verified 2026-10-25). Tests: 387
+frontend (61 files CI-true) / 352 Rust (+1 ignored) / 23 native-host.
+Plan: fix_impl_plan_v1.4.0.md (R3). Manual QA T33-T37 appended — **T33
+(updater E2E v1.3.2→v1.4.0 on macOS+Windows) is the release-gating item**
+for the wry jump.
 
 ### 2026-10-25 (v1.3.2 — audit P2 batch: Shadow DOM isolation + re-theme, IPC error sanitization, UI polish)
 
