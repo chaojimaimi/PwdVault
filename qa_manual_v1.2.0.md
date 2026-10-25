@@ -147,3 +147,28 @@
 2. 等 30s → 到点 alarm 应唤醒 Service Worker 并完成清除 → 外部粘贴为空。
 3. 对照（可选）：arm 后立即 Stop SW，再于到点前保持浏览器活跃，确认 alarm 仍按期触发（alarm 由浏览器调度，不依赖 SW 常驻）。
 4. 已知偏差（v1.3.1 评审备注）：Chrome 120+ 会把 <30s 的 alarm 延迟钳到 30s——失败后的 5s 重试实际会在 ~30s 后发生；arm 记录持久 + digest 校验保证晚到的清除依然安全，仅时间推迟。
+
+---
+
+# v1.3.2 验证小节（content.js 全量重构 + UI P2 批）
+
+> ⚠️ 携带项：**T26-T28（剪贴板端到端）必须在 v1.3.2 构建上重跑**——content.js 已全量迁移 Shadow DOM。
+
+## T29 自动填充条 Shadow DOM 隔离与配色
+
+1. 打开任一含登录表单的站点 → 浮动按钮与自动填充条应为 **navy/teal 新配色**（非旧靛蓝），与桌面端视觉一致。
+2. 真实点击 Fill → 凭据正确填入；DevTools Elements 面板确认注入 UI 位于 closed shadow root 内。
+3. 宿主页样式污染测试：DevTools 注入 `div { background: red !important; color: white !important; }` → 注入 UI 外观不受影响（`all:initial` 隔离生效）。
+
+## T30 overlay 真实流
+
+1. Ctrl+Shift+L 打开 overlay → 搜索过滤 → 点击条目展开 → Copy → Esc 或点击遮罩关闭；全程样式正常、modal 内点击不误关。
+
+## T31 Light 主题对比度抽检
+
+1. 桌面 Light 主题：输入框 placeholder、强度计标签（弱/中/强）肉眼清晰可辨（AA 达标）。
+
+## T32 空态 CTA 与 Enter 保存
+
+1. 空库下显示 "Add your first password" 主按钮，点击进入新增页；搜索无结果时不显示该按钮。
+2. 条目编辑页：标题输入框内按 Enter → 触发保存；标签输入框按 Enter → 只加标签不触发保存；Delete 不触发保存。

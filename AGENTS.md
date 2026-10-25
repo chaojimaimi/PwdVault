@@ -4,8 +4,8 @@ A secure, local-first password manager built with Tauri + React.
 
 **Last Updated**: 2026-10-25
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.3.1
-**Current Version**: `v1.3.1` — 2026-10-25 audit P1 batch (extension clipboard auto-clear redesigned onto background alarms + offscreen/execCommand with digest-verified overwrite, isTrusted gates on all extension credential triggers, .screen overflow fix, rustls 0.23.46 + zip advisory allowlist expiring 2026-12-31) on top of v1.3.0 bincode 1→2 serialization swap + audit-polish batch + trust anchor pinned + manual update check + v1.1.9/v1.2.0 hardening + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.3.2
+**Current Version**: `v1.3.2` — 2026-10-25 audit P2 batch (extension injected UI migrated to closed Shadow DOM with navy/teal re-theme, IPC errors sanitized via public_message, handshake version disclosure removed, VaultScreen async toasts, UI AA-contrast tokens, extensions under ESLint) on top of v1.3.1 clipboard/background redesign + rustls bump + v1.3.0 bincode 1→2 serialization swap + trust anchor pinned + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -201,7 +201,7 @@ PwdVault/
 | Rust infrastructure crate | 121 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                 | (same run)                                |
 | Rust domain crate         | 4                                                                                                                              | (same run)                                |
 | Rust native-host          | 23                                                                                                                             | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 295 (51 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
+| Frontend (total)          | 308 (54 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -315,6 +315,41 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-10-25 (v1.3.2 — audit P2 batch: Shadow DOM isolation + re-theme, IPC error sanitization, UI polish)
+
+Pipeline: recon → plan R1 → plan-reviewer REVISE (3×P1: TotpCode's enum-shape
+polling check would break under serialize_str; TagsEditor Enter would
+double-fire under the new form; eslint ignores would noop the new config
+section) → R2 → re-review **PASS** → ds-worker (7 documented deviations, all
+sound — notably Save uses type=submit+form= because a jsdom probe showed
+implicit submission requires a submit button; GroupSelector got the same
+preventDefault as TagsEditor) → 3-way split review (rust/react/extension —
+the code-reviewer agent type was concurrency-limited, so domains went to
+rust-reviewer + react-reviewer + general-purpose) all **APPROVE, 0 P0-P2** →
+clean-worktree full gates → release. Clean-worktree caveat recorded: cargo
+suites need the native-host sidecar pre-built into src-tauri/binaries/
+(tauri.conf resources glob `binaries/pwdvault-native*`) — same pre-step as
+release.yml's gate job. Shipped: content.js 4 UI roots → closed shadow roots
+via a single mountShadowHost (:host navy/teal token block, all:initial +
+re-pin, styles/keyframes scoped, toast dedupe via closure ref, escapeHtml
+removed, empty content.css dropped from both manifests); VaultError
+Serialize → public_message() (TotpCode startsWith contract, mock shapes
+migrated); VaultScreen 4 async toasts; VaultContext actions stabilized
+(DELETE_GROUP clears selection in reducer, latestRef workarounds removed);
+UPDATE_FAILED phase (banner + settings, retry preserved); EntryScreen real
+form semantics; extensions under ESLint (ignores narrowed to the firefox
+symlink) + GET_STATUS parallelized + handshake app_version removed (zero
+consumers, verified); UI AA tokens (muted #5B6B80, warning/accent/success
+text variants), ellipsis, :focus-within, toast transform fix, modal shadows,
+disabled hover guards, reduced-motion, empty-state CTA, DESIGN.md/popup.html
+token sync. Tests: +content-shadow 4, +EntryScreen.form 3, +1 each
+(UpdateNotification/SettingsScreen.updates/SettingsContext ipc shape),
+Rust +1 (ipc_serialization_exposes_only_the_public_message) → **308 frontend
+(54 files CI-true, verified in clean worktree) / 329 Rust (+1 ignored) / 23
+native-host**. Plan: fix_impl_plan_v1.3.2.md (R2.1). Manual QA T29-T32
+appended; **T26-T28 clipboard E2E must be re-run on this build**
+(content.js fully rewritten).
 
 ### 2026-10-25 (v1.3.1 — audit P1 batch: clipboard clear redesign, event gating, screen overflow, rustls bump)
 
