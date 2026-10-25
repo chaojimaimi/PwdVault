@@ -201,7 +201,7 @@ PwdVault/
 | Rust infrastructure crate | 121 (+1 ignored keychain SecItem smoke, CI 跑) | (same run)                                |
 | Rust domain crate         | 4                                              | (same run)                                |
 | Rust native-host          | 23                                             | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 320 (58 files, incl. extension tests, chrome+firefox double-run) | `pnpm test`            |
+| Frontend (total)          | 295 (51 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`            |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -344,8 +344,11 @@ steps aligned to root-cwd `--file` form incl. the `-n` offline retry;
 expiry 2026-12-31 forces the tauri-plugin-updater/zip≥9 upgrade into the
 next minor — the plugin bump drags wry 0.54→0.57, patch-ineligible).
 Tests: clipboard-clear 18 + content-is-trusted 5 + sender-auth +2
-(double-run via firefox symlink). Test baseline after: 328 Rust (+1
-ignored) + 23 native-host + 320 frontend (58 files). Plan:
+(verified 295/51-file CI-true in a clean checkout after the release gate
+caught a tab-vs-space drift in the content.js verbatim copy — local runs
+can over-count via untracked dist/ copies; clean-worktree verification is
+now part of the release checklist). Test baseline after: 328 Rust (+1
+ignored) + 23 native-host + 295 frontend (51 files). Plan:
 fix_impl_plan_v1.3.1.md (R2.1). Manual QA T24-T28 appended (real-browser
 clipboard behavior is unmockable — T26 is the gating item, see Chromium bug
 330570363 if it fails).
