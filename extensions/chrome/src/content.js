@@ -8,20 +8,20 @@
 // in sender-auth.test.js fails when the two drift apart. Hoisted, so the IIFE
 // below can use it.
 function entryMatchesPageUrl(entryUrl, pageUrl) {
-	// Empty entryUrl = generic entry (no stored URL); an explicit popup fill is
-	// a deliberate user action, so allow it. Empty pageUrl = cannot judge.
-	if (!entryUrl) return true;
-	if (!pageUrl) return false;
-	// Entries are often stored scheme-less ("github.com/acme"); pad https://
-	// exactly like popup.js formatUrl before parsing, otherwise such entries
-	// would be rejected here despite being fillable nowhere else.
-	const withScheme = /^https?:\/\//i.test(entryUrl)
-		? entryUrl
-		: `https://${entryUrl}`;
-	const entryDomain = normalizedDomain(withScheme);
-	const pageDomain = normalizedDomain(pageUrl);
-	// A parse failure yields null (cannot judge) → reject.
-	return Boolean(entryDomain && pageDomain && entryDomain === pageDomain);
+  // Empty entryUrl = generic entry (no stored URL); an explicit popup fill is
+  // a deliberate user action, so allow it. Empty pageUrl = cannot judge.
+  if (!entryUrl) return true;
+  if (!pageUrl) return false;
+  // Entries are often stored scheme-less ("github.com/acme"); pad https://
+  // exactly like popup.js formatUrl before parsing, otherwise such entries
+  // would be rejected here despite being fillable nowhere else.
+  const withScheme = /^https?:\/\//i.test(entryUrl)
+    ? entryUrl
+    : `https://${entryUrl}`;
+  const entryDomain = normalizedDomain(withScheme);
+  const pageDomain = normalizedDomain(pageUrl);
+  // A parse failure yields null (cannot judge) → reject.
+  return Boolean(entryDomain && pageDomain && entryDomain === pageDomain);
 }
 
 // Verbatim copy of the normalizedDomain helper from sender-auth.js — the
