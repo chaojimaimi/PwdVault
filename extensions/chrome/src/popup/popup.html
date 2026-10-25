@@ -14,6 +14,30 @@
       --color-on-primary: #FFFFFF;
       --color-on-danger: #FFFFFF;
       --color-on-success: #FFFFFF;
+      /* Light-theme fallback (v1.3.2): popup.js sets data-theme after load;
+         without these the first paint renders unstyled/blank-variable. */
+      --color-primary: #1E3A5F;
+      --color-primary-hover: #153050;
+      --color-primary-dim: rgba(30, 58, 95, 0.07);
+      --color-primary-border: rgba(30, 58, 95, 0.20);
+      --gradient-icon: linear-gradient(135deg, #1E3A5F, #0D9488);
+
+      --color-bg: #F8FAFC;
+      --color-surface: #FFFFFF;
+      --color-input: #EDEEF2;
+      --color-text: #0F172A;
+      --color-text-secondary: #475569;
+      --color-text-muted: #5B6B80;
+      --color-border: rgba(0, 0, 0, 0.06);
+      --color-border-light: rgba(0, 0, 0, 0.10);
+
+      --color-success: #059669;
+      --color-danger: #DC2626;
+      --color-danger-hover: #B91C1C;
+      --color-danger-dim: rgba(220, 38, 38, 0.07);
+      --color-danger-text: #DC2626;
+      --color-warning: #D97706;
+      --color-accent: #0D9488;
     }
 
     [data-theme="light"] {
@@ -28,7 +52,7 @@
       --color-input: #EDEEF2;
       --color-text: #0F172A;
       --color-text-secondary: #475569;
-      --color-text-muted: #64748B;
+      --color-text-muted: #5B6B80;
       --color-border: rgba(0, 0, 0, 0.06);
       --color-border-light: rgba(0, 0, 0, 0.10);
 
@@ -38,6 +62,7 @@
       --color-danger-dim: rgba(220, 38, 38, 0.07);
       --color-danger-text: #DC2626;
       --color-warning: #D97706;
+      --color-accent: #0D9488;
     }
 
     [data-theme="dark"] {
@@ -65,6 +90,7 @@
       --color-danger-dim: rgba(248, 113, 113, 0.10);
       --color-danger-text: #F87171;
       --color-warning: #FBBF24;
+      --color-accent: #5EEAD4;
     }
 
     /* === Theme transition === */

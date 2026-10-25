@@ -441,19 +441,364 @@ function normalizedDomain(rawUrl) {
 	}
 
 	// ============================================================================
+	// Shadow DOM mounting (style isolation)
+	// ============================================================================
+
+	// One shared stylesheet injected into every shadow root. A shadow tree
+	// cannot read the host page's CSS custom properties, so the design tokens
+	// are pinned in the :host block below — they mirror the desktop Light
+	// theme (src/styles/themes.css); resync both when the palette changes.
+	// The four @keyframes live here too: shadow-scoped, so the page can neither
+	// clobber nor reuse them.
+	const SHADOW_CSS = `
+    :host {
+      /* Design tokens — mirror of the desktop Light theme (themes.css). */
+      --pv-primary: #1E3A5F;
+      --pv-primary-hover: #153050;
+      --pv-accent: #0D9488;
+      --pv-success: #059669;
+      --pv-danger: #DC2626;
+      --pv-bg: #F8FAFC;
+      --pv-surface: #FFFFFF;
+      --pv-input: #EDEEF2;
+      --pv-text: #0F172A;
+      --pv-text-secondary: #475569;
+      --pv-text-muted: #5B6B80;
+      --pv-border: rgba(0, 0, 0, 0.06);
+      --pv-border-strong: rgba(0, 0, 0, 0.10);
+      /* Cut inheritance from the host element so a page rule targeting our
+         wrapper div cannot restyle the widgets through inheritable
+         properties. Custom properties survive the all shorthand, and the
+         two declarations below re-pin what the widgets rely on. */
+      all: initial;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: var(--pv-text);
+    }
+
+    /* --- Auto-fill prompt bar (position/z-index live on the host) --- */
+    #pwdvault-autofill-bar {
+      width: 100%;
+      background: var(--pv-surface);
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 14px;
+      color: var(--pv-text);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+      animation: slideDown 0.3s ease-out;
+    }
+    @keyframes slideDown {
+      from { transform: translateY(-100%); }
+      to { transform: translateY(0); }
+    }
+    #pwdvault-autofill-bar .pv-bar-content {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    #pwdvault-autofill-bar .pv-icon {
+      width: 28px;
+      height: 28px;
+      background: var(--pv-primary);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      color: #fff;
+      font-size: 12px;
+    }
+    #pwdvault-autofill-bar .pv-text {
+      display: flex;
+      flex-direction: column;
+    }
+    #pwdvault-autofill-bar .pv-title {
+      font-weight: 500;
+    }
+    #pwdvault-autofill-bar .pv-subtitle {
+      font-size: 12px;
+      color: var(--pv-text-muted);
+    }
+    #pwdvault-autofill-bar .pv-error {
+      font-size: 12px;
+      color: var(--pv-danger);
+    }
+    #pwdvault-autofill-bar .pv-actions {
+      display: flex;
+      gap: 8px;
+    }
+    #pwdvault-autofill-bar .pv-btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: none;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+    #pwdvault-autofill-bar .pv-btn-primary {
+      background: var(--pv-primary);
+      color: #fff;
+    }
+    #pwdvault-autofill-bar .pv-btn-primary:hover {
+      background: var(--pv-primary-hover);
+    }
+    #pwdvault-autofill-bar .pv-btn-secondary {
+      background: var(--pv-input);
+      color: var(--pv-text-secondary);
+    }
+    #pwdvault-autofill-bar .pv-btn-secondary:hover {
+      background: var(--pv-border-strong);
+      color: var(--pv-text);
+    }
+
+    /* --- Overlay (backdrop fills the fixed host) --- */
+    #pwdvault-overlay {
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 100px;
+      font-size: 14px;
+      color: var(--pv-text);
+      animation: fadeIn 0.2s ease-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    #pwdvault-modal {
+      background: var(--pv-surface);
+      border-radius: 12px;
+      padding: 20px;
+      min-width: 320px;
+      max-width: 400px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      color: var(--pv-text);
+    }
+    #pwdvault-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    #pwdvault-header h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 0;
+    }
+    #pwdvault-close {
+      background: none;
+      border: none;
+      color: var(--pv-text-muted);
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px;
+      font-family: inherit;
+    }
+    #pwdvault-close:hover {
+      color: var(--pv-text);
+    }
+    #pwdvault-search {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--pv-border-strong);
+      border-radius: 8px;
+      background: var(--pv-input);
+      color: var(--pv-text);
+      font-size: 14px;
+      margin-bottom: 12px;
+      box-sizing: border-box;
+      font-family: inherit;
+    }
+    #pwdvault-search:focus {
+      outline: none;
+      border-color: var(--pv-primary);
+    }
+    #pwdvault-list {
+      max-height: 280px;
+      overflow-y: auto;
+    }
+    .pwdvault-item {
+      display: flex;
+      align-items: center;
+      padding: 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .pwdvault-item:hover {
+      background: var(--pv-input);
+    }
+    .pwdvault-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--pv-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      color: #fff;
+      margin-right: 12px;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+    .pwdvault-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .pwdvault-info h4 {
+      font-size: 14px;
+      font-weight: 500;
+      margin: 0 0 4px 0;
+    }
+    .pwdvault-info p {
+      font-size: 12px;
+      color: var(--pv-text-muted);
+      margin: 0;
+    }
+    .pwdvault-item-actions {
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .pwdvault-item:hover .pwdvault-item-actions {
+      opacity: 1;
+    }
+    .pwdvault-action-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      border: none;
+      background: var(--pv-input);
+      color: var(--pv-text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+    .pwdvault-action-btn:hover {
+      background: var(--pv-border-strong);
+      color: var(--pv-text);
+    }
+    .pwdvault-action-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+    #pwdvault-empty {
+      text-align: center;
+      padding: 32px 16px;
+      color: var(--pv-text-muted);
+    }
+    #pwdvault-status {
+      text-align: center;
+      padding: 32px 16px;
+    }
+    #pwdvault-status.error {
+      color: var(--pv-danger);
+    }
+
+    /* --- Toast (bottom-right; position lives on the host) --- */
+    #pwdvault-notification {
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      animation: slideIn 0.3s ease-out;
+      color: #fff;
+    }
+    #pwdvault-notification.error { background: var(--pv-danger); }
+    #pwdvault-notification.success { background: var(--pv-success); }
+    #pwdvault-notification.info { background: var(--pv-primary); }
+    @keyframes slideIn {
+      from { transform: translateY(20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    /* --- Floating button (position/top live on the host) --- */
+    #pwdvault-floating-btn {
+      position: relative;
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, var(--pv-primary) 0%, var(--pv-accent) 100%);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(30, 58, 95, 0.4);
+      transition: transform 0.2s, opacity 0.3s;
+      animation: fadeInFloat 0.3s ease-out;
+      opacity: 0;
+    }
+    @keyframes fadeInFloat {
+      from { opacity: 0; transform: scale(0.8); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    #pwdvault-floating-btn:hover {
+      transform: scale(1.1);
+    }
+    #pwdvault-floating-btn svg {
+      width: 20px;
+      height: 20px;
+      fill: white;
+    }
+    #pwdvault-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      min-width: 18px;
+      height: 18px;
+      background: var(--pv-success);
+      border-radius: 9px;
+      font-size: 11px;
+      font-weight: 600;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 4px;
+      display: none;
+    }
+  `;
+
+	// Creates a position:fixed host element carrying one closed shadow root
+	// pre-seeded with the shared stylesheet. `hostCss` holds the positioning
+	// that used to live on the injected roots (inline styles beat page CSS,
+	// so the page cannot move or unstack the widgets). closed mode keeps the
+	// page from reaching the root via el.shadowRoot — this script only ever
+	// uses the reference returned here.
+	function mountShadowHost(hostCss) {
+		const host = document.createElement("div");
+		host.style.cssText = hostCss;
+		const shadowRoot = host.attachShadow({ mode: "closed" });
+		const style = document.createElement("style");
+		style.textContent = SHADOW_CSS;
+		shadowRoot.appendChild(style);
+		return { host, shadowRoot };
+	}
+
+	// ============================================================================
 	// Notification Bar (for auto-fill prompt)
 	// ============================================================================
 
 	let notificationBar = null;
+	let notificationBarShadow = null;
 
 	// Renders an error inside the existing prompt bar without dismissing it,
 	// so the user can retry Fill after e.g. unlocking the vault.
 	function showAutoFillPromptError(message) {
-		if (!notificationBar) return;
-		const text = notificationBar.querySelector(".pv-text");
+		if (!notificationBarShadow) return;
+		const text = notificationBarShadow.querySelector(".pv-text");
 		if (!text) return;
 
-		let errorEl = notificationBar.querySelector(".pv-error");
+		let errorEl = notificationBarShadow.querySelector(".pv-error");
 		if (!errorEl) {
 			errorEl = document.createElement("span");
 			errorEl.className = "pv-error";
@@ -466,94 +811,12 @@ function normalizedDomain(rawUrl) {
 	function showAutoFillPrompt(entry) {
 		hideNotificationBar();
 
-		notificationBar = document.createElement("div");
-		notificationBar.id = "pwdvault-autofill-bar";
+		const { host, shadowRoot } = mountShadowHost(
+			"position: fixed; top: 0; left: 0; right: 0; z-index: 2147483646;",
+		);
 
-		const style = document.createElement("style");
-		style.textContent = `
-      #pwdvault-autofill-bar {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
-        padding: 12px 20px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        font-size: 14px;
-        color: #e0e0e0;
-        z-index: 2147483646;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-        animation: slideDown 0.3s ease-out;
-      }
-      @keyframes slideDown {
-        from { transform: translateY(-100%); }
-        to { transform: translateY(0); }
-      }
-      #pwdvault-autofill-bar .pv-bar-content {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-      #pwdvault-autofill-bar .pv-icon {
-        width: 28px;
-        height: 28px;
-        background: #6366f1;
-        border-radius: 6px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-weight: 600;
-        color: #fff;
-        font-size: 12px;
-      }
-      #pwdvault-autofill-bar .pv-text {
-        display: flex;
-        flex-direction: column;
-      }
-      #pwdvault-autofill-bar .pv-title {
-        font-weight: 500;
-      }
-      #pwdvault-autofill-bar .pv-subtitle {
-        font-size: 12px;
-        color: #888;
-      }
-      #pwdvault-autofill-bar .pv-error {
-        font-size: 12px;
-        color: #f87171;
-      }
-      #pwdvault-autofill-bar .pv-actions {
-        display: flex;
-        gap: 8px;
-      }
-      #pwdvault-autofill-bar .pv-btn {
-        padding: 8px 16px;
-        border-radius: 6px;
-        border: none;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s;
-      }
-      #pwdvault-autofill-bar .pv-btn-primary {
-        background: #6366f1;
-        color: white;
-      }
-      #pwdvault-autofill-bar .pv-btn-primary:hover {
-        background: #4f46e5;
-      }
-      #pwdvault-autofill-bar .pv-btn-secondary {
-        background: #333;
-        color: #aaa;
-      }
-      #pwdvault-autofill-bar .pv-btn-secondary:hover {
-        background: #444;
-        color: #fff;
-      }
-    `;
-		notificationBar.appendChild(style);
+		const bar = document.createElement("div");
+		bar.id = "pwdvault-autofill-bar";
 
 		const barContent = document.createElement("div");
 		barContent.className = "pv-bar-content";
@@ -575,7 +838,7 @@ function normalizedDomain(rawUrl) {
 		text.appendChild(subtitleSpan);
 		barContent.appendChild(text);
 
-		notificationBar.appendChild(barContent);
+		bar.appendChild(barContent);
 
 		const actions = document.createElement("div");
 		actions.className = "pv-actions";
@@ -592,60 +855,57 @@ function normalizedDomain(rawUrl) {
 		fillBtn.textContent = "Fill";
 		actions.appendChild(fillBtn);
 
-		notificationBar.appendChild(actions);
+		bar.appendChild(actions);
 
 		// The bar only ever receives an entry summary (title/username, no
 		// password). The secret is fetched here, at click time, through the
 		// background's URL-scoped gate, and dropped after autofill — so a page
 		// load never pulls plaintext credentials into the content script.
-		notificationBar
-			.querySelector("#pv-fill")
-			.addEventListener("click", async (e) => {
-				// Synthetic events dispatched by page scripts must never pull
-				// credentials (isTrusted is false for script-made events).
-				if (!e.isTrusted) return;
-				const fillBtn =
-					notificationBar && notificationBar.querySelector("#pv-fill");
-				if (fillBtn) fillBtn.disabled = true;
+		bar.querySelector("#pv-fill").addEventListener("click", async (e) => {
+			// Synthetic events dispatched by page scripts must never pull
+			// credentials (isTrusted is false for script-made events).
+			if (!e.isTrusted) return;
+			const fillBtn = shadowRoot.querySelector("#pv-fill");
+			if (fillBtn) fillBtn.disabled = true;
 
-				try {
-					const full = await chrome.runtime.sendMessage({
-						type: "GET_ENTRY",
-						id: entry.id,
-					});
+			try {
+				const full = await chrome.runtime.sendMessage({
+					type: "GET_ENTRY",
+					id: entry.id,
+				});
 
-					if (!full || full.error) {
-						showAutoFillPromptError(
-							full && full.error && /lock/i.test(full.error)
-								? "Vault is locked — unlock PwdVault and try again"
-								: (full && full.error) ||
-										"Failed to fetch the entry. Try again.",
-						);
-						return;
-					}
-
-					hideNotificationBar();
-					autofillLogin(full.username, full.password);
-				} catch (error) {
-					const message = error && error.message ? error.message : "";
+				if (!full || full.error) {
 					showAutoFillPromptError(
-						/lock/i.test(message)
+						full && full.error && /lock/i.test(full.error)
 							? "Vault is locked — unlock PwdVault and try again"
-							: "Failed to fetch the entry. Try again.",
+							: (full && full.error) ||
+									"Failed to fetch the entry. Try again.",
 					);
-				} finally {
-					// No-op once the bar is hidden; keeps Fill usable after an error.
-					if (fillBtn && notificationBar) fillBtn.disabled = false;
+					return;
 				}
-			});
 
-		notificationBar
-			.querySelector("#pv-dismiss")
-			.addEventListener("click", () => {
 				hideNotificationBar();
-			});
+				autofillLogin(full.username, full.password);
+			} catch (error) {
+				const message = error && error.message ? error.message : "";
+				showAutoFillPromptError(
+					/lock/i.test(message)
+						? "Vault is locked — unlock PwdVault and try again"
+						: "Failed to fetch the entry. Try again.",
+				);
+			} finally {
+				// No-op once the bar is hidden; keeps Fill usable after an error.
+				if (fillBtn && notificationBarShadow) fillBtn.disabled = false;
+			}
+		});
 
-		document.body.appendChild(notificationBar);
+		bar.querySelector("#pv-dismiss").addEventListener("click", () => {
+			hideNotificationBar();
+		});
+
+		notificationBar = host;
+		notificationBarShadow = shadowRoot;
+		document.body.appendChild(host);
 
 		// Auto-dismiss after 10 seconds
 		setTimeout(() => {
@@ -657,6 +917,7 @@ function normalizedDomain(rawUrl) {
 		if (notificationBar && notificationBar.parentNode) {
 			notificationBar.parentNode.removeChild(notificationBar);
 			notificationBar = null;
+			notificationBarShadow = null;
 		}
 	}
 
@@ -665,166 +926,21 @@ function normalizedDomain(rawUrl) {
 	// ============================================================================
 
 	let overlay = null;
+	let overlayShadow = null;
 	let cachedEntries = null;
 
 	function createOverlay() {
 		if (overlay) return overlay;
 
-		overlay = document.createElement("div");
-		overlay.id = "pwdvault-overlay";
-		overlay.innerHTML = `
-      <style>
-        #pwdvault-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0, 0, 0, 0.5);
-          display: flex;
-          align-items: flex-start;
-          justify-content: center;
-          padding-top: 100px;
-          z-index: 2147483647;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          animation: fadeIn 0.2s ease-out;
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        #pwdvault-modal {
-          background: #1e1e2e;
-          border-radius: 12px;
-          padding: 20px;
-          min-width: 320px;
-          max-width: 400px;
-          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-          color: #e0e0e0;
-        }
-        #pwdvault-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 16px;
-        }
-        #pwdvault-header h3 {
-          font-size: 16px;
-          font-weight: 600;
-          margin: 0;
-        }
-        #pwdvault-close {
-          background: none;
-          border: none;
-          color: #888;
-          font-size: 20px;
-          cursor: pointer;
-          padding: 4px;
-        }
-        #pwdvault-close:hover {
-          color: #fff;
-        }
-        #pwdvault-search {
-          width: 100%;
-          padding: 10px 12px;
-          border: 1px solid #333;
-          border-radius: 8px;
-          background: #262637;
-          color: #fff;
-          font-size: 14px;
-          margin-bottom: 12px;
-          box-sizing: border-box;
-        }
-        #pwdvault-search:focus {
-          outline: none;
-          border-color: #6366f1;
-        }
-        #pwdvault-list {
-          max-height: 280px;
-          overflow-y: auto;
-        }
-        .pwdvault-item {
-          display: flex;
-          align-items: center;
-          padding: 12px;
-          border-radius: 8px;
-          cursor: pointer;
-          transition: background 0.2s;
-        }
-        .pwdvault-item:hover {
-          background: #262637;
-        }
-        .pwdvault-icon {
-          width: 36px;
-          height: 36px;
-          border-radius: 8px;
-          background: #6366f1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 600;
-          color: #fff;
-          margin-right: 12px;
-          text-transform: uppercase;
-          flex-shrink: 0;
-        }
-        .pwdvault-info {
-          flex: 1;
-          min-width: 0;
-        }
-        .pwdvault-info h4 {
-          font-size: 14px;
-          font-weight: 500;
-          margin: 0 0 4px 0;
-        }
-        .pwdvault-info p {
-          font-size: 12px;
-          color: #888;
-          margin: 0;
-        }
-        .pwdvault-item-actions {
-          display: flex;
-          gap: 4px;
-          opacity: 0;
-          transition: opacity 0.2s;
-        }
-        .pwdvault-item:hover .pwdvault-item-actions {
-          opacity: 1;
-        }
-        .pwdvault-action-btn {
-          width: 28px;
-          height: 28px;
-          border-radius: 6px;
-          border: none;
-          background: #333;
-          color: #888;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: all 0.2s;
-        }
-        .pwdvault-action-btn:hover {
-          background: #444;
-          color: #fff;
-        }
-        .pwdvault-action-btn svg {
-          width: 14px;
-          height: 14px;
-        }
-        #pwdvault-empty {
-          text-align: center;
-          padding: 32px 16px;
-          color: #666;
-        }
-        #pwdvault-status {
-          text-align: center;
-          padding: 32px 16px;
-        }
-        #pwdvault-status.error {
-          color: #f87171;
-        }
-      </style>
+		const { host, shadowRoot } = mountShadowHost(
+			"position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 2147483647;",
+		);
+
+		// The backdrop fills the fixed host; the modal is centered by the
+		// backdrop's flex layout. Created once and re-shown by showOverlay.
+		const backdrop = document.createElement("div");
+		backdrop.id = "pwdvault-overlay";
+		backdrop.innerHTML = `
       <div id="pwdvault-modal">
         <div id="pwdvault-header">
           <h3>PwdVault</h3>
@@ -834,27 +950,32 @@ function normalizedDomain(rawUrl) {
         <div id="pwdvault-content"></div>
       </div>
     `;
+		shadowRoot.appendChild(backdrop);
 
-		overlay
+		backdrop
 			.querySelector("#pwdvault-close")
 			.addEventListener("click", hideOverlay);
-		overlay.addEventListener("click", (e) => {
-			if (e.target === overlay) hideOverlay();
+		// Listener on the backdrop (inside the shadow tree): e.target is the
+		// real inner element here, so only clicks on the scrim itself close.
+		backdrop.addEventListener("click", (e) => {
+			if (e.target === backdrop) hideOverlay();
 		});
 
-		// Keyboard shortcut to close
-		overlay.addEventListener("keydown", (e) => {
+		// Keyboard shortcut to close (bubbles up from the search input)
+		backdrop.addEventListener("keydown", (e) => {
 			if (e.key === "Escape") hideOverlay();
 		});
 
-		return overlay;
+		overlay = host;
+		overlayShadow = shadowRoot;
+		return host;
 	}
 
 	function showOverlay() {
 		const overlayEl = createOverlay();
 		document.body.appendChild(overlayEl);
 		loadEntries();
-		overlayEl.querySelector("#pwdvault-search").focus();
+		overlayShadow.querySelector("#pwdvault-search").focus();
 	}
 
 	function hideOverlay() {
@@ -864,7 +985,7 @@ function normalizedDomain(rawUrl) {
 	}
 
 	async function loadEntries() {
-		const content = overlay.querySelector("#pwdvault-content");
+		const content = overlayShadow.querySelector("#pwdvault-content");
 
 		try {
 			const response = await chrome.runtime.sendMessage({
@@ -877,7 +998,9 @@ function normalizedDomain(rawUrl) {
 				const statusEl = document.createElement("div");
 				statusEl.id = "pwdvault-status";
 				statusEl.className = "error";
-				statusEl.textContent = escapeHtml(response.error);
+				// textContent never parses markup — no escaping wanted (a plain
+				// escapeHtml here would show literal &amp; entities).
+				statusEl.textContent = response.error;
 				content.appendChild(statusEl);
 				return;
 			}
@@ -890,14 +1013,13 @@ function normalizedDomain(rawUrl) {
 			statusEl.id = "pwdvault-status";
 			statusEl.className = "error";
 			statusEl.textContent =
-				"Failed to load entries: " +
-				escapeHtml(error.message || "Unknown error");
+				"Failed to load entries: " + (error.message || "Unknown error");
 			content.appendChild(statusEl);
 		}
 	}
 
 	function renderEntries(entries) {
-		const content = overlay.querySelector("#pwdvault-content");
+		const content = overlayShadow.querySelector("#pwdvault-content");
 
 		if (!entries || entries.length === 0) {
 			content.innerHTML = "";
@@ -935,8 +1057,8 @@ function normalizedDomain(rawUrl) {
 			const copyBtn = document.createElement("button");
 			copyBtn.className = "pwdvault-action-btn";
 			copyBtn.setAttribute("data-action", "copy");
-			// Escape the ID attribute value to prevent XSS
-			copyBtn.setAttribute("data-id", escapeHtml(entry.id));
+			// setAttribute is assignment, not parsing — the raw ID is safe here.
+			copyBtn.setAttribute("data-id", entry.id);
 			copyBtn.title = "Copy password";
 			copyBtn.innerHTML =
 				'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
@@ -970,7 +1092,7 @@ function normalizedDomain(rawUrl) {
 		content.appendChild(list);
 
 		// Setup search
-		const searchInput = overlay.querySelector("#pwdvault-search");
+		const searchInput = overlayShadow.querySelector("#pwdvault-search");
 		searchInput.oninput = () => filterEntries(entries, searchInput.value);
 	}
 
@@ -1000,7 +1122,7 @@ function normalizedDomain(rawUrl) {
 			autofillLogin(entry.username, entry.password);
 		} catch (error) {
 			showNotification(
-				"Failed to get entry: " + escapeHtml(error.message || "Unknown error"),
+				"Failed to get entry: " + (error.message || "Unknown error"),
 				"error",
 			);
 		}
@@ -1026,8 +1148,7 @@ function normalizedDomain(rawUrl) {
 			}
 		} catch (error) {
 			showNotification(
-				"Failed to copy password: " +
-					escapeHtml(error.message || "Unknown error"),
+				"Failed to copy password: " + (error.message || "Unknown error"),
 				"error",
 			);
 		}
@@ -1037,44 +1158,32 @@ function normalizedDomain(rawUrl) {
 	// Notifications
 	// ============================================================================
 
+	// Current toast's host element — the dedupe anchor. The old
+	// document.getElementById lookup stopped working once the toast moved into
+	// a closed shadow root (page-wide ids are no longer reachable).
+	let activeToastHost = null;
+
 	function showNotification(message, type = "info") {
-		const existing = document.getElementById("pwdvault-notification");
-		if (existing) existing.remove();
+		if (activeToastHost) activeToastHost.remove();
+
+		const { host, shadowRoot } = mountShadowHost(
+			"position: fixed; bottom: 20px; right: 20px; z-index: 2147483647;",
+		);
 
 		const notification = document.createElement("div");
 		notification.id = "pwdvault-notification";
-		notification.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      padding: 12px 20px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      z-index: 2147483647;
-      animation: slideIn 0.3s ease-out;
-      background: ${type === "error" ? "#dc2626" : type === "success" ? "#16a34a" : "#6366f1"};
-      color: white;
-    `;
+		notification.className =
+			type === "error" || type === "success" ? type : "info";
 		notification.textContent = message;
+		shadowRoot.appendChild(notification);
 
-		const style = document.createElement("style");
-		style.textContent = `
-      @keyframes slideIn {
-        from { transform: translateY(20px); opacity: 0; }
-        to { transform: translateY(0); opacity: 1; }
-      }
-    `;
-		document.head.appendChild(style);
-		document.body.appendChild(notification);
+		activeToastHost = host;
+		document.body.appendChild(host);
 
-		setTimeout(() => notification.remove(), 3000);
-	}
-
-	function escapeHtml(text) {
-		const div = document.createElement("div");
-		div.textContent = text;
-		return div.innerHTML;
+		setTimeout(() => {
+			if (activeToastHost === host) activeToastHost = null;
+			host.remove();
+		}, 3000);
 	}
 
 	// ============================================================================
@@ -1082,6 +1191,7 @@ function normalizedDomain(rawUrl) {
 	// ============================================================================
 
 	let floatingButton = null;
+	let floatingButtonShadow = null;
 	let entryCount = 0;
 
 	function createFloatingButton(entries = null) {
@@ -1100,88 +1210,52 @@ function normalizedDomain(rawUrl) {
 
 		entryCount = entries ? entries.length : 0;
 
-		floatingButton = document.createElement("div");
-		floatingButton.id = "pwdvault-floating-btn";
-		floatingButton.innerHTML = `
-      <style>
-        #pwdvault-floating-btn {
-          position: fixed;
-          width: 40px;
-          height: 40px;
-          background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
-          z-index: 2147483646;
-          transition: transform 0.2s, opacity 0.3s;
-          animation: fadeInFloat 0.3s ease-out;
-          opacity: 0;
-        }
-        @keyframes fadeInFloat {
-          from { opacity: 0; transform: scale(0.8); }
-          to { opacity: 1; transform: scale(1); }
-        }
-        #pwdvault-floating-btn:hover {
-          transform: scale(1.1);
-        }
-        #pwdvault-floating-btn svg {
-          width: 20px;
-          height: 20px;
-          fill: white;
-        }
-        #pwdvault-badge {
-          position: absolute;
-          top: -4px;
-          right: -4px;
-          min-width: 18px;
-          height: 18px;
-          background: #16a34a;
-          border-radius: 9px;
-          font-size: 11px;
-          font-weight: 600;
-          color: white;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 0 4px;
-          display: none;
-        }
-      </style>
+		const { host, shadowRoot } = mountShadowHost(
+			"position: fixed; z-index: 2147483646;",
+		);
+
+		const button = document.createElement("div");
+		button.id = "pwdvault-floating-btn";
+		button.innerHTML = `
       <svg viewBox="0 0 24 24">
         <path d="M12 2C9.24 2 7 4.24 7 7v2H6c-1.1 0-2 .9-2 2v9c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-9c0-1.1-.9-2-2-2h-1V7c0-2.76-2.24-5-5-5zm0 2c1.66 0 3 1.34 3 3v2H9V7c0-1.66 1.34-3 3-3zm0 10c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z"/>
       </svg>
       <span id="pwdvault-badge"></span>
     `;
+		shadowRoot.appendChild(button);
 
-		// Position near password field. The button is position:fixed, so it
+		// Position near password field. The host is position:fixed, so it
 		// takes viewport coordinates — adding window.scrollY would push it
 		// off-screen below the fold on scrolled pages.
 		const rect = loginForm.passwordField.getBoundingClientRect();
-		floatingButton.style.top = `${rect.top - 50}px`;
-		floatingButton.style.right = "20px";
+		host.style.top = `${rect.top - 50}px`;
+		host.style.right = "20px";
 
-		floatingButton.addEventListener("click", (e) => {
+		host.addEventListener("click", (e) => {
 			e.preventDefault();
 			showOverlay();
 		});
 
-		document.body.appendChild(floatingButton);
+		floatingButton = host;
+		floatingButtonShadow = shadowRoot;
+		document.body.appendChild(host);
 
-		// Trigger fade-in animation
+		// Trigger fade-in animation (the animated element sits inside the
+		// shadow tree — the host only carries positioning)
 		requestAnimationFrame(() => {
-			floatingButton.style.opacity = "1";
+			if (floatingButtonShadow === shadowRoot) {
+				const inner = shadowRoot.querySelector("#pwdvault-floating-btn");
+				if (inner) inner.style.opacity = "1";
+			}
 		});
 
 		updateFloatingButtonBadge(entries);
 	}
 
 	function updateFloatingButtonBadge(entries) {
-		if (!floatingButton) return;
+		if (!floatingButtonShadow) return;
 
-		const badge = floatingButton.querySelector("#pwdvault-badge");
+		const badge = floatingButtonShadow.querySelector("#pwdvault-badge");
 		if (!badge) return;
 
 		const count = entries ? entries.length : 0;
@@ -1199,6 +1273,7 @@ function normalizedDomain(rawUrl) {
 		if (floatingButton) {
 			floatingButton.remove();
 			floatingButton = null;
+			floatingButtonShadow = null;
 		}
 	}
 

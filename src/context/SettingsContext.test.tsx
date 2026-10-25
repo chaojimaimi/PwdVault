@@ -155,16 +155,28 @@ describe('SettingsProvider update privacy', () => {
     expect(downloadAndInstall).toHaveBeenCalledOnce();
   });
 
-  it('returns to the offer state (silent retry) when the download fails', async () => {
-    const downloadAndInstall = vi.fn().mockRejectedValue(new Error('download interrupted'));
-    vi.mocked(check).mockResolvedValue(fakeUpdate('1.1.7', downloadAndInstall as unknown as Update['downloadAndInstall']));
-    await renderWithSettings(true);
-    await waitFor(() => expect(latestCtx?.state.update).toEqual({ version: '1.1.7' }));
+  it('surfaces a visible UPDATE_FAILED phase when the download fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const downloadAndInstall = vi.fn().mockRejectedValue(new Error('download interrupted'));
+      vi.mocked(check).mockResolvedValue(fakeUpdate('1.1.7', downloadAndInstall as unknown as Update['downloadAndInstall']));
+      await renderWithSettings(true);
+      await waitFor(() => expect(latestCtx?.state.update).toEqual({ version: '1.1.7' }));
 
-    await latestCtx!.actions.installUpdate();
+      await latestCtx!.actions.installUpdate();
 
-    await waitFor(() => expect(latestCtx?.state.updatePhase).toBe('available'));
-    expect(latestCtx?.state.downloadProgress).toBe(0);
+      // v1.3.2: failure is no longer a silent fallback to 'available' — it is
+      // a distinct 'failed' phase, logged, with progress reset for the retry.
+      await waitFor(() => expect(latestCtx?.state.updatePhase).toBe('failed'));
+      expect(latestCtx?.state.downloadProgress).toBe(0);
+      expect(errorSpy).toHaveBeenCalled();
+
+      // The in-flight Update handle survives the failure so a retry can use it.
+      await latestCtx!.actions.installUpdate();
+      expect(downloadAndInstall).toHaveBeenCalledTimes(2);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('relaunches through the process plugin', async () => {

@@ -3,13 +3,13 @@ import {
 	useEffect,
 	useDeferredValue,
 	useMemo,
-	useRef,
 	useState,
 } from "react";
 import { Virtuoso } from "react-virtuoso";
 import { useAuth, useVault, useSettings } from "../context/AppContext";
 import { useTheme } from "../hooks/useTheme";
 import { copyWithTimeout, copyWithoutClear } from "../utils/clipboard";
+import { errorMessage } from "../utils/errorMessage";
 import { searchWithIndex } from "../utils/search";
 import { showToast } from "../utils/toast";
 import { UpdateNotification } from "../components/UpdateNotification";
@@ -31,23 +31,18 @@ export function VaultScreen() {
 	const { toggleTheme } = useTheme();
 	const [copiedId, setCopiedId] = useState<string | null>(null);
 
-	// H4: `actions` gets a new identity whenever selectedGroupId changes (see
-	// VaultContext's useMemo deps), so putting it in the dependency array would
-	// re-run the load on every group switch. The latestRef pattern keeps the
-	// effect's semantic "run once per unlock transition" while always calling
-	// the newest actions.
-	const actionsRef = useRef(actions);
-	actionsRef.current = actions;
-
 	useEffect(() => {
 		if (authState.isUnlocked) {
 			void Promise.allSettled([
-				actionsRef.current.loadEntries(),
-				actionsRef.current.loadGroups(),
+				actions.loadEntries(),
+				actions.loadGroups(),
 			]);
 		}
-		// Intentionally only re-runs on isUnlocked; actions are read via ref.
-	}, [authState.isUnlocked]);
+		// "Run once per unlock transition": actions is now referentially stable
+		// (VaultContext memoizes on [dispatch] — v1.3.2 removed the
+		// selectedGroupId dependency), so listing it cannot re-trigger the load
+		// and the old latestRef workaround is gone.
+	}, [authState.isUnlocked, actions]);
 
 	// §5.6.1: apply the group filter first, then search the filtered set.
 	// searchWithIndex uses a two-tier strategy: substring fast-path for the
@@ -69,25 +64,37 @@ export function VaultScreen() {
 
 	const handleEntryClick = useCallback(
 		async (entry: EntrySummary) => {
-			await actions.selectEntry(entry.id);
-			authActions.navigate("entry");
+			try {
+				await actions.selectEntry(entry.id);
+				authActions.navigate("entry");
+			} catch (e) {
+				showToast(errorMessage(e, "Failed to open entry"));
+			}
 		},
 		[actions, authActions],
 	);
 
 	const handleCopyUsername = useCallback(async (username: string) => {
-		await copyWithoutClear(username);
-		showToast("Username copied");
+		try {
+			await copyWithoutClear(username);
+			showToast("Username copied");
+		} catch (e) {
+			showToast(errorMessage(e, "Failed to copy username"));
+		}
 	}, []);
 
 	const handleCopyPassword = useCallback(
 		async (entry: EntrySummary) => {
-			const secret = await actions.getEntrySecret(entry.id);
-			if (secret?.password) {
-				await copyWithTimeout(secret.password);
-				setCopiedId(entry.id);
-				showToast("Password copied (auto-clears in 30s)");
-				setTimeout(() => setCopiedId(null), 2000);
+			try {
+				const secret = await actions.getEntrySecret(entry.id);
+				if (secret?.password) {
+					await copyWithTimeout(secret.password);
+					setCopiedId(entry.id);
+					showToast("Password copied (auto-clears in 30s)");
+					setTimeout(() => setCopiedId(null), 2000);
+				}
+			} catch (e) {
+				showToast(errorMessage(e, "Failed to copy password"));
 			}
 		},
 		[actions],
@@ -245,39 +252,54 @@ export function VaultScreen() {
 						<p className="text-muted-hint">{state.entriesError}</p>
 						<button
 							className="btn btn-secondary"
-							onClick={() => void actions.loadEntries()}
+							onClick={() =>
+								void actions.loadEntries().catch((e) => {
+									// loadEntries already flips the resource state; the
+									// toast keeps the retry rejection from being silent
+									// for transient failures the state banner misses.
+									showToast(errorMessage(e, "Failed to load passwords"));
+								})
+							}
 						>
 							Retry
 						</button>
 					</div>
-				) : filteredEntries.length === 0 ? (
-					<div className="empty-state" role="listitem">
-						<LockIcon size={64} />
-						<p>
-							{state.searchQuery
-								? "No matching passwords found"
-								: "No passwords saved yet"}
-						</p>
-						<p className="text-muted-hint">Tap + to add your first password</p>
-					</div>
-				) : (
-					// §5.6.1: virtualize the entry list so 10k entries render only the
-					// visible window. Combined with the memoized EntryRow and the
-					// deferred query, this keeps the main-thread long task under 50ms.
-					<Virtuoso
-						data={filteredEntries}
-						itemContent={(_i, entry) => (
-							<EntryRow
-								entry={entry}
-								copied={copiedId === entry.id}
-								onOpen={handleEntryClick}
-								onCopyUsername={handleCopyUsername}
-								onCopyPassword={handleCopyPassword}
-							/>
-						)}
-						style={{ height: "100%" }}
-					/>
-				)}
+					) : filteredEntries.length === 0 ? (
+						<div className="empty-state" role="listitem">
+							<LockIcon size={64} />
+							<p>
+								{state.searchQuery
+									? "No matching passwords found"
+									: "No passwords saved yet"}
+							</p>
+							{!state.searchQuery && (
+								<button
+									type="button"
+									className="btn btn-primary"
+									onClick={handleAddClick}
+								>
+									Add your first password
+								</button>
+							)}
+						</div>
+					) : (
+						// §5.6.1: virtualize the entry list so 10k entries render only the
+						// visible window. Combined with the memoized EntryRow and the
+						// deferred query, this keeps the main-thread long task under 50ms.
+						<Virtuoso
+							data={filteredEntries}
+							itemContent={(_i, entry) => (
+								<EntryRow
+									entry={entry}
+									copied={copiedId === entry.id}
+									onOpen={handleEntryClick}
+									onCopyUsername={handleCopyUsername}
+									onCopyPassword={handleCopyPassword}
+								/>
+							)}
+							style={{ height: "100%" }}
+						/>
+					)}
 			</div>
 		</div>
 	);

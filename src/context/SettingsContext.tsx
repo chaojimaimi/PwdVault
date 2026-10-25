@@ -10,8 +10,12 @@ import { useAuth } from './AuthContext';
 // State
 // ---------------------------------------------------------------------------
 
-/** Banner lifecycle: offer → download (with progress) → ready to relaunch. */
-export type UpdatePhase = 'available' | 'downloading' | 'ready';
+/**
+ * Banner lifecycle: offer → download (with progress) → ready to relaunch,
+ * with 'failed' for a visible download/install failure (v1.3.2 — the old
+ * silent fallback to 'available' looked exactly like nothing had happened).
+ */
+export type UpdatePhase = 'available' | 'downloading' | 'ready' | 'failed';
 
 /** Manual "Check for updates" button lifecycle (Settings page). */
 export type ManualCheckPhase = 'idle' | 'checking' | 'available' | 'uptodate' | 'error';
@@ -278,9 +282,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'SET_UPDATE_PHASE', payload: 'ready' });
         updateRef.current = null;
         void update.close().catch(() => {});
-      } catch {
-        // Silent degradation: back to the offer state so "Update now" can retry.
-        dispatch({ type: 'SET_UPDATE_PHASE', payload: 'available' });
+      } catch (error) {
+        // Visible failure (v1.3.2): log for diagnostics and flip to 'failed'
+        // so the banner and the Settings Updates block can say what happened
+        // and offer the retry instead of silently re-appearing as an offer.
+        console.error('update downloadAndInstall failed:', error);
+        dispatch({ type: 'SET_UPDATE_PHASE', payload: 'failed' });
         dispatch({ type: 'SET_DOWNLOAD_PROGRESS', payload: 0 });
       }
     },

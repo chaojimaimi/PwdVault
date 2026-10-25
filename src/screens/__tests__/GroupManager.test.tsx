@@ -12,6 +12,11 @@ const updateGroup = vi.fn();
 const deleteGroup = vi.fn();
 const navigate = vi.fn();
 
+// Stable actions object mirroring the real context (v1.3.2: VaultContext
+// memoizes actions on [dispatch]). A per-render fresh object would re-run the
+// mount effect after the test reset the mocks (deps [actions]).
+const vaultActions = { loadGroups, createGroup, updateGroup, deleteGroup };
+
 beforeEach(() => {
 	// The mount load now attaches .catch — the mock must return a promise.
 	loadGroups.mockResolvedValue(undefined);
@@ -26,7 +31,7 @@ vi.mock("../../context/AppContext", () => ({
 		return {
 			state: { groups, entries: [], selectedGroupId: null },
 			dispatch: () => {},
-			actions: { loadGroups, createGroup, updateGroup, deleteGroup },
+			actions: vaultActions,
 		};
 	},
 	useSettings: () => ({ state: { settings: {} }, actions: {} }),

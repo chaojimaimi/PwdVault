@@ -73,7 +73,7 @@ export function RecoveryScreen() {
 					</div>
 
 					<div className="form-group">
-						<label htmlFor="new-password">New Master Password</label>
+						<label htmlFor="new-password">New Master password</label>
 						<input
 							id="new-password"
 							type="password"

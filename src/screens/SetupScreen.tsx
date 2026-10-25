@@ -49,7 +49,7 @@ export function SetupScreen() {
 
 				<form onSubmit={handleSubmit}>
 					<div className="form-group">
-						<label htmlFor="password">Master Password</label>
+						<label htmlFor="password">Master password</label>
 						<input
 							id="password"
 							type="password"

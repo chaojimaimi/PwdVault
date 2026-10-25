@@ -72,7 +72,9 @@ class PopupApp {
 			) {
 				this.state.theme = "dark";
 			}
-		} catch {}
+		} catch {
+			// localStorage unavailable — fall back to the light default.
+		}
 		this.applyTheme();
 	}
 
@@ -80,7 +82,9 @@ class PopupApp {
 		this.state.theme = theme;
 		try {
 			localStorage.setItem("pwdvault-theme", theme);
-		} catch {}
+		} catch {
+			// Persisting the theme is best-effort; the in-memory value still applies.
+		}
 		this.applyTheme();
 	}
 
@@ -518,7 +522,7 @@ class PopupApp {
         ${this.state.error ? `<div class="error-message">${this.escapeHtml(this.state.error)}</div>` : ""}
         <form id="unlock-form">
           <div class="form-group">
-            <label for="password">Master Password</label>
+            <label for="password">Master password</label>
             <input type="password" id="password" class="form-input" placeholder="Enter password" autofocus />
           </div>
           <button type="submit" class="btn btn-primary">Unlock Vault</button>
@@ -1465,7 +1469,7 @@ class PopupApp {
 					case "go-to-url":
 						await this.goToUrl(btn.dataset.url);
 						break;
-					case "autofill":
+					case "autofill": {
 						const entry = this.state.entries.find(
 							(e) => e.id === btn.dataset.id,
 						);
@@ -1473,7 +1477,8 @@ class PopupApp {
 							await this.autofill(entry);
 						}
 						break;
-					case "copy-both":
+					}
+					case "copy-both": {
 						const details = await this.getEntryDetails(btn.dataset.id);
 						// SF-P1: same silent no-op as copy-password — surface the
 						// failure (empty string counts as failed too).
@@ -1487,6 +1492,7 @@ class PopupApp {
 							true,
 						);
 						break;
+					}
 				}
 			};
 		});

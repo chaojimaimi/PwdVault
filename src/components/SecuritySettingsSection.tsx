@@ -247,7 +247,7 @@ export function SecuritySettingsSection() {
 				<h3 className="settings-section-title">Security</h3>
 
 				{/* --- Change master password --- */}
-				<h4 className="settings-subsection-title">Change Master Password</h4>
+				<h4 className="settings-subsection-title">Change Master password</h4>
 				<div className="security-inline-form">
 					<label htmlFor="security-current-password">Current password</label>
 					<input

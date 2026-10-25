@@ -39,7 +39,7 @@ Professional security aesthetic with navy primary and teal accent.
 | `--color-input` | `#EDEEF2` | Input backgrounds |
 | `--color-text` | `#0F172A` | Primary text |
 | `--color-text-secondary` | `#475569` | Secondary text |
-| `--color-text-muted` | `#94A3B8` | Muted text, placeholders |
+| `--color-text-muted` | `#5B6B80` | Muted text, placeholders |
 | `--color-border` | `rgba(0, 0, 0, 0.06)` | Subtle borders |
 | `--color-border-light` | `rgba(0, 0, 0, 0.10)` | Emphasis borders |
 | `--color-success` | `#059669` | Success states |
@@ -66,7 +66,7 @@ Modern deep dark with teal primary and lighter accents.
 | `--color-input` | `#16161E` | Input backgrounds |
 | `--color-text` | `#EDEDEF` | Primary text |
 | `--color-text-secondary` | `#8A8F98` | Secondary text |
-| `--color-text-muted` | `#5C6370` | Muted text |
+| `--color-text-muted` | `#8A93A3` | Muted text |
 | `--color-border` | `rgba(255, 255, 255, 0.08)` | Subtle borders |
 | `--color-border-light` | `rgba(255, 255, 255, 0.12)` | Emphasis borders |
 | `--color-success` | `#34D399` | Success states |

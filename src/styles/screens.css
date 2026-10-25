@@ -132,6 +132,8 @@
   font-family: var(--font-mono);
   font-size: var(--text-h2);
   text-align: center;
+  /* One click selects the whole generated password (v1.3.2). */
+  user-select: all;
 }
 
 /* --- TOTP (Phase 2) --- */

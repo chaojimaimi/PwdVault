@@ -69,7 +69,8 @@
   color: var(--color-text);
 }
 
-.btn-secondary:hover {
+/* :not(:disabled) keeps the disabled affordance stable on hover (v1.3.2). */
+.btn-secondary:hover:not(:disabled) {
   background: var(--color-border-light);
 }
 
@@ -78,7 +79,7 @@
   color: var(--color-on-danger);
 }
 
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled) {
   background: var(--color-danger-hover);
 }
 
@@ -91,7 +92,7 @@
   color: var(--color-text-secondary);
 }
 
-.btn-icon:hover {
+.btn-icon:hover:not(:disabled) {
   color: var(--color-text);
   background: var(--color-border);
 }
@@ -294,6 +295,7 @@
   max-width: 420px;
   max-height: 90vh;
   overflow-y: auto;
+  box-shadow: var(--shadow-card);
 }
 
 .modal-header {
@@ -329,6 +331,7 @@
   max-height: 90vh;
   overflow-y: auto;
   border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card);
 }
 
 .confirm-modal-header {
@@ -516,25 +519,28 @@
   color: var(--color-on-primary);
 }
 
+/* Toasts animate inside the already-centered #toast-container, so only the
+   Y axis moves — the old translateX(-50%) here shifted each toast half its
+   own width to the left during the animation (v1.3.2 fix). */
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(1rem);
+    transform: translateY(1rem);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
   }
 }
 
 @keyframes fadeOut {
   from {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
   }
   to {
     opacity: 0;
-    transform: translateX(-50%) translateY(1rem);
+    transform: translateY(1rem);
   }
 }
 
@@ -649,11 +655,14 @@
   height: 100%;
 }
 
-/* === 浅色主题 V4-Light === */
+/* === 浅色主题 V4-Light ===
+   v1.3.2: colors reference the theme tokens again (the hardcoded hexes
+   desynced from themes.css); the rgba glow/shadow tints stay literal since
+   tokens cannot express alpha-wrapped primary colors. */
 :root[data-theme="light"] .pairing-toast,
 :root:not([data-theme]) .pairing-toast {
-  background: #FFFFFF;
-  color: #0F172A;
+  background: var(--color-surface);
+  color: var(--color-text);
   box-shadow: 0 12px 32px rgba(30, 58, 95, 0.12), 0 0 0 1px rgba(30, 58, 95, 0.12);
 }
 
@@ -667,17 +676,17 @@
 :root[data-theme="light"] .pairing-toast-icon,
 :root:not([data-theme]) .pairing-toast-icon {
   background: rgba(30, 58, 95, 0.10);
-  color: #1E3A5F;
+  color: var(--color-primary);
 }
 
 :root[data-theme="light"] .pairing-toast-title,
 :root:not([data-theme]) .pairing-toast-title {
-  color: #0F172A;
+  color: var(--color-text);
 }
 
 :root[data-theme="light"] .pairing-toast-close,
 :root:not([data-theme]) .pairing-toast-close {
-  color: #94A3B8;
+  color: var(--color-text-muted);
 }
 
 :root[data-theme="light"] .pairing-toast-close:hover,
@@ -685,18 +694,18 @@
 :root[data-theme="light"] .pairing-toast-close:focus-visible,
 :root:not([data-theme]) .pairing-toast-close:focus-visible {
   background: rgba(30, 58, 95, 0.08);
-  color: #0F172A;
+  color: var(--color-text);
   outline: none;
 }
 
 :root[data-theme="light"] .pairing-toast-label,
 :root:not([data-theme]) .pairing-toast-label {
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 :root[data-theme="light"] .pairing-toast-code,
 :root:not([data-theme]) .pairing-toast-code {
-  color: #1E3A5F;
+  color: var(--color-primary);
   /* 浅底发光需更柔和，避免过曝 */
   text-shadow: 0 0 12px rgba(30, 58, 95, 0.25), 0 0 24px rgba(30, 58, 95, 0.12);
 }
@@ -708,13 +717,13 @@
 
 :root[data-theme="light"] .pairing-toast-progress-bar,
 :root:not([data-theme]) .pairing-toast-progress-bar {
-  background: linear-gradient(90deg, #1E3A5F, #0D9488);
+  background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
 }
 
 /* === 深色主题 V4-Dark === */
 :root[data-theme="dark"] .pairing-toast {
-  background: #0A0A0C;
-  color: #EDEDEF;
+  background: var(--color-surface);
+  color: var(--color-text);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(20, 184, 166, 0.25);
 }
 
@@ -726,30 +735,30 @@
 
 :root[data-theme="dark"] .pairing-toast-icon {
   background: rgba(20, 184, 166, 0.15);
-  color: #14B8A6;
+  color: var(--color-primary);
 }
 
 :root[data-theme="dark"] .pairing-toast-title {
-  color: #EDEDEF;
+  color: var(--color-text);
 }
 
 :root[data-theme="dark"] .pairing-toast-close {
-  color: #5C6370;
+  color: var(--color-text-muted);
 }
 
 :root[data-theme="dark"] .pairing-toast-close:hover,
 :root[data-theme="dark"] .pairing-toast-close:focus-visible {
   background: rgba(255, 255, 255, 0.08);
-  color: #EDEDEF;
+  color: var(--color-text);
   outline: none;
 }
 
 :root[data-theme="dark"] .pairing-toast-label {
-  color: #8A8F98;
+  color: var(--color-text-secondary);
 }
 
 :root[data-theme="dark"] .pairing-toast-code {
-  color: #14B8A6;
+  color: var(--color-primary);
   /* 深底发光可更强，霓虹感显著 */
   text-shadow: 0 0 20px rgba(20, 184, 166, 0.5), 0 0 40px rgba(20, 184, 166, 0.3);
 }
@@ -759,7 +768,7 @@
 }
 
 :root[data-theme="dark"] .pairing-toast-progress-bar {
-  background: linear-gradient(90deg, #14B8A6, #5EEAD4);
+  background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
 }
 
 /* --- Strength meter --- */
@@ -810,11 +819,13 @@
   color: var(--color-text-secondary);
 }
 
+/* The LABELS use the text-grade tokens (v1.3.2): at 12px the plain
+   warning/accent/success fill colors miss AA contrast on both themes. */
 .strength-label.strength-very-weak { color: var(--color-danger); }
-.strength-label.strength-weak { color: var(--color-warning); }
-.strength-label.strength-fair { color: var(--color-accent); }
+.strength-label.strength-weak { color: var(--color-warning-text); }
+.strength-label.strength-fair { color: var(--color-accent-text); }
 .strength-label.strength-strong,
-.strength-label.strength-very-strong { color: var(--color-success); }
+.strength-label.strength-very-strong { color: var(--color-success-text); }
 
 /* --- Empty state --- */
 

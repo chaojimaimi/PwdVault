@@ -23,7 +23,6 @@
     {
       "matches": ["<all_urls>"],
       "js": ["src/content.js"],
-      "css": ["src/content.css"],
       "run_at": "document_idle"
     }
   ],

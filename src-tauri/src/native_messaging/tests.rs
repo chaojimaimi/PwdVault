@@ -105,6 +105,12 @@ fn test_handshake_reports_protocol_and_capabilities() {
         constants::NATIVE_PROTOCOL_VERSION
     );
     assert!(result["capabilities"].as_array().unwrap().len() >= 3);
+    // v1.3.2: the application version left the handshake (zero consumers; the
+    // endpoint is unauthenticated). A return of app_version is a regression.
+    assert!(
+        result.get("app_version").is_none(),
+        "handshake must not leak the app version"
+    );
 }
 
 #[test]

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { totpCode } from "../api/vault";
 import type { TotpCodeResponse } from "../types";
-import { isVaultError } from "../utils/errorMessage";
 import { copyWithTimeout } from "../utils/clipboard";
 import { showToast } from "../utils/toast";
 import { CopyIcon } from "./Icons";
@@ -10,14 +9,16 @@ interface TotpCodeProps {
 	entryId: string;
 }
 
-/** Permanent rejection: the entry has no TOTP secret at all. */
+/**
+ * Permanent rejection: the entry has no TOTP secret at all.
+ *
+ * v1.3.2: VaultError serializes to its public message STRING over both IPC
+ * and HTTP (`"CODE: message"` shape — public_message of InvalidInput), so the
+ * old enum-shape probe (`{ InvalidInput: { code } }`) no longer matches what
+ * the backend sends. Match on the code prefix instead.
+ */
 function isTotpNotConfigured(error: unknown): boolean {
-	return (
-		isVaultError(error) &&
-		typeof error === "object" &&
-		"InvalidInput" in error &&
-		error.InvalidInput.code === "TOTP_NOT_CONFIGURED"
-	);
+	return typeof error === "string" && error.startsWith("TOTP_NOT_CONFIGURED");
 }
 
 /** Retry delay (in countdown ticks) after a transient fetch failure. */

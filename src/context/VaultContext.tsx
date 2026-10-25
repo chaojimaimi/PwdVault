@@ -49,6 +49,9 @@ type VaultAction =
 			type: "SET_GROUPS_RESOURCE";
 			payload: { status: ResourceStatus; error?: string | null };
 	  }
+	/** Selection reset for a deleted group lives in the reducer (v1.3.2) so
+	 * `deleteGroup` no longer closes over `state` — see the actions memo. */
+	| { type: "DELETE_GROUP"; payload: string }
 	| { type: "RESET" };
 
 const initialVaultState: VaultState = {
@@ -87,6 +90,12 @@ function vaultReducer(state: VaultState, action: VaultAction): VaultState {
 				groupsStatus: action.payload.status,
 				groupsError: action.payload.error ?? null,
 			};
+		case "DELETE_GROUP":
+			// Sunk here from the deleteGroup action: dropping the selected group
+			// clears the filter, keeping any other selection intact.
+			return state.selectedGroupId === action.payload
+				? { ...state, selectedGroupId: null }
+				: state;
 		case "RESET":
 			return { ...initialVaultState };
 		default:
@@ -211,13 +220,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 			deleteGroup: async (id: string) => {
 				try {
 					await api.removeGroup(id);
+					// Selection clearing is decided inside the reducer (DELETE_GROUP)
+					// — this action must not close over `state`, otherwise `actions`
+					// would need state-dependent memo deps and a fresh identity per
+					// group switch (the H4 churn the latestRef workarounds fought).
+					dispatch({ type: "DELETE_GROUP", payload: id });
 					await actions.loadGroups();
 					await actions.loadEntries();
-					dispatch({
-						type: "SET_SELECTED_GROUP",
-						payload:
-							state.selectedGroupId === id ? null : state.selectedGroupId,
-					});
 				} catch (error) {
 					throw error;
 				}
@@ -280,7 +289,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 				return result;
 			},
 		}),
-		[dispatch, state.selectedGroupId],
+		// Stable for the provider's lifetime: only dispatch lives here. Every
+		// state read happens inside the reducer (see DELETE_GROUP) so consumers
+		// can put `actions` in effect deps without re-run churn.
+		[dispatch],
 	);
 
 	const value = useMemo(

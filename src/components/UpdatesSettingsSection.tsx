@@ -72,7 +72,9 @@ export function UpdatesSettingsSection({
 
 	const manualCheck = state.manualCheck;
 	// Mirrors the checkForUpdates guards: no re-check while one is in flight
-	// or while an install is downloading / waiting for relaunch.
+	// or while an install is downloading / waiting for relaunch. A 'failed'
+	// install deliberately does NOT disable the button — re-checking is a
+	// legitimate recovery path after a failed download (v1.3.2).
 	const updateCheckDisabled =
 		manualCheck.phase === "checking" ||
 		state.updatePhase === "downloading" ||
@@ -107,6 +109,12 @@ export function UpdatesSettingsSection({
 			<p className="update-check-status" aria-live="polite">
 				{updateCheckStatus}
 			</p>
+			{state.updatePhase === "failed" && (
+				<p className="update-check-status" role="alert">
+					The last update download failed — use "Retry update" in the banner
+					above, or "Check for updates" here to start over.
+				</p>
+			)}
 		</div>
 	);
 }

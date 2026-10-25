@@ -49,10 +49,9 @@ beforeEach(() => {
 	vi.clearAllMocks();
 	updateEntry.mockResolvedValue({});
 	// Entry has no TOTP configured: the backend answers TOTP_NOT_CONFIGURED
-	// and the live-code view hides itself.
-	totpCode.mockRejectedValue({
-		InvalidInput: { code: "TOTP_NOT_CONFIGURED", message: "no secret" },
-	});
+	// and the live-code view hides itself. v1.3.2: VaultError reaches the UI
+	// as its public-message string ("CODE: message").
+	totpCode.mockRejectedValue("TOTP_NOT_CONFIGURED: no secret");
 });
 
 async function saveAndCapturePatch() {

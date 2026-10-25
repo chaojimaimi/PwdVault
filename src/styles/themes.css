@@ -57,7 +57,8 @@
   --color-input: #EDEEF2;
   --color-text: #0F172A;
   --color-text-secondary: #475569;
-  --color-text-muted: #64748B;
+  /* v1.3.2: darkened from #64748B — small muted text must meet AA (4.5:1). */
+  --color-text-muted: #5B6B80;
   --color-border: rgba(0, 0, 0, 0.06);
   --color-border-light: rgba(0, 0, 0, 0.10);
 
@@ -68,6 +69,13 @@
   --color-danger-hover: #B91C1C;
   --color-danger-dim: rgba(220, 38, 38, 0.07);
   --color-warning: #D97706;
+
+  /* v1.3.2: text-grade variants for small type on surface backgrounds —
+     the base success/accent/warning colors only reach AA as large/bold
+     fills, not at the label sizes they are reused at. */
+  --color-warning-text: #B45309;
+  --color-accent-text: #0F766E;
+  --color-success-text: #047857;
 
   --shadow-overlay: rgba(0, 0, 0, 0.3);
 }
@@ -99,6 +107,12 @@
   --color-danger-hover: #EF4444;
   --color-danger-dim: rgba(248, 113, 113, 0.10);
   --color-warning: #FBBF24;
+
+  /* Dark text-grade variants: the existing bright fill colors are already
+     light enough for AA on the dark surface, so they double as text colors. */
+  --color-warning-text: #FBBF24;
+  --color-accent-text: #5EEAD4;
+  --color-success-text: #34D399;
 
   --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.04);
   --shadow-toast: 0 4px 16px rgba(0, 0, 0, 0.3);

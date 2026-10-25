@@ -31,7 +31,7 @@ describe("RecoveryScreen", () => {
 		fireEvent.change(screen.getByLabelText("Recovery Key"), {
 			target: { value: "  key-abc-123  " },
 		});
-		fireEvent.change(screen.getByLabelText("New Master Password"), {
+		fireEvent.change(screen.getByLabelText("New Master password"), {
 			target: { value: "new master password" },
 		});
 		fireEvent.change(screen.getByLabelText("Confirm New Password"), {
@@ -50,7 +50,7 @@ describe("RecoveryScreen", () => {
 		fireEvent.change(screen.getByLabelText("Recovery Key"), {
 			target: { value: "key-abc-123" },
 		});
-		fireEvent.change(screen.getByLabelText("New Master Password"), {
+		fireEvent.change(screen.getByLabelText("New Master password"), {
 			target: { value: "password-one" },
 		});
 		fireEvent.change(screen.getByLabelText("Confirm New Password"), {

@@ -52,7 +52,15 @@ export function TagsEditor({ value, onChange }: TagsEditorProps) {
 					className="form-input"
 					value={tagInput}
 					onChange={(e) => setTagInput(e.target.value)}
-					onKeyDown={(e) => e.key === "Enter" && addTag()}
+					onKeyDown={(e) => {
+						// preventDefault: this input lives inside the entry form, so
+						// an unprevented Enter would add the tag AND run the form's
+						// implicit submission (saving the entry) in one keystroke.
+						if (e.key === "Enter") {
+							e.preventDefault();
+							addTag();
+						}
+					}}
 					placeholder="Add tag..."
 				/>
 				<button

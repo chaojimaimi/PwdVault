@@ -25,14 +25,20 @@ export function UpdateNotification({ version, phase, progress, onUpdate, onRelau
           <polyline points="7 10 12 15 17 10" />
           <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
-        <span className="update-text">PwdVault {version} is available</span>
-        {phase === 'available' && (
-          <button className="btn btn-sm btn-primary" onClick={onUpdate}>Update now</button>
+        <span className="update-text">
+          {phase === 'failed'
+            ? 'PwdVault update download failed — check your connection'
+            : `PwdVault ${version} is available`}
+        </span>
+        {(phase === 'available' || phase === 'failed') && (
+          <button className="btn btn-sm btn-primary" onClick={onUpdate}>
+            {phase === 'failed' ? 'Retry update' : 'Update now'}
+          </button>
         )}
         {phase === 'ready' && (
           <button className="btn btn-sm btn-primary" onClick={onRelaunch}>Relaunch</button>
         )}
-        {phase === 'available' && (
+        {(phase === 'available' || phase === 'failed') && (
           <button className="btn btn-sm btn-link" onClick={onDismiss}>Dismiss</button>
         )}
       </div>

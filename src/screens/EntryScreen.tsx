@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useAuth, useSettings, useVault } from "../context/AppContext";
 import { generatePassword } from "../api/vault";
 import { copyWithTimeout } from "../utils/clipboard";
+import { errorMessage } from "../utils/errorMessage";
 import { showToast } from "../utils/toast";
 import { BackHeader } from "../components/BackHeader";
 import { StrengthMeter } from "../components/StrengthMeter";
@@ -343,8 +344,7 @@ export function EntryScreen() {
 			setShowConfirmation(false);
 			leaveEntry();
 		} catch (e: unknown) {
-			const msg = e instanceof Error ? e.message : "";
-			setError("Failed to save entry" + (msg ? ": " + msg : ""));
+			setError(errorMessage(e, "Failed to save entry"));
 		} finally {
 			setIsSavingConfirmed(false);
 		}
@@ -445,7 +445,19 @@ export function EntryScreen() {
 				headerClass="entry-header"
 			/>
 
-			<div className="entry-content screen-scroll-region">
+			{/* Form semantics (v1.3.2): the content area is a form so Enter in a
+			    text field submits the entry. The Save button lives OUTSIDE the
+			    form (in .entry-actions) and is associated via the form attribute —
+			    a type="submit" there would not reach this form. onSubmit always
+			    preventDefaults: the SPA owns navigation. */}
+			<form
+				id="pwdvault-entry-form"
+				className="entry-content screen-scroll-region"
+				onSubmit={(e) => {
+					e.preventDefault();
+					void handleSave();
+				}}
+			>
 				{error && (
 					<div className="error-message" id="entry-error" role="alert">
 						{error}
@@ -597,11 +609,15 @@ export function EntryScreen() {
 						onChange={(tags) => setFormData({ ...formData, tags })}
 					/>
 				</div>
-			</div>
+			</form>
 
 			<div className="entry-actions">
 				{isEditing && (
+					// Explicit type="button": without it this button would default
+					// to submit semantics (harmless here since it sits outside the
+					// form, but explicit beats implicit inside a form screen).
 					<button
+						type="button"
 						className="btn btn-danger"
 						onClick={handleDelete}
 						disabled={isLoading}
@@ -609,9 +625,18 @@ export function EntryScreen() {
 						Delete
 					</button>
 				)}
+				{/* The form's submit button, associated across the DOM via form=
+				    (it sits outside .entry-content). type=submit + form= makes it
+				    the form's DEFAULT button, which is what lets Enter in any text
+				    field run implicit submission — a type=button here would leave
+				    the form with no default button and Enter would do nothing
+				    (multi-field implicit-submission block). No onClick: the submit
+				    event is the single save path, so a click cannot double-fire.
+				    Re-entry while saving is blocked by disabled + handleSave. */}
 				<button
+					type="submit"
+					form="pwdvault-entry-form"
 					className="btn btn-primary"
-					onClick={handleSave}
 					disabled={isLoading}
 				>
 					{isLoading ? "Saving..." : "Save"}

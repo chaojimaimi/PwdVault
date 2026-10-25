@@ -4,13 +4,18 @@
 //! errors, and application-level failures (locked vault, rate limit, etc.).
 //! Adapters (Tauri IPC, Native Messaging) receive this type and serialize it
 //! for the frontend/extension.
+//!
+//! Serialization is hand-written (v1.3.2): every variant serializes to its
+//! [`VaultError::public_message`] string, so both IPC and HTTP present the
+//! SAME sanitized shape — the derived enum shape used to leak internal detail
+//! (paths, serialization errors) through the Tauri reject value.
 
 use pwdvault_domain::DomainError;
 use pwdvault_infrastructure::crypto::{EncryptionError, KdfError, VerificationError};
 use pwdvault_infrastructure::database::DatabaseError;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub enum VaultError {
     VaultLocked,
     VaultAlreadyExists,
@@ -56,6 +61,17 @@ pub enum VaultError {
     /// stored digest does not match the database contents under the keys the
     /// caller held. The transaction rolled back; the vault is unchanged.
     IntegrityCheckFailed,
+}
+
+impl Serialize for VaultError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Single shape for every transport: the sanitized public message (the
+        // same string the HTTP bridge sends). Raw payloads never serialize.
+        serializer.serialize_str(&self.public_message())
+    }
 }
 
 impl From<DomainError> for VaultError {
@@ -219,5 +235,42 @@ impl VaultError {
                     .to_string()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// v1.3.2: the IPC serialization of a VaultError is its public message —
+    /// internal payloads (paths, serialization errors) must never cross the
+    /// boundary the way the old derived enum shape let them.
+    #[test]
+    fn ipc_serialization_exposes_only_the_public_message() {
+        let err = VaultError::InternalError("C:\\secret\\path".to_string());
+        let json = serde_json::to_string(&err).expect("serialize VaultError");
+        assert!(
+            !json.contains("secret"),
+            "raw payload leaked through serialization: {json}"
+        );
+        assert_eq!(json, "\"Internal error\"");
+
+        // Same single shape for every variant family, matching the HTTP path.
+        let input = VaultError::InvalidInput {
+            code: "TOTP_NOT_CONFIGURED".to_string(),
+            message: "no secret".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_string(&input).expect("serialize InvalidInput"),
+            "\"TOTP_NOT_CONFIGURED: no secret\""
+        );
+
+        let rate = VaultError::RateLimited {
+            retry_after_secs: 42,
+        };
+        assert_eq!(
+            serde_json::to_string(&rate).expect("serialize RateLimited"),
+            "\"Too many attempts. Retry in 42s\""
+        );
     }
 }

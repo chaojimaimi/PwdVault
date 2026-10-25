@@ -8,7 +8,10 @@ export default tseslint.config(
 	{
 		ignores: [
 			"dist/**",
-			"extensions/**",
+			// Only the firefox copy is excluded: it symlinks the shared chrome
+			// sources, so linting both would double-report every finding. The
+			// chrome sources ARE linted (v1.3.2).
+			"extensions/firefox/**",
 			"releases/**",
 			"src-tauri/**",
 			"scripts/**",
@@ -39,6 +42,21 @@ export default tseslint.config(
 			],
 			"@typescript-eslint/no-explicit-any": "warn",
 			"no-useless-catch": "off",
+		},
+	},
+	{
+		// Extension sources (MV3 service worker / content / popup scripts).
+		// chrome/browser are the extension API namespaces; window/document are
+		// already covered by globals.browser above but are pinned here so this
+		// block stays self-describing.
+		files: ["extensions/chrome/src/**/*.js"],
+		languageOptions: {
+			globals: {
+				chrome: "readonly",
+				browser: "readonly",
+				window: "readonly",
+				document: "readonly",
+			},
 		},
 	},
 );

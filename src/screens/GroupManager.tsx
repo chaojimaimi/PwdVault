@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth, useVault } from "../context/AppContext";
 import { BackHeader } from "../components/BackHeader";
 import {
@@ -24,18 +24,16 @@ export default function GroupManager() {
 	} | null>(null);
 	const [isDeleting, setIsDeleting] = useState(false);
 
-	// H4: latestRef pattern — `actions` changes identity on group switches
-	// (VaultContext useMemo), and this mount-only load must not re-run then.
-	const actionsRef = useRef(actions);
-	actionsRef.current = actions;
-
+	// Mount-only load. v1.3.2: VaultContext memoizes `actions` on [dispatch],
+	// so the identity is stable and the old latestRef workaround is gone —
+	// listing `actions` in the deps cannot re-trigger the fetch.
 	useEffect(() => {
 		// Same guard as GroupSelector's mount load: a failed fetch must not
 		// surface as an unhandled rejection — show it in the manager banner.
-		actionsRef.current.loadGroups().catch(() => {
+		actions.loadGroups().catch(() => {
 			setError("Failed to load groups");
 		});
-	}, []);
+	}, [actions]);
 
 	const handleCreate = async () => {
 		const name = newGroupName.trim();

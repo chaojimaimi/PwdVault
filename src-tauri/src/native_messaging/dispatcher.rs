@@ -38,9 +38,12 @@ pub(super) fn execute_command(
     // pair_confirm only manipulate in-memory state and don't need a lease.
 
     match req.command.as_str() {
+        // Protocol negotiation only: version/capabilities. The application
+        // version is deliberately NOT reported (v1.3.2) — it zero-consumed
+        // across extensions/ and only broadened the fingerprint an attacker
+        // can collect from the unauthenticated handshake.
         "handshake" => Ok(serde_json::json!({
             "protocol_version": constants::NATIVE_PROTOCOL_VERSION,
-            "app_version": env!("CARGO_PKG_VERSION"),
             "capabilities": [
                 "caller_bound_pairing",
                 "entry_secret_split",

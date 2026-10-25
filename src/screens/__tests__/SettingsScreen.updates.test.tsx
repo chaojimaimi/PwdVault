@@ -30,7 +30,7 @@ const settingsHolder = {
 			check_updates: true,
 		},
 		update: null as { version: string } | null,
-		updatePhase: "available" as "available" | "downloading" | "ready",
+		updatePhase: "available" as "available" | "downloading" | "ready" | "failed",
 		downloadProgress: 0,
 		manualCheck: { phase: "idle", checkedAt: null } as ManualCheckState,
 		status: "success" as string,
@@ -142,6 +142,22 @@ describe("SettingsScreen manual update check", () => {
 		settingsHolder.state.updatePhase = "ready";
 		rerender(<SettingsScreen />);
 		expect(screen.getByRole("button", { name: "Check for updates" })).toBeDisabled();
+	});
+
+	it("shows the failed-install error line while keeping the check button enabled", async () => {
+		// v1.3.2: a failed download is visible and re-checking stays a valid
+		// recovery path (the banner's "Retry update" is the other route).
+		const { rerender } = render(<SettingsScreen />);
+		await screen.findByText("Current version: 1.2.1");
+
+		settingsHolder.state.updatePhase = "failed";
+		rerender(<SettingsScreen />);
+		expect(
+			screen.getByText(/The last update download failed/),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Check for updates" }),
+		).toBeEnabled();
 	});
 
 	it("mounts the update banner above the content when an update is present", async () => {

@@ -44,7 +44,15 @@ export default function GroupSelector({ value, onChange }: Props) {
             className="form-input"
             value={newGroupName}
             onChange={(e) => setNewGroupName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+            onKeyDown={(e) => {
+              // preventDefault: this input is rendered inside the entry form,
+              // so an unprevented Enter would create the group AND run the
+              // form's implicit submission in one keystroke.
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void handleCreate();
+              }
+            }}
             placeholder="New group name"
             ref={(el) => {
               // jsx-a11y/no-autofocus: focus at commit when the inline input

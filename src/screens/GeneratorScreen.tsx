@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth, useSettings } from "../context/AppContext";
 import { generatePassword } from "../api/vault";
 import { copyWithTimeout } from "../utils/clipboard";
+import { errorMessage } from "../utils/errorMessage";
 import { showToast } from "../utils/toast";
 import { BackHeader } from "../components/BackHeader";
 import { StrengthMeter } from "../components/StrengthMeter";
@@ -43,9 +44,7 @@ export function GeneratorScreen() {
 			setPassword(pwd);
 			setCopied(false);
 		} catch (error) {
-			showToast(
-				error instanceof Error ? error.message : "Failed to generate password",
-			);
+			showToast(errorMessage(error, "Failed to generate password"));
 		} finally {
 			setPending(false);
 		}

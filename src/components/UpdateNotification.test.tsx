@@ -47,4 +47,21 @@ describe('UpdateNotification (updater banner)', () => {
     screen.getByRole('button', { name: 'Relaunch' }).click();
     expect(handlers.onRelaunch).toHaveBeenCalledOnce();
   });
+
+  it('shows the failure copy with a retry (and dismissal) after a failed download', () => {
+    // v1.3.2: the failed phase must not masquerade as a fresh offer.
+    const handlers = setup('failed');
+    expect(
+      screen.getByText('PwdVault update download failed — check your connection'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/is available/)).not.toBeInTheDocument();
+
+    const retry = screen.getByRole('button', { name: 'Retry update' });
+    retry.click();
+    expect(handlers.onUpdate).toHaveBeenCalledOnce();
+
+    screen.getByRole('button', { name: 'Dismiss' }).click();
+    expect(handlers.onDismiss).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
 });

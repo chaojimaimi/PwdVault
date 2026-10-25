@@ -133,19 +133,22 @@ function sendNativeMessageP(message) {
 		const timer = setTimeout(() => {
 			if (!settled) {
 				settled = true;
-				chrome.runtime.lastError; // clear any pending error
 				reject(new Error("Native messaging host timed out"));
 			}
 		}, NM_TIMEOUT_MS);
 
 		try {
 			chrome.runtime.sendNativeMessage(NATIVE_HOST, message, (response) => {
+				// Read lastError even on the timeout-abandoned path: leaving it
+				// unread makes Chrome log an "Unchecked runtime.lastError"
+				// warning for the abandoned callback.
+				const asyncError = chrome.runtime.lastError;
 				if (settled) return;
 				settled = true;
 				clearTimeout(timer);
 
-				if (chrome.runtime.lastError) {
-					reject(new Error(chrome.runtime.lastError.message));
+				if (asyncError) {
+					reject(new Error(asyncError.message));
 					return;
 				}
 				resolve(response);
@@ -330,7 +333,7 @@ async function sendToApp(command, params = {}) {
 			msg.includes("connect")
 		) {
 			connectionStatus = "disconnected";
-			throw new Error(friendlyConnectionError(error));
+			throw new Error(friendlyConnectionError(error), { cause: error });
 		}
 		throw error;
 	}
@@ -672,14 +675,16 @@ async function handleMessage(message, sender) {
 	const authorization = authorizeMessage(message, sender, chrome.runtime.id);
 
 	switch (message.type) {
-		case "GET_STATUS":
-			const status = await checkConnection();
-			return {
-				status,
-				initialized: await isVaultInitialized().catch(() => false),
-				unlocked: await isVaultUnlocked().catch(() => false),
-				error: lastConnectionError,
-			};
+		case "GET_STATUS": {
+			// The three probes are independent — run them concurrently instead
+			// of paying three serial native-messaging round-trips.
+			const [status, initialized, unlocked] = await Promise.all([
+				checkConnection(),
+				isVaultInitialized().catch(() => false),
+				isVaultUnlocked().catch(() => false),
+			]);
+			return { status, initialized, unlocked, error: lastConnectionError };
+		}
 
 		case "UNLOCK_VAULT":
 			return unlockVault(message.password);
@@ -714,7 +719,7 @@ async function handleMessage(message, sender) {
 		case "GET_SETTINGS":
 			return getSettings();
 
-		case "AUTOFILL":
+		case "AUTOFILL": {
 			// Dead code (verified 2026-09): every AUTOFILL sender targets the
 			// tab directly via chrome.tabs.sendMessage (popup.js autofill, the
 			// context-menu handler and the keyboard command below) — nothing
@@ -734,14 +739,16 @@ async function handleMessage(message, sender) {
 				});
 			}
 			return { success: true };
+		}
 
-		case "START_PAIRING":
+		case "START_PAIRING": {
 			const pairResult = await startPairing();
 			return {
 				result: pairResult,
 				status: connectionStatus,
 				error: lastConnectionError,
 			};
+		}
 
 		case "PAIR_CONFIRM": {
 			const ok = await pairConfirm(message.code);

@@ -60,10 +60,10 @@
   padding: 0.5rem 0;
 }
 
-.group-create-input:focus {
-  outline: none;
-  box-shadow: none;
-  border: none;
+/* v1.3.2: the input no longer clears its own focus outline (invisible-focus
+   regression); the bar highlights instead while the input has focus. */
+.group-create-bar:focus-within {
+  border-color: var(--color-primary);
 }
 
 .group-create-save {

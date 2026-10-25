@@ -16,7 +16,11 @@
 //! rotation (D4, keep the last 10) is impossible without it on a backend
 //! with no directory listing, and the engine tracks the file names itself.
 
+// HashMap/VecDeque/Arc/Mutex are only used by the test-only MockCloudBackend
+// below, so those imports are cfg(test) too (v1.3.2).
+#[cfg(test)]
 use std::collections::{HashMap, VecDeque};
+#[cfg(test)]
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -100,9 +104,12 @@ pub trait CloudBackend: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// MockCloudBackend — in-memory test double
+// MockCloudBackend — in-memory test double (test-only: every consumer lives
+// in a #[cfg(test)] module, so the double is compiled out of production
+// builds entirely, v1.3.2)
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 #[derive(Default)]
 struct MockInner {
     /// path → (body, etag counter)
@@ -118,11 +125,13 @@ struct MockInner {
 /// another device winning the upload race. [`MockCloudBackend::handle`]
 /// clones share the same storage so two fake devices can fight over one
 /// cloud.
+#[cfg(test)]
 #[derive(Clone, Default)]
 pub struct MockCloudBackend {
     inner: Arc<Mutex<MockInner>>,
 }
 
+#[cfg(test)]
 impl MockCloudBackend {
     pub fn new() -> Self {
         Self::default()
@@ -163,11 +172,13 @@ impl MockCloudBackend {
 }
 
 /// Insert/overwrite with a monotonically increasing ETag counter.
+#[cfg(test)]
 fn bump_etag_insert(files: &mut HashMap<String, (Vec<u8>, u64)>, path: &str, body: &[u8]) {
     let etag = files.get(path).map(|(_, e)| e + 1).unwrap_or(1);
     files.insert(path.to_string(), (body.to_vec(), etag));
 }
 
+#[cfg(test)]
 impl CloudBackend for MockCloudBackend {
     fn stat(&self, path: &str) -> Result<Option<RemoteStat>, BackendError> {
         let inner = self.inner.lock().expect("mock backend lock poisoned");

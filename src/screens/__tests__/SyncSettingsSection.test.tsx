@@ -49,12 +49,11 @@ async function renderSection() {
 	return render(<SyncSettingsSection />);
 }
 
-const NOT_CONFIGURED_ERROR = {
-	InvalidInput: {
-		code: "SYNC_BACKEND_NOT_CONFIGURED",
-		message: "Baidu Netdisk backend is not configured in this build",
-	},
-};
+// v1.3.2: VaultError reaches the UI as its public-message string
+// ("CODE: message") — the InvalidInput code prefix is what
+// isBaiduNotConfigured matches on.
+const NOT_CONFIGURED_ERROR =
+	"SYNC_BACKEND_NOT_CONFIGURED: Baidu Netdisk backend is not configured in this build";
 
 describe("SyncSettingsSection not-connected state", () => {
 	it("renders the backend choice and the WebDAV bootstrap form", async () => {
@@ -290,15 +289,16 @@ describe("SyncSettingsSection connected state", () => {
 	});
 
 	it("surfaces sync failures from the backend", async () => {
-		syncNow.mockRejectedValue({
-			InternalError: "cloud unreachable",
-		});
+		// v1.3.2: VaultError reaches the UI as its sanitized public-message
+		// string over IPC — internal detail ("cloud unreachable") never was
+		// part of that contract; the public message is what surfaces.
+		syncNow.mockRejectedValue("Internal error");
 		await renderSection();
 
 		fireEvent.click(await screen.findByRole("button", { name: "Sync Now" }));
 		await waitFor(() =>
 			expect(showToast).toHaveBeenCalledWith(
-				expect.stringContaining("cloud unreachable"),
+				expect.stringContaining("Internal error"),
 			),
 		);
 		// Backend failure: no local refresh is attempted.

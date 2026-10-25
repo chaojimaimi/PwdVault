@@ -61,6 +61,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    /* Looping spinners must stop, not just run fast (v1.3.2). */
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }

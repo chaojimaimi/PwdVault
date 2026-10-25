@@ -37,9 +37,9 @@ describe("TotpCode", () => {
 	});
 
 	it("renders nothing while the entry has no configured secret", async () => {
-		totpCode.mockRejectedValue({
-			InvalidInput: { code: "TOTP_NOT_CONFIGURED", message: "no secret" },
-		});
+		// v1.3.2: VaultError reaches the UI as its public-message string
+		// ("CODE: message") — same shape the HTTP path always had.
+		totpCode.mockRejectedValue("TOTP_NOT_CONFIGURED: no secret");
 		const { container } = render(<TotpCode entryId="entry-1" />);
 
 		await waitFor(() => expect(totpCode).toHaveBeenCalledOnce());
@@ -49,7 +49,7 @@ describe("TotpCode", () => {
 	it("retries after a transient failure instead of wedging at zero", async () => {
 		vi.useFakeTimers();
 		try {
-			totpCode.mockRejectedValueOnce({ InternalError: "backend busy" });
+			totpCode.mockRejectedValueOnce("Internal error");
 			totpCode.mockResolvedValue({ code: "654321", seconds_remaining: 12 });
 			render(<TotpCode entryId="entry-1" />);
 
@@ -74,9 +74,7 @@ describe("TotpCode", () => {
 	it("stops polling entirely on TOTP_NOT_CONFIGURED (permanent)", async () => {
 		vi.useFakeTimers();
 		try {
-			totpCode.mockRejectedValue({
-				InvalidInput: { code: "TOTP_NOT_CONFIGURED", message: "no secret" },
-			});
+			totpCode.mockRejectedValue("TOTP_NOT_CONFIGURED: no secret");
 			const { container } = render(<TotpCode entryId="entry-1" />);
 
 			await act(async () => {});
