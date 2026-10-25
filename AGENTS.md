@@ -2,10 +2,10 @@
 
 A secure, local-first password manager built with Tauri + React.
 
-**Last Updated**: 2026-10-05
+**Last Updated**: 2026-10-25
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.3.0
-**Current Version**: `v1.3.0` — bincode 1→2 serialization swap (byte-identical, golden-pinned) + audit-polish batch + trust anchor pinned + manual update check + layout fixes + 2026-10 audit remediation complete (closure fixes incl. OAuth state-echo, prerelease-aware feed gating) + v1.1.9/v1.2.0 hardening + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.3.1
+**Current Version**: `v1.3.1` — 2026-10-25 audit P1 batch (extension clipboard auto-clear redesigned onto background alarms + offscreen/execCommand with digest-verified overwrite, isTrusted gates on all extension credential triggers, .screen overflow fix, rustls 0.23.46 + zip advisory allowlist expiring 2026-12-31) on top of v1.3.0 bincode 1→2 serialization swap + audit-polish batch + trust anchor pinned + manual update check + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -201,7 +201,7 @@ PwdVault/
 | Rust infrastructure crate | 121 (+1 ignored keychain SecItem smoke, CI 跑) | (same run)                                |
 | Rust domain crate         | 4                                              | (same run)                                |
 | Rust native-host          | 23                                             | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 270 (54 files, incl. 78 extension tests)       | `pnpm test`                               |
+| Frontend (total)          | 320 (58 files, incl. extension tests, chrome+firefox double-run) | `pnpm test`            |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -315,6 +315,40 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-10-25 (v1.3.1 — audit P1 batch: clipboard clear redesign, event gating, screen overflow, rustls bump)
+
+Full pipeline over the 6-track audit's P1 findings (plan R1 → plan-reviewer
+REVISE → R2 → re-review **PASS** → ds-worker → independent code-reviewer
+REQUEST CHANGES → main-agent fixes → focused re-review **APPROVE** → gates →
+release). Notable: the cancelled first ds-worker run left a half-finished
+tree; the successor verified every inherited change against the plan before
+continuing (v1.3.0 precedent). The reviewer caught a real **P0**
+(popup.js `import.meta.env` without optional chaining = popup white screen
+in production — the extension ships as plain ESM via build.sh copy, there is
+no vite build) and a **P1** (offscreen dedupe regex didn't match Chrome's
+actual "Only a single offscreen document may be created per extension" error
+— would have permanently broken clearing on Chrome 109-115 with a failure
+toast on every copy). Shipped: clipboard auto-clear moved from the
+popup-local timer to background (alarms + storage.session arm, offscreen
+document on Chrome / hidden-textarea execCommand on Firefox, SHA-256
+digest-verified overwrite, retry-once + notify-once; +alarms/offscreen/
+clipboardRead permissions and minimum_chrome_version 109 — clipboardRead is
+a deliberate expansion, the digest check prevents clobbering newer user
+content); isTrusted gates on 4 content.js credential triggers; .screen
+flex-start + :only-child margin:auto clipping fix (Setup/Unlock/Recovery/
+loading at 500px min height); rustls 0.23.46 / rustls-webpki 0.103.16 /
+webpki-roots·certs 1.0.11 / clipboard-win 5.4.3; zip RUSTSEC-2026-0367/0368/
+0369 allowlisted (deny.toml + NEW root .cargo/audit.toml + quality.yml audit
+steps aligned to root-cwd `--file` form incl. the `-n` offline retry;
+expiry 2026-12-31 forces the tauri-plugin-updater/zip≥9 upgrade into the
+next minor — the plugin bump drags wry 0.54→0.57, patch-ineligible).
+Tests: clipboard-clear 18 + content-is-trusted 5 + sender-auth +2
+(double-run via firefox symlink). Test baseline after: 328 Rust (+1
+ignored) + 23 native-host + 320 frontend (58 files). Plan:
+fix_impl_plan_v1.3.1.md (R2.1). Manual QA T24-T28 appended (real-browser
+clipboard behavior is unmockable — T26 is the gating item, see Chromium bug
+330570363 if it fails).
 
 ### 2026-10-07 (v1.3.0 — bincode 1→2 serialization swap, byte-identical)
 
