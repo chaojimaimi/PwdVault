@@ -4,6 +4,54 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.3.2] - 2026-10-25
+
+### Security
+
+- The native-messaging handshake no longer discloses the desktop app
+  version — any local process could previously fingerprint the exact
+  build pre-authentication (the extension consumed it nowhere,
+  verified before removal).
+- Tauri IPC errors are now sanitized through the same
+  `public_message()` filter as the HTTP API: internal paths and raw
+  dependency text embedded in `DatabaseError`/`InternalError` payloads
+  no longer reach the webview. TotpCode's stop-polling check migrated
+  to the sanitized string contract (`TOTP_NOT_CONFIGURED` prefix).
+- Browser-extension injected UI (autofill bar, overlay, toast, floating
+  button) now lives in **closed shadow roots**: page scripts can no
+  longer read or manipulate it, page CSS/JS can no longer interfere
+  (styles and keyframes are scoped), and the retired v0.2 indigo
+  palette is replaced with the current navy/teal design tokens.
+
+### Fixed
+
+- VaultScreen: copy/open/retry failures show a toast with the real
+  reason instead of failing silently.
+- VaultContext: switching group tabs no longer rebuilds every action
+  identity (the two `latestRef` workarounds are gone).
+- Update download failures are now visible (banner + Settings updates
+  section, with retry) instead of silently returning to "Update now".
+- EntryScreen: Enter submits the form (Save associates via `form=`);
+  adding a tag or a group with Enter no longer double-fires a save.
+- Toast entry/exit no longer slides sideways (stray `translateX`);
+  keyboard focus is visible on entry-row actions and the group create
+  input; long titles/usernames ellipsize instead of breaking the row;
+  disabled buttons no longer show hover states; reduced-motion now
+  stops the spinner; password preview supports select-all; the pairing
+  toast reuses theme tokens.
+- Light-theme text contrast raised to WCAG AA (muted `#5B6B80`, plus
+  dedicated warning/accent/success text tokens for small labels);
+  DESIGN.md palette synced to the actual token values.
+
+### Changed
+
+- Removed dead bincode dependency declarations (serialization stays on
+  the single `crypto::codec` seam); `MockCloudBackend` is test-only.
+- ESLint now covers `extensions/chrome/src` (0 errors; 9 pre-existing
+  warnings tracked).
+- `GET_STATUS` probes run in parallel (one fewer native-messaging
+  round trip per popup open).
+
 ## [1.3.1] - 2026-10-25
 
 ### Security

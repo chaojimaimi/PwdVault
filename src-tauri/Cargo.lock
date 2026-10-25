@@ -3216,7 +3216,7 @@ dependencies = [
 
 [[package]]
 name = "pwdvault"
-version = "1.3.1"
+version = "1.3.2"
 dependencies = [
  "criterion",
  "pwdvault-application",
@@ -3242,7 +3242,7 @@ dependencies = [
 
 [[package]]
 name = "pwdvault-application"
-version = "1.3.1"
+version = "1.3.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3265,7 +3265,7 @@ dependencies = [
 
 [[package]]
 name = "pwdvault-domain"
-version = "1.3.1"
+version = "1.3.2"
 dependencies = [
  "chrono",
  "serde",
@@ -3276,7 +3276,7 @@ dependencies = [
 
 [[package]]
 name = "pwdvault-infrastructure"
-version = "1.3.1"
+version = "1.3.2"
 dependencies = [
  "aes-gcm",
  "argon2",
