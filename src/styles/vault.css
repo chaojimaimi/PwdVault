@@ -4,440 +4,440 @@
    ============================================ */
 
 .vault-container {
-  display: flex;
-  flex-direction: column;
-  height: 100dvh;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--color-bg);
+	display: flex;
+	flex-direction: column;
+	height: 100dvh;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+	background: var(--color-bg);
 }
 
 /* --- Header --- */
 
 .vault-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-md) var(--space-lg);
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
-  flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: var(--space-md) var(--space-lg);
+	background: var(--color-surface);
+	border-bottom: 1px solid var(--color-border);
+	flex: 0 0 auto;
 }
 
 .vault-header h1 {
-  font-size: var(--text-h2);
-  font-weight: 600;
+	font-size: var(--text-h2);
+	font-weight: 600;
 }
 
 .header-actions {
-  display: flex;
-  gap: var(--space-sm);
-  align-items: center;
+	display: flex;
+	gap: var(--space-sm);
+	align-items: center;
 }
 
 /* --- Search --- */
 
 .search-bar {
-  padding: var(--space-sm) var(--space-lg);
-  background: var(--color-surface);
+	padding: var(--space-sm) var(--space-lg);
+	background: var(--color-surface);
 }
 
 .search-input-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
+	position: relative;
+	display: flex;
+	align-items: center;
 }
 
 .search-icon {
-  position: absolute;
-  left: var(--space-md);
-  width: 16px;
-  height: 16px;
-  color: var(--color-text-muted);
-  pointer-events: none;
+	position: absolute;
+	left: var(--space-md);
+	width: 16px;
+	height: 16px;
+	color: var(--color-text-muted);
+	pointer-events: none;
 }
 
 .search-input {
-  width: 100%;
-  padding: 0.5rem var(--space-md) 0.5rem 2.25rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-input);
-  color: var(--color-text);
-  font-size: var(--text-body);
+	width: 100%;
+	padding: 0.5rem var(--space-md) 0.5rem 2.25rem;
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	background: var(--color-input);
+	color: var(--color-text);
+	font-size: var(--text-body);
 }
 
 .search-input::placeholder {
-  color: var(--color-text-muted);
+	color: var(--color-text-muted);
 }
 
 /* --- Group tabs --- */
 
 .group-tabs {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-lg);
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
+	padding: var(--space-sm) var(--space-lg);
+	background: var(--color-surface);
+	border-bottom: 1px solid var(--color-border);
 }
 
 .group-tabs-scroll {
-  display: flex;
-  gap: var(--space-xs);
-  overflow-x: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  flex: 1;
+	display: flex;
+	gap: var(--space-xs);
+	overflow-x: auto;
+	scrollbar-width: none;
+	-ms-overflow-style: none;
+	flex: 1;
 }
 
 .group-tabs-scroll::-webkit-scrollbar {
-  display: none;
+	display: none;
 }
 
 .group-tab {
-  flex-shrink: 0;
-  padding: var(--space-xs) var(--space-md);
-  border: 1px solid transparent;
-  border-radius: var(--radius-tag);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: var(--text-label);
-  font-family: var(--font-body);
-  cursor: pointer;
-  transition: all var(--duration-fast) ease;
-  white-space: nowrap;
+	flex-shrink: 0;
+	padding: var(--space-xs) var(--space-md);
+	border: 1px solid transparent;
+	border-radius: var(--radius-tag);
+	background: transparent;
+	color: var(--color-text-secondary);
+	font-size: var(--text-label);
+	font-family: var(--font-body);
+	cursor: pointer;
+	transition: all var(--duration-fast) ease;
+	white-space: nowrap;
 }
 
 .group-tab:hover {
-  background: var(--color-input);
-  color: var(--color-text);
-  border-color: var(--color-border-light);
+	background: var(--color-input);
+	color: var(--color-text);
+	border-color: var(--color-border-light);
 }
 
 .group-tab.active {
-  background: var(--color-primary-dim);
-  color: var(--color-primary);
-  border-color: var(--color-primary-border);
+	background: var(--color-primary-dim);
+	color: var(--color-primary);
+	border-color: var(--color-primary-border);
 }
 
 .group-manage-btn {
-  flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: all var(--duration-fast) ease;
+	flex-shrink: 0;
+	width: 40px;
+	height: 40px;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: none;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--color-text-muted);
+	cursor: pointer;
+	transition: all var(--duration-fast) ease;
 }
 
 .group-manage-btn:hover {
-  color: var(--color-text-secondary);
-  background: var(--color-input);
+	color: var(--color-text-secondary);
+	background: var(--color-input);
 }
 
 .group-manage-btn svg {
-  width: 14px;
-  height: 14px;
+	width: 14px;
+	height: 14px;
 }
 
 /* v1.4.1: pinned action cluster — a DOM sibling of the scroll region so the
    Trash tab and the group manager never scroll away, however many group tabs
    there are (v1.2.2 lesson: never let siblings starve the flex row). */
 .group-tabs-actions {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	gap: var(--space-xs);
 }
 
 .group-tabs-divider {
-  width: 1px;
-  align-self: stretch;
-  background: var(--color-border-light);
+	width: 1px;
+	align-self: stretch;
+	background: var(--color-border-light);
 }
 
 .group-tab-trash {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-xs);
 }
 
 /* TrashIcon's width/height attributes lose to the global `.icon` class (24px)
    — same suppression precedent as .group-manage-btn svg. */
 .group-tab-trash svg {
-  width: 12px;
-  height: 12px;
+	width: 12px;
+	height: 12px;
 }
 
 /* The groups-error retry row is embedded in the tabs row (v1.4.1): drop the
    standalone centered padding — .group-tabs already pads the row. */
 .group-tabs .resource-error-compact {
-  padding: 0;
-  justify-content: flex-start;
-  text-align: left;
+	padding: 0;
+	justify-content: flex-start;
+	text-align: left;
 }
 
 .group-manage-first {
-  width: auto;
-  height: auto;
-  gap: var(--space-xs);
-  padding: var(--space-xs) var(--space-md);
-  font-size: var(--text-label);
-  color: var(--color-primary);
-  font-family: var(--font-body);
-  display: flex;
-  align-items: center;
+	width: auto;
+	height: auto;
+	gap: var(--space-xs);
+	padding: var(--space-xs) var(--space-md);
+	font-size: var(--text-label);
+	color: var(--color-primary);
+	font-family: var(--font-body);
+	display: flex;
+	align-items: center;
 }
 
 .group-manage-first:hover {
-  color: var(--color-primary-hover);
+	color: var(--color-primary-hover);
 }
 
 /* --- Entry list --- */
 
 .entry-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: var(--space-sm);
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	padding: var(--space-sm);
 }
 
 .entry-item {
-  display: flex;
-  align-items: center;
-  padding: 0;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: background var(--duration-fast);
+	display: flex;
+	align-items: center;
+	padding: 0;
+	border-radius: var(--radius-md);
+	cursor: pointer;
+	transition: background var(--duration-fast);
 }
 
 .entry-main {
-  flex: 1;
-  min-width: 0;
-  min-height: 52px;
-  display: flex;
-  align-items: center;
-  padding: var(--space-md);
-  border: 0;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  font-family: inherit;
+	flex: 1;
+	min-width: 0;
+	min-height: 52px;
+	display: flex;
+	align-items: center;
+	padding: var(--space-md);
+	border: 0;
+	border-radius: var(--radius-md);
+	background: transparent;
+	color: inherit;
+	text-align: left;
+	cursor: pointer;
+	font-family: inherit;
 }
 
 .entry-item:hover,
 .entry-main:hover {
-  background: var(--color-input);
+	background: var(--color-input);
 }
 
 .entry-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-md);
-  background: var(--gradient-icon);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--color-on-primary);
-  margin-right: 11px;
-  text-transform: uppercase;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+	width: 36px;
+	height: 36px;
+	border-radius: var(--radius-md);
+	background: var(--gradient-icon);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-weight: 600;
+	font-size: 13px;
+	color: var(--color-on-primary);
+	margin-right: 11px;
+	text-transform: uppercase;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 
 .entry-info {
-  flex: 1;
-  min-width: 0;
+	flex: 1;
+	min-width: 0;
 }
 
 .entry-title {
-  display: block;
-  font-size: var(--text-body);
-  font-weight: 500;
-  margin-bottom: var(--space-xs);
-  /* Ellipsis trio (v1.3.2): long titles pushed the row actions out of the
+	display: block;
+	font-size: var(--text-body);
+	font-weight: 500;
+	margin-bottom: var(--space-xs);
+	/* Ellipsis trio (v1.3.2): long titles pushed the row actions out of the
      viewport instead of clipping. */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .entry-username {
-  display: block;
-  font-size: var(--text-micro);
-  color: var(--color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+	display: block;
+	font-size: var(--text-micro);
+	color: var(--color-text-secondary);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .entry-actions-inline {
-  display: flex;
-  gap: var(--space-xs);
-  opacity: 0;
-  transition: opacity var(--duration-fast);
+	display: flex;
+	gap: var(--space-xs);
+	opacity: 0;
+	transition: opacity var(--duration-fast);
 }
 
 .entry-item:hover .entry-actions-inline {
-  opacity: 1;
+	opacity: 1;
 }
 
 /* Keyboard users tab to the inline copy buttons without hovering the row —
    keep the actions visible while focus is inside (v1.3.2). */
 .entry-actions-inline:focus-within {
-  opacity: 1;
+	opacity: 1;
 }
 
 .btn-copy {
-  width: 40px;
-  height: 40px;
-  padding: 0.25rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
+	width: 40px;
+	height: 40px;
+	padding: 0.25rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: var(--radius-sm);
 }
 
 @media (max-width: 370px) {
-  .vault-header,
-  .search-bar,
-  .group-tabs {
-    padding-left: var(--space-md);
-    padding-right: var(--space-md);
-  }
+	.vault-header,
+	.search-bar,
+	.group-tabs {
+		padding-left: var(--space-md);
+		padding-right: var(--space-md);
+	}
 
-  .header-actions {
-    gap: 0;
-  }
+	.header-actions {
+		gap: 0;
+	}
 
-  .entry-icon {
-    width: 32px;
-    height: 32px;
-  }
+	.entry-icon {
+		width: 32px;
+		height: 32px;
+	}
 }
 
 .btn-copy.copied {
-  color: var(--color-success);
+	color: var(--color-success);
 }
 .resource-error-compact {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-sm);
-  margin: 0;
-  padding: var(--space-sm) var(--space-lg);
-  font-size: var(--text-label);
-  color: var(--color-danger);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-sm);
+	margin: 0;
+	padding: var(--space-sm) var(--space-lg);
+	font-size: var(--text-label);
+	color: var(--color-danger);
 }
 
 /* --- v1.4.0: sort control + trash view --- */
 
 .search-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
 }
 
 .search-bar .search-input-wrapper {
-  flex: 1;
-  min-width: 0;
+	flex: 1;
+	min-width: 0;
 }
 
 .sort-select {
-  flex-shrink: 0;
-  padding: 0.5rem var(--space-sm);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-input);
-  color: var(--color-text);
-  font-size: var(--text-label);
+	flex-shrink: 0;
+	padding: 0.5rem var(--space-sm);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	background: var(--color-input);
+	color: var(--color-text);
+	font-size: var(--text-label);
 }
 
 .trash-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-lg);
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
+	padding: var(--space-sm) var(--space-lg);
+	background: var(--color-surface);
+	border-bottom: 1px solid var(--color-border);
 }
 
 .trash-header h2 {
-  flex: 1;
-  margin: 0;
-  font-size: var(--text-h2);
+	flex: 1;
+	margin: 0;
+	font-size: var(--text-h2);
 }
 
 /* Scoped `.btn` width override — without it the global width:100% is the
    flex base size and Empty trash stretches across the whole header row. */
 .trash-header .btn-danger {
-  width: auto;
-  flex-shrink: 0;
+	width: auto;
+	flex-shrink: 0;
 }
 
 .trash-list {
-  list-style: none;
-  margin: 0;
-  padding: var(--space-sm) var(--space-lg);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
+	list-style: none;
+	margin: 0;
+	padding: var(--space-sm) var(--space-lg);
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-sm);
 }
 
 .trash-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-md);
-  padding: var(--space-md);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-md);
+	padding: var(--space-md);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	background: var(--color-surface);
 }
 
 .trash-item-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
 }
 
 .trash-item-title {
-  font-weight: 600;
-  color: var(--color-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+	font-weight: 600;
+	color: var(--color-text);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .trash-item-time {
-  font-size: var(--text-micro);
-  color: var(--color-text-muted);
+	font-size: var(--text-micro);
+	color: var(--color-text-muted);
 }
 
 .trash-item-actions {
-  display: flex;
-  gap: var(--space-xs);
-  flex-shrink: 0;
+	display: flex;
+	gap: var(--space-xs);
+	flex-shrink: 0;
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .trash-item {
-    transition: border-color 120ms ease;
-  }
+	.trash-item {
+		transition: border-color 120ms ease;
+	}
 
-  .trash-item:hover {
-    border-color: var(--color-primary);
-  }
+	.trash-item:hover {
+		border-color: var(--color-primary);
+	}
 }

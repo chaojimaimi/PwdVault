@@ -141,9 +141,7 @@ describe("DashboardScreen", () => {
 	it("renders the three finding lists with titles resolved from the vault", async () => {
 		render(<DashboardScreen />);
 
-		await waitFor(() =>
-			expect(getSecurityReport).toHaveBeenCalledTimes(1),
-		);
+		await waitFor(() => expect(getSecurityReport).toHaveBeenCalledTimes(1));
 		expect(await screen.findByText("Old Mail")).toBeTruthy();
 		expect(screen.getByText("12/100")).toBeTruthy();
 		expect(screen.getByText("Forum A")).toBeTruthy();
@@ -203,9 +201,7 @@ describe("DashboardScreen", () => {
 		await screen.findByText("Old Mail");
 		fireEvent.click(screen.getByText("Re-run check"));
 
-		await waitFor(() =>
-			expect(getSecurityReport).toHaveBeenCalledTimes(2),
-		);
+		await waitFor(() => expect(getSecurityReport).toHaveBeenCalledTimes(2));
 	});
 
 	it("shows the error state with retry when the report fails", async () => {
@@ -216,8 +212,6 @@ describe("DashboardScreen", () => {
 			await screen.findByText(/Could not build the security report/),
 		).toBeTruthy();
 		fireEvent.click(screen.getByText("Retry"));
-		await waitFor(() =>
-			expect(getSecurityReport).toHaveBeenCalledTimes(2),
-		);
+		await waitFor(() => expect(getSecurityReport).toHaveBeenCalledTimes(2));
 	});
 });
