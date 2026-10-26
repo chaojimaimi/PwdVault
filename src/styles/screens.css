@@ -264,3 +264,12 @@
   color: var(--color-text-muted);
   font-size: var(--text-micro);
 }
+
+/* v1.5.0 WP4: per-entry URL match override — explanation line under the
+   select, same token recipe as .totp-hint. */
+.url-match-hint {
+  font-size: var(--text-micro);
+  color: var(--color-text-secondary);
+  margin-top: var(--space-xs);
+  opacity: 0.7;
+}

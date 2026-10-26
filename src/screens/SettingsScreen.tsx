@@ -23,6 +23,17 @@ const AUTO_LOCK_OPTIONS = [
 	{ label: "1 hour", value: 3600 },
 ];
 
+// v1.5.0 (WP3): trash auto-purge. 0 = off is the DEFAULT — permanent
+// deletion is strict opt-in (deliberately more conservative than Bitwarden's
+// 30-day default). The values mirror the Rust side's treatment: any nonzero
+// number of days works, these four are the curated choices.
+const TRASH_PURGE_OPTIONS = [
+	{ label: "Off", value: 0 },
+	{ label: "After 7 days", value: 7 },
+	{ label: "After 30 days", value: 30 },
+	{ label: "After 90 days", value: 90 },
+];
+
 export function SettingsScreen() {
 	const { actions: authActions } = useAuth();
 	const { state, actions } = useSettings();
@@ -227,6 +238,39 @@ export function SettingsScreen() {
 							</select>
 						</div>
 						<p className="settings-hint">Vault locks automatically when idle</p>
+					</div>
+
+					<div className="settings-divider" />
+
+					<div className="settings-section">
+						<h3 className="settings-section-title">Trash Auto-Purge</h3>
+						<div className="option-row">
+							<label htmlFor="trash-auto-purge">Empty trash automatically</label>
+							<select
+								id="trash-auto-purge"
+								className="settings-select"
+								value={settings.trash_auto_purge_days}
+								onChange={(e) =>
+									setSettings({
+										...settings,
+										trash_auto_purge_days: parseInt(e.target.value),
+									})
+								}
+							>
+								{TRASH_PURGE_OPTIONS.map((opt) => (
+									<option key={opt.value} value={opt.value}>
+										{opt.label}
+									</option>
+								))}
+							</select>
+						</div>
+						<p className="settings-hint">
+							Permanently deletes recycle-bin items older than the selected
+							number of days. The trash is only swept right after the vault
+							is unlocked — an always-unlocked vault never sweeps, and a
+							changed setting applies at the next unlock. At most 500 items
+							are deleted per unlock.
+						</p>
 					</div>
 
 					<div className="settings-divider" />

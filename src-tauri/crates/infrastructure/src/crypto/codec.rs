@@ -7,7 +7,7 @@
 //!
 //! - **v1.3.0 swap**: the underlying crate moved bincode 1.3.3 → 2.0.x with
 //!   `bincode::serde` + `config::legacy()`, which reproduces the bincode 1.x
-//!   byte format exactly (fixint LE, u64 length prefixes, enum u8 variants).
+//!   byte format exactly (fixint LE, u64 length prefixes, enum u32 variants).
 //!   Byte parity with everything already written to disk is pinned by the
 //!   golden fixtures in `database/bincode_golden.rs` (six types) and
 //!   `application/src/service/sync/container.rs::bincode_golden` (sync

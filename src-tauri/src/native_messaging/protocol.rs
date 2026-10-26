@@ -13,6 +13,7 @@ use zeroize::Zeroizing;
 use pwdvault_application::AppState;
 use pwdvault_domain::constants;
 use pwdvault_domain::PasswordEntry;
+use pwdvault_domain::UrlMatchMode;
 use pwdvault_infrastructure::auth;
 
 use super::dispatcher::execute_command;
@@ -65,6 +66,12 @@ pub struct NativeRequest {
     pub import_password: Option<Zeroizing<String>>,
     #[serde(default)]
     pub backup: Option<serde_json::Value>,
+    /// v1.5.0 WP4: per-entry URL match override carried with entry
+    /// create/update requests. `#[serde(default)]` pins the wire contract
+    /// for pre-v1.5.0 extension payloads (same rule as GeneratorOptions
+    /// mode): a missing field lands on the status-quo Auto behavior.
+    #[serde(default)]
+    pub url_match_mode: UrlMatchMode,
 }
 
 #[derive(Debug, Deserialize)]
@@ -319,6 +326,31 @@ mod tests {
     use super::{enforce_pair_rate_limit, NativeRequest};
     use pwdvault_application::AppState;
     use pwdvault_domain::constants;
+    use pwdvault_domain::UrlMatchMode;
+
+    /// v1.5.0 WP4 wire contract: a request without `url_match_mode`
+    /// (pre-v1.5.0 extension) deserializes on the Auto default instead of
+    /// failing; a present value round-trips; an unknown string fails the
+    /// request deserialization (fail closed, same rule as GeneratorMode).
+    #[test]
+    fn url_match_mode_defaults_to_auto_when_field_is_absent() {
+        let req: NativeRequest =
+            serde_json::from_str(r#"{"id":1,"command":"update_entry"}"#).unwrap();
+        assert_eq!(req.url_match_mode, UrlMatchMode::Auto);
+
+        let req: NativeRequest =
+            serde_json::from_str(r#"{"id":1,"command":"update_entry","url_match_mode":"exact"}"#)
+                .unwrap();
+        assert_eq!(req.url_match_mode, UrlMatchMode::Exact);
+
+        assert!(
+            serde_json::from_str::<NativeRequest>(
+                r#"{"id":1,"command":"update_entry","url_match_mode":"regex"}"#
+            )
+            .is_err(),
+            "unknown match modes must fail the request, not degrade to Auto"
+        );
+    }
 
     /// Build a minimal pair/pair_confirm request: both branches hit the
     /// shared rate-limit gate before any pairing logic runs.
@@ -344,6 +376,7 @@ mod tests {
             export_password: None,
             import_password: None,
             backup: None,
+            url_match_mode: UrlMatchMode::Auto,
         }
     }
 

@@ -11,6 +11,7 @@ pub mod constants;
 pub mod dto;
 pub mod entities;
 pub mod error;
+pub mod strength;
 pub mod validation;
 
 pub use constants::*;

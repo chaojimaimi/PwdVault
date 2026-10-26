@@ -12,6 +12,7 @@ import { GeneratorScreen } from "./screens/GeneratorScreen";
 import GroupManager from "./screens/GroupManager";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { ImportExportScreen } from "./screens/ImportExportScreen";
+import { DashboardScreen } from "./screens/DashboardScreen";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { showPairingCodeToast, showToastWithType } from "./utils/toast";
 import "./styles/themes.css";
@@ -148,23 +149,42 @@ function AppContent() {
 			return <SettingsScreen />;
 		case "importExport":
 			return <ImportExportScreen />;
+		case "dashboard":
+			return <DashboardScreen />;
 		default:
 			return <UnlockScreen />;
 	}
 }
 
-function App() {
+/**
+ * Native-event toasts (v1.5.0): the pairing-code toast, the trash
+ * auto-purged notice, and the native-server-error warning. Extracted from
+ * App's inline effect so tests can mount the hook against a mocked `listen`
+ * (same pattern as useAutoLockActivity above). The listeners are global and
+ * lifetime-of-app — they must not depend on auth state, because pairing and
+ * the extension bridge exist before any unlock.
+ */
+export function useNativeEventToasts() {
 	useEffect(() => {
 		// Show the pairing code as a non-blocking toast. A modal dialog would
 		// block subsequent pair-request events (each one creates a new session
 		// and overwrites the previous code), making "Get New Code" in the
 		// extension appear to do nothing until the user dismisses the dialog.
 		// Toasts let multiple updates show in sequence without blocking.
+		// WP5: the payload is { code, caller } — the caller digest gives the
+		// user a comparison aid (forgeable on loopback, NOT authentication).
 		const unlistenPair = listen("pair-request", (event) => {
-			const code = event.payload as string;
+			const payload = event.payload as { code: string; caller?: string };
 			// V4 双主题配对码 toast：30s 与后端 SESSION_TTL 保持一致，
 			// 确保用户看到的码在有效期内。
-			showPairingCodeToast(code, 30000);
+			showPairingCodeToast(payload.code, 30000, payload.caller);
+		});
+
+		// WP3 (v1.5.0): the Rust post-unlock sweep physically deleted expired
+		// recycle-bin entries; the count arrives as the event payload
+		// (never emitted for 0).
+		const unlistenTrashPurge = listen<number>("trash-auto-purged", (event) => {
+			showToastWithType(`回收站自动清理了 ${event.payload} 条`, "info");
 		});
 
 		// B3: warn loudly when the extension HTTP server could not start.
@@ -182,9 +202,14 @@ function App() {
 		);
 		return () => {
 			unlistenPair.then((u) => u());
+			unlistenTrashPurge.then((u) => u());
 			unlistenServerError.then((u) => u());
 		};
 	}, []);
+}
+
+function App() {
+	useNativeEventToasts();
 
 	return (
 		<ThemeProvider>

@@ -40,15 +40,30 @@ pub async fn init_vault(
         .map_err(|e| VaultError::InternalError(format!("init task join error: {}", e)))?
 }
 
+/// `app: tauri::AppHandle` is injected by Tauri (never sent by the webview),
+/// so the JS contract `invoke("unlock_vault", { password })` is unchanged.
 #[tauri::command]
 pub async fn unlock_vault(
+    app: tauri::AppHandle,
     password: Zeroizing<String>,
     state: State<'_, AppHandle>,
 ) -> Result<bool, VaultError> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || app::unlock_vault(&state, password))
-        .await
-        .map_err(|e| VaultError::InternalError(format!("unlock task join error: {}", e)))?
+    let unlocked = tauri::async_runtime::spawn_blocking({
+        let state = state.clone();
+        move || app::unlock_vault(&state, password)
+    })
+    .await
+    // Double `?`: join error first, then the service's own Result.
+    .map_err(|e| VaultError::InternalError(format!("unlock task join error: {}", e)))??;
+    // WP3: keys are published at this point (complete_unlock ran inside the
+    // service); the sweep runs OUTSIDE any D8 exclusive window, bounded by
+    // the 500-row batch cap. Ok(false) = wrong password — nothing published,
+    // nothing to sweep.
+    if unlocked {
+        crate::unlock_effects::sweep_trash_and_emit(&app, &state);
+    }
+    Ok(unlocked)
 }
 
 #[tauri::command]
@@ -517,14 +532,26 @@ pub fn disable_biometric(state: State<'_, AppHandle>) -> Result<(), VaultError> 
     app::disable_biometric(state.inner(), state.inner().secret_store.as_ref())
 }
 
+/// Same post-unlock trash sweep as `unlock_vault` (WP3): runs after the
+/// biometric path published the keys, one bounded batch per unlock.
 #[tauri::command]
-pub async fn unlock_biometric(state: State<'_, AppHandle>) -> Result<(), VaultError> {
+pub async fn unlock_biometric(
+    app: tauri::AppHandle,
+    state: State<'_, AppHandle>,
+) -> Result<(), VaultError> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        app::unlock_biometric(&state, state.secret_store.as_ref())
+    let inner = tauri::async_runtime::spawn_blocking({
+        let state = state.clone();
+        move || app::unlock_biometric(&state, state.secret_store.as_ref())
     })
     .await
-    .map_err(|e| VaultError::InternalError(format!("biometric unlock task join error: {}", e)))?
+    // Single `?`: the join error. `inner` stays Result<(), VaultError> so
+    // the sweep only fires on the success branch below.
+    .map_err(|e| VaultError::InternalError(format!("biometric unlock task join error: {}", e)))?;
+    if inner.is_ok() {
+        crate::unlock_effects::sweep_trash_and_emit(&app, &state);
+    }
+    inner
 }
 
 #[tauri::command]
@@ -652,70 +679,84 @@ pub async fn baidu_complete_auth(
         })?
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pwdvault_infrastructure::crypto;
-    use tauri::Manager;
+// ---------------------------------------------------------------------------
+// Security dashboard (WP1) + third-party CSV import (WP2) — Tauri IPC only
+// (D6): the extension bridge never sees either. Heavy work (decrypt sweep /
+// seal + bulk write) and the blocking dialog run on spawn_blocking (§5.6.2).
+// ---------------------------------------------------------------------------
 
-    /// The std-only civil_from_days used for the default export file name
-    /// must agree with known UTC dates.
-    #[test]
-    fn civil_from_days_known_dates() {
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
-        assert_eq!(civil_from_days(11_017), (2000, 3, 1));
-        assert_eq!(civil_from_days(19_358), (2023, 1, 1));
-        assert_eq!(civil_from_days(19_723), (2024, 1, 1));
-    }
-
-    /// utc_today_string renders the same shape as the webview's
-    /// `new Date().toISOString().slice(0, 10)`.
-    #[test]
-    fn utc_today_string_is_iso_date_shape() {
-        let today = utc_today_string();
-        assert_eq!(today.len(), 10, "YYYY-MM-DD: {today}");
-        assert_eq!(&today[4..5], "-");
-        assert_eq!(&today[7..8], "-");
-        assert!(today[..4].chars().all(|c| c.is_ascii_digit()));
-        assert!(today[5..7].chars().all(|c| c.is_ascii_digit()));
-        assert!(today[8..10].chars().all(|c| c.is_ascii_digit()));
-    }
-
-    /// A1: the `touch_activity` command must delegate to
-    /// `AppState::touch_activity` so pure-local user input advances the
-    /// auto-lock deadline exactly like vault operations do.
-    #[test]
-    fn touch_activity_command_advances_auto_lock_deadline() {
-        let app = tauri::test::mock_app();
-        let state = Arc::new(AppState::default());
-        app.manage(state.clone());
-
-        // Locked session: no deadline exists and touching stays a no-op.
-        assert!(state.session.auto_lock_deadline(600).is_none());
-
-        // Unlock the session (same helper pattern as the native messaging tests).
-        let salt = crypto::kdf::generate_salt();
-        let (master_key, _params) = crypto::kdf::derive_key("correct horse battery staple", &salt)
-            .expect("derive master key");
-        let (enc_key, mac_key) = crypto::kdf::derive_subkeys(&master_key, &salt);
-        state.session.unlock(enc_key, mac_key);
-
-        let before = state
-            .session
-            .auto_lock_deadline(600)
-            .expect("unlocked deadline before touch");
-        std::thread::sleep(std::time::Duration::from_millis(10));
-
-        let ipc_state: State<'_, AppHandle> = app.state();
-        touch_activity(ipc_state);
-
-        let after = state
-            .session
-            .auto_lock_deadline(600)
-            .expect("deadline after touch");
-        assert!(
-            after > before,
-            "touch_activity must advance the auto-lock deadline"
-        );
-    }
+/// WP1: aggregate the security report. The response carries ids, counts and
+/// scores only — no password/notes/totp plaintext ever crosses IPC.
+#[tauri::command]
+pub async fn security_report(
+    state: State<'_, AppHandle>,
+) -> Result<pwdvault_application::SecurityReport, VaultError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || app::security_report(&state))
+        .await
+        .map_err(|e| VaultError::InternalError(format!("security report task join error: {}", e)))?
 }
+
+/// WP2: parse + validate + stage a CSV file, return the password-free
+/// preview. `bytes: None` opens the NATIVE dialog (SEC-M2 — the file content
+/// never enters the webview); `bytes: Some(..)` is the browser-fallback path
+/// where the webview read the file first (plaintext crosses the webview —
+/// risk accepted in the plan, non-Tauri frontends only). `null` = cancelled.
+#[tauri::command]
+pub async fn import_csv_open(
+    app: tauri::AppHandle,
+    bytes: Option<Zeroizing<Vec<u8>>>,
+    state: State<'_, AppHandle>,
+) -> Result<Option<pwdvault_application::CsvImportPreview>, VaultError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || match bytes {
+        Some(bytes) => app::import_csv_open(&state, bytes.to_vec()).map(Some),
+        None => match pick_csv_file_blocking(&app)? {
+            Some(bytes) => app::import_csv_open(&state, bytes).map(Some),
+            None => Ok(None),
+        },
+    })
+    .await
+    .map_err(|e| VaultError::InternalError(format!("csv open task join error: {}", e)))?
+}
+
+/// Blocking half of the native-dialog path (spawn_blocking pool;
+/// read_backup_file_blocking precedent).
+fn pick_csv_file_blocking(app: &tauri::AppHandle) -> Result<Option<Vec<u8>>, VaultError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let Some(file_path) = app
+        .dialog()
+        .file()
+        .add_filter("CSV export", &["csv", "txt"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|error| VaultError::InvalidInput {
+            code: "PATH_INVALID".into(),
+            message: format!("the selected file path is not usable: {error}"),
+        })?;
+    std::fs::read(&path)
+        .map(Some)
+        .map_err(|error| VaultError::InvalidInput {
+            code: "CSV_READ_FAILED".into(),
+            message: format!("cannot read the selected file: {error}"),
+        })
+}
+
+/// WP2: commit the staged import (pre-seal all rows + single transaction).
+#[tauri::command]
+pub async fn import_csv_commit(
+    state: State<'_, AppHandle>,
+) -> Result<pwdvault_application::CsvImportResult, VaultError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || app::import_csv_commit(&state))
+        .await
+        .map_err(|e| VaultError::InternalError(format!("csv commit task join error: {}", e)))?
+}
+
+#[cfg(test)]
+mod tests;

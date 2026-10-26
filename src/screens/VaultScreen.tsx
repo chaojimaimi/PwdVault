@@ -24,6 +24,7 @@ import {
 	SearchIcon,
 	FolderIcon,
 	TrashIcon,
+	ShieldIcon,
 } from "../components/Icons";
 import type { EntrySummary, SortMode } from "../types";
 
@@ -217,6 +218,14 @@ export function VaultScreen() {
 						aria-label="Toggle theme"
 					/>
 					<div className="header-separator" />
+					<button
+						className="btn btn-icon"
+						onClick={() => authActions.navigate("dashboard")}
+						title="Security Dashboard"
+						aria-label="Security dashboard"
+					>
+						<ShieldIcon />
+					</button>
 					<button
 						className="btn btn-icon"
 						onClick={() => authActions.navigate("generator")}

@@ -11,35 +11,49 @@
 use std::collections::HashSet;
 
 /// Command names handled by the Native Messaging HTTP dispatcher
-/// (native_messaging::execute_command). Extracted by reading the match arms.
-/// This is the authoritative list — when the dispatcher changes, update here
-/// and the IPC handler list in lib.rs together.
+/// (native_messaging::dispatcher::execute_command match arms).
+///
+/// MAINTENANCE RESPONSIBILITY (v1.5.0 WP6): the dispatcher match is the
+/// source of truth — this hand-written list MUST be updated in the SAME
+/// commit whenever a dispatcher arm is added, renamed, or removed. The list
+/// had drifted before (stale `is_initialized`/`get_entry` names) while the
+/// old assertions compared it against itself and never went red; the
+/// nm_only/ipc_only diff assertions below are what give it teeth now.
+/// Deliberately NOT reflection-based (kept out of scope in the plan).
 fn native_messaging_commands() -> HashSet<&'static str> {
     [
+        // Negotiation / pairing (unauthenticated by design, protocol-gated).
+        "handshake",
+        "pair",
+        "pair_confirm",
+        // Lifecycle.
+        "is_vault_initialized",
+        "is_vault_unlocked",
         "setup_vault",
-        "is_initialized",
         "init_vault",
         "unlock_vault",
         "lock_vault",
+        // Settings.
         "get_settings",
         "update_settings",
+        // Entries.
         "create_entry",
         "list_all_entries",
-        "get_entry",
+        "get_entry_meta",
         "get_entry_secret",
         "generate_password",
         "update_entry",
         "remove_entry",
         "get_entry_count",
+        // Groups.
         "create_group",
         "list_all_groups",
         "update_group",
         "remove_group",
+        // Backup.
         "export_vault",
         "import_vault",
-        "handshake",
-        "pair",
-        "pair_confirm",
+        // Access control.
         "revoke_extension_access",
     ]
     .into_iter()
@@ -113,6 +127,12 @@ fn tauri_ipc_commands() -> HashSet<&'static str> {
         // desktop-only like the rest of sync.
         "baidu_start_auth",
         "baidu_complete_auth",
+        // v1.5.0 (WP1/WP2): security dashboard report (ids/scores only, no
+        // plaintext) and the third-party CSV importer (stages plaintext rows
+        // in AppState) — desktop-only, never reachable from the extension.
+        "security_report",
+        "import_csv_open",
+        "import_csv_commit",
     ]
     .into_iter()
     .collect()
@@ -174,13 +194,7 @@ fn adapter_only_commands_are_documented() {
     };
     assert_eq!(
         nm_only,
-        vec![
-            &"get_entry",
-            &"handshake",
-            &"is_initialized",
-            &"pair",
-            &"pair_confirm"
-        ],
+        vec![&"handshake", &"pair", &"pair_confirm"],
         "NM-only command set changed — update this test if intentional"
     );
 
@@ -203,9 +217,8 @@ fn adapter_only_commands_are_documented() {
             &"enable_biometric",
             &"enable_recovery",
             &"export_vault_file",
-            &"get_entry_meta",
-            &"is_vault_initialized",
-            &"is_vault_unlocked",
+            &"import_csv_commit",
+            &"import_csv_open",
             &"list_deleted_entries",
             &"purge_entry",
             &"read_backup_file",
@@ -213,6 +226,7 @@ fn adapter_only_commands_are_documented() {
             &"recovery_status",
             &"register_global_shortcut",
             &"restore_entry",
+            &"security_report",
             &"sync_connect",
             &"sync_disconnect",
             &"sync_now",

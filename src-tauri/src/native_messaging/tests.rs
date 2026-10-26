@@ -11,7 +11,7 @@ use zeroize::Zeroizing;
 use super::dispatcher::execute_command;
 
 /// Helper: create a test AppState with a temp database
-fn setup_test_state() -> (Arc<AppState>, TempDir) {
+pub(super) fn setup_test_state() -> (Arc<AppState>, TempDir) {
     let temp = TempDir::new().expect("create temp dir");
     let db_path = temp.path().join("test_vault.db");
     let db = Arc::new(database::init_database(&db_path).expect("init db"));
@@ -22,7 +22,7 @@ fn setup_test_state() -> (Arc<AppState>, TempDir) {
 }
 
 /// Helper: initialize vault with a password in the given state
-fn init_test_vault(state: &Arc<AppState>, password: &str) {
+pub(super) fn init_test_vault(state: &Arc<AppState>, password: &str) {
     // Clear any existing session state
     state.lock_vault();
 
@@ -45,8 +45,9 @@ fn init_test_vault(state: &Arc<AppState>, password: &str) {
     state.touch_activity();
 }
 
-fn make_request(command: &str, id: u32) -> NativeRequest {
+pub(super) fn make_request(command: &str, id: u32) -> NativeRequest {
     NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id,
         protocol_version: constants::NATIVE_PROTOCOL_VERSION,
         command: command.to_string(),
@@ -181,6 +182,7 @@ fn test_pair_confirm_success() {
     let caller = "chrome-extension://confirm-success";
     let challenge = pwdvault_infrastructure::pairing::create_session(caller);
     let confirm_req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 1,
         command: "pair_confirm".to_string(),
         code: Some(Zeroizing::new(challenge.code)),
@@ -197,6 +199,7 @@ fn test_pair_confirm_wrong_code_fails() {
     let caller = "chrome-extension://confirm-wrong-code";
     let challenge = pwdvault_infrastructure::pairing::create_session(caller);
     let req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 1,
         command: "pair_confirm".to_string(),
         code: Some(Zeroizing::new("000000".to_string())),
@@ -211,6 +214,7 @@ fn test_pair_confirm_wrong_code_fails() {
 fn test_pair_confirm_without_session_fails() {
     let (state, _temp) = setup_test_state();
     let req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 1,
         command: "pair_confirm".to_string(),
         code: Some(Zeroizing::new("123456".to_string())),
@@ -234,6 +238,7 @@ fn test_create_entry() {
     init_test_vault(&state, "master123");
 
     let req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 1,
         protocol_version: constants::NATIVE_PROTOCOL_VERSION,
         command: "create_entry".to_string(),
@@ -270,6 +275,7 @@ fn test_create_entry_locked() {
     // Don't init vault — stays locked
 
     let req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 1,
         protocol_version: constants::NATIVE_PROTOCOL_VERSION,
         command: "create_entry".to_string(),
@@ -306,6 +312,7 @@ fn test_get_entry_meta_and_secret() {
 
     // Create an entry first
     let create_req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 1,
         protocol_version: constants::NATIVE_PROTOCOL_VERSION,
         command: "create_entry".to_string(),
@@ -332,6 +339,7 @@ fn test_get_entry_meta_and_secret() {
 
     // Meta endpoint returns public fields without secrets
     let meta_req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 2,
         command: "get_entry_meta".to_string(),
         id_param: Some(entry_id.clone()),
@@ -346,6 +354,7 @@ fn test_get_entry_meta_and_secret() {
     // Secret endpoint returns decrypted password/notes AND bumps last_used_at
     // (v1.4.0 restored the persistence with a 60s write throttle).
     let secret_req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 3,
         command: "get_entry_secret".to_string(),
         id_param: Some(entry_id.clone()),
@@ -366,6 +375,7 @@ fn test_get_entry_meta_and_secret() {
     // the throttle in one assertion pair.
     std::thread::sleep(std::time::Duration::from_millis(1100));
     let secret_req2 = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 4,
         command: "get_entry_secret".to_string(),
         id_param: Some(entry_id),
@@ -389,6 +399,7 @@ fn test_list_all_entries() {
     // Create 3 entries
     for i in 0..3 {
         let req = NativeRequest {
+            url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
             id: i,
             protocol_version: constants::NATIVE_PROTOCOL_VERSION,
             command: "create_entry".to_string(),
@@ -428,6 +439,7 @@ fn test_update_entry() {
 
     // Create an entry
     let create_req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 1,
         protocol_version: constants::NATIVE_PROTOCOL_VERSION,
         command: "create_entry".to_string(),
@@ -454,6 +466,7 @@ fn test_update_entry() {
 
     // Update the entry
     let update_req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 2,
         protocol_version: constants::NATIVE_PROTOCOL_VERSION,
         command: "update_entry".to_string(),
@@ -501,6 +514,7 @@ fn test_remove_entry() {
 
     // Create an entry
     let create_req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 1,
         protocol_version: constants::NATIVE_PROTOCOL_VERSION,
         command: "create_entry".to_string(),
@@ -527,6 +541,7 @@ fn test_remove_entry() {
 
     // Remove it
     let remove_req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 2,
         protocol_version: constants::NATIVE_PROTOCOL_VERSION,
         command: "remove_entry".to_string(),
@@ -570,6 +585,7 @@ fn test_get_entry_count() {
 
     // Create an entry
     let create_req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 2,
         protocol_version: constants::NATIVE_PROTOCOL_VERSION,
         command: "create_entry".to_string(),
@@ -598,224 +614,6 @@ fn test_get_entry_count() {
     assert_eq!(count, serde_json::json!(1));
 }
 
-// ---- generate_password ----
-// ---- generate_password ----
-
-/// v1.4.0 wire contract: a payload written before the `mode` field existed
-/// (old extension / pinned request) must keep landing on the password path
-/// with the historical parameter defaults — `#[serde(default)]` on
-/// `GeneratorOptions.mode`.
-#[test]
-fn generate_password_options_without_mode_deserialize_as_password() {
-    let options: GeneratorOptions = serde_json::from_str("{}").expect("empty object is valid");
-    assert_eq!(options.mode, GeneratorMode::Password);
-    assert_eq!(options.length, 16);
-    assert!(options.include_uppercase && options.include_lowercase);
-    assert!(options.include_numbers && options.include_symbols);
-    assert_eq!(options.words, 6);
-    assert!(options.separator.is_none());
-    assert!(!options.capitalize && !options.append_number);
-
-    // An explicit legacy-shaped payload (exactly the five v1.3.x fields).
-    let legacy: GeneratorOptions = serde_json::from_str(
-        r#"{"length": 20, "include_uppercase": true, "include_lowercase": false,
-            "include_numbers": true, "include_symbols": true}"#,
-    )
-    .expect("legacy payload is valid");
-    assert_eq!(legacy.mode, GeneratorMode::Password);
-    assert_eq!(legacy.length, 20);
-    assert!(!legacy.include_lowercase);
-
-    // An unknown mode fails the request deserialization (fail closed) —
-    // it must NOT silently degrade to the password generator.
-    assert!(serde_json::from_str::<GeneratorOptions>(r#"{"mode": "haiku"}"#).is_err());
-}
-
-/// v1.4.0 dispatcher: mode selects the backend over the same command.
-#[test]
-fn generate_password_dispatches_passphrase_and_pin_modes() {
-    let (state, _temp) = setup_test_state();
-    init_test_vault(&state, "master123");
-
-    let mut req = make_request("generate_password", 1);
-    req.options = Some(
-        serde_json::from_str(
-            r#"{"mode": "passphrase", "words": 5, "separator": ".", "capitalize": true,
-            "append_number": true}"#,
-        )
-        .unwrap(),
-    );
-    let value = execute_command(req, state.clone(), None, None).unwrap();
-    let passphrase = value.as_str().unwrap();
-    // 4 dots = 5 words; the trailing 0-99 number glues onto the last word.
-    assert_eq!(passphrase.matches('.').count(), 4, "{passphrase}");
-    let without_number = passphrase.trim_end_matches(|c: char| c.is_ascii_digit());
-    let words: Vec<&str> = without_number.split('.').collect();
-    assert_eq!(words.len(), 5);
-    assert!(
-        words.iter().all(|w| {
-            w.chars().next().is_some_and(|c| c.is_ascii_uppercase())
-                // '-' allows the EFF list's single hyphenated word ("yo-yo").
-                && w.chars().skip(1).all(|c| c.is_ascii_lowercase() || c == '-')
-        }),
-        "{passphrase}"
-    );
-
-    let mut pin_req = make_request("generate_password", 2);
-    pin_req.options = Some(serde_json::from_str(r#"{"mode": "pin", "length": 6}"#).unwrap());
-    let pin = execute_command(pin_req, state, None, None).unwrap();
-    let pin = pin.as_str().unwrap();
-    assert_eq!(pin.len(), 6);
-    assert!(pin.chars().all(|c| c.is_ascii_digit()));
-}
-
-#[test]
-fn test_generate_password_default() {
-    let (state, _temp) = setup_test_state();
-    let req = make_request("generate_password", 1);
-    let result = execute_command(req, state, None, None).unwrap();
-    let password = result.as_str().unwrap();
-    assert_eq!(password.len(), 16);
-}
-
-#[test]
-fn test_generate_password_custom_length() {
-    let (state, _temp) = setup_test_state();
-    let req = NativeRequest {
-        id: 1,
-        protocol_version: constants::NATIVE_PROTOCOL_VERSION,
-        command: "generate_password".to_string(),
-        password: None,
-        url: None,
-        id_param: None,
-        code: None,
-        session_nonce: None,
-        title: None,
-        username: None,
-        notes: None,
-        tags: None,
-        request: None,
-        options: Some(GeneratorOptions {
-            length: 32,
-            include_uppercase: true,
-            include_lowercase: true,
-            include_numbers: true,
-            include_symbols: false,
-            ..GeneratorOptions::default()
-        }),
-        name: None,
-        group_id: None,
-        settings: None,
-        export_password: None,
-        import_password: None,
-        backup: None,
-    };
-    let result = execute_command(req, state, None, None).unwrap();
-    let password = result.as_str().unwrap();
-    assert_eq!(password.len(), 32);
-}
-
-#[test]
-fn test_generate_password_guarantees_all_types() {
-    let (state, _temp) = setup_test_state();
-    let req = NativeRequest {
-        id: 1,
-        protocol_version: constants::NATIVE_PROTOCOL_VERSION,
-        command: "generate_password".to_string(),
-        password: None,
-        url: None,
-        id_param: None,
-        code: None,
-        session_nonce: None,
-        title: None,
-        username: None,
-        notes: None,
-        tags: None,
-        request: None,
-        options: Some(GeneratorOptions {
-            length: 16,
-            include_uppercase: true,
-            include_lowercase: true,
-            include_numbers: true,
-            include_symbols: true,
-            ..GeneratorOptions::default()
-        }),
-        name: None,
-        group_id: None,
-        settings: None,
-        export_password: None,
-        import_password: None,
-        backup: None,
-    };
-    let result = execute_command(req, state, None, None).unwrap();
-    let password = result.as_str().unwrap();
-
-    let has_upper = password.chars().any(|c| c.is_ascii_uppercase());
-    let has_lower = password.chars().any(|c| c.is_ascii_lowercase());
-    let has_digit = password.chars().any(|c| c.is_ascii_digit());
-    let has_symbol = password
-        .chars()
-        .any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c));
-
-    assert!(has_upper, "Password missing uppercase letters");
-    assert!(has_lower, "Password missing lowercase letters");
-    assert!(has_digit, "Password missing digits");
-    assert!(has_symbol, "Password missing symbols");
-}
-
-#[test]
-fn test_generate_password_short_guarantees_all_types() {
-    let (state, _temp) = setup_test_state();
-    // Even very short passwords should contain all requested types
-    for _ in 0..50 {
-        let req = NativeRequest {
-            id: 1,
-            protocol_version: constants::NATIVE_PROTOCOL_VERSION,
-            command: "generate_password".to_string(),
-            password: None,
-            url: None,
-            id_param: None,
-            code: None,
-            session_nonce: None,
-            title: None,
-            username: None,
-            notes: None,
-            tags: None,
-            request: None,
-            options: Some(GeneratorOptions {
-                length: 4,
-                include_uppercase: true,
-                include_lowercase: true,
-                include_numbers: true,
-                include_symbols: true,
-                ..GeneratorOptions::default()
-            }),
-            name: None,
-            group_id: None,
-            settings: None,
-            export_password: None,
-            import_password: None,
-            backup: None,
-        };
-        let result = execute_command(req, state.clone(), None, None).unwrap();
-        let password = result.as_str().unwrap();
-        assert_eq!(password.len(), 4);
-
-        let has_upper = password.chars().any(|c| c.is_ascii_uppercase());
-        let has_lower = password.chars().any(|c| c.is_ascii_lowercase());
-        let has_digit = password.chars().any(|c| c.is_ascii_digit());
-        let has_symbol = password
-            .chars()
-            .any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c));
-
-        assert!(
-            has_upper && has_lower && has_digit && has_symbol,
-            "Short password missing required character type: {}",
-            password
-        );
-    }
-}
-
 // ---- unknown command ----
 
 #[test]
@@ -833,6 +631,7 @@ fn test_unknown_command() {
 fn test_get_entry_meta_locked() {
     let (state, _temp) = setup_test_state();
     let req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 1,
         command: "get_entry_meta".to_string(),
         id_param: Some("some-id".to_string()),
@@ -855,6 +654,7 @@ fn test_list_entries_locked() {
 fn test_update_entry_locked() {
     let (state, _temp) = setup_test_state();
     let req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 1,
         command: "update_entry".to_string(),
         id_param: Some("id".to_string()),
@@ -871,6 +671,7 @@ fn test_update_entry_locked() {
 fn test_remove_entry_locked() {
     let (state, _temp) = setup_test_state();
     let req = NativeRequest {
+        url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
         id: 1,
         command: "remove_entry".to_string(),
         id_param: Some("id".to_string()),

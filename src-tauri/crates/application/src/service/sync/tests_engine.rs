@@ -86,6 +86,7 @@ pub(super) fn create_entry_titled(state: &Arc<AppState>, title: &str) -> String 
     create_entry(
         state,
         crate::CreateEntryRequest {
+            url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
             title: title.to_string(),
             url: None,
             username: format!("user-{title}"),
@@ -419,6 +420,7 @@ fn concurrent_writes_during_sync_do_not_corrupt_vault() {
             while !stop_writes.load(std::sync::atomic::Ordering::SeqCst) && i < 5_000 {
                 let id = &entry_ids[i % entry_ids.len()];
                 let request = crate::UpdateEntryRequest {
+                    url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
                     title: format!("w{writer}-{i}"),
                     url: None,
                     username: format!("writer-{writer}"),

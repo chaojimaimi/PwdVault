@@ -20,3 +20,5 @@ pub use server::start_server;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_generator;

@@ -201,18 +201,52 @@ function normalizedDomain(rawUrl) {
 	}
 }
 
+// v1.5.0 WP4 per-entry URL match override. Anything unrecognized —
+// including a MISSING field (pre-v1.5.0 desktop/extension payloads) —
+// degrades to "auto" (the v1.4.0 status quo): never an error, never a
+// silent tightening of the gate.
+function entryMatchMode(entry) {
+	return entry?.url_match_mode === "exact" || entry?.url_match_mode === "domain"
+		? entry.url_match_mode
+		: "auto";
+}
+
+// Full hostname of a stored or page URL for "exact" mode. `new URL()` already
+// case-folds and punycodes IDN into .hostname and keeps the port OUT of it,
+// so hosts compare for equality without further normalization. Scheme-less
+// entry URLs get the same https:// padding as the domain paths. A parse
+// failure returns null (cannot judge → both gates reject).
+function exactHost(rawUrl) {
+	try {
+		const withScheme = /^https?:\/\//i.test(rawUrl)
+			? rawUrl
+			: `https://${rawUrl}`;
+		return new URL(withScheme).hostname;
+	} catch {
+		return null;
+	}
+}
+
 function entryMatchesSenderUrl(entry, senderUrl) {
 	const senderDomain = normalizedDomain(senderUrl);
 	// Empty entryUrl is REJECTED here — INTENTIONALLY different from
 	// entryMatchesPageUrl below (which allows generic entries on an explicit
 	// popup fill): the content-script path auto-fills without a per-entry user
 	// click, so a stored URL must exist to compare against the sender frame.
+	// v1.5.0: the rejection holds in ALL three match modes.
 	const rawEntryUrl = typeof entry?.url === "string" ? entry.url : "";
 	if (!senderDomain || !rawEntryUrl) return false;
-	// Entries are often stored scheme-less ("github.com/acme"); pad https://
-	// exactly like entryMatchesPageUrl before parsing, otherwise such entries
-	// would be invisible to the content-script path while the popup could
-	// still fill them — a pointless semantics split.
+	// v1.5.0 per-entry override: "exact" pins FULL hostname equality.
+	if (entryMatchMode(entry) === "exact") {
+		const entryHost = exactHost(rawEntryUrl);
+		return Boolean(entryHost) && entryHost === exactHost(senderUrl);
+	}
+	// "auto" (v1.4.0 status quo) and "domain" (the same comparison pinned by
+	// contract) both compare registrable domains. Entries are often stored
+	// scheme-less ("github.com/acme"); pad https:// exactly like
+	// entryMatchesPageUrl before parsing, otherwise such entries would be
+	// invisible to the content-script path while the popup could still fill
+	// them — a pointless semantics split.
 	const withScheme = /^https?:\/\//i.test(rawEntryUrl)
 		? rawEntryUrl
 		: `https://${rawEntryUrl}`;
@@ -221,20 +255,29 @@ function entryMatchesSenderUrl(entry, senderUrl) {
 }
 
 // Single source of truth for "may this entry be filled on this page?".
-// Compares registrable domains (eTLD+1 via registeredDomain, lowercase +
-// strip a leading "www."), matching the semantics of entryMatchesSenderUrl
-// and the background fill gate. DIVERGENCE IS INTENTIONAL:
-// entryMatchesSenderUrl rejects an empty entryUrl (see its comment); this
-// function allows it — an explicit popup fill is a deliberate user action on
-// a generic entry. Do NOT "unify" the two.
+// Takes the full entry (v1.5.0 WP4: the per-entry url_match_mode override
+// rides along with the stored URL). Compares registrable domains (eTLD+1 via
+// registeredDomain, lowercase + strip a leading "www."), matching the
+// semantics of entryMatchesSenderUrl and the background fill gate. DIVERGENCE
+// IS INTENTIONAL: entryMatchesSenderUrl rejects an empty entryUrl (see its
+// comment); this function allows it — an explicit popup fill is a deliberate
+// user action on a generic entry. Do NOT "unify" the two.
 // NOTE: content.js carries a verbatim copy of this whole block — content
 // scripts are classic scripts and cannot import ES modules. Keep the copies
 // byte-identical; the guard test in sender-auth.test.js enforces it.
-function entryMatchesPageUrl(entryUrl, pageUrl) {
+function entryMatchesPageUrl(entry, pageUrl) {
 	// Empty entryUrl = generic entry (no stored URL); an explicit popup fill is
-	// a deliberate user action, so allow it. Empty pageUrl = cannot judge.
+	// a deliberate user action, so allow it — in ALL match modes. Empty
+	// pageUrl = cannot judge.
+	const entryUrl = typeof entry?.url === "string" ? entry.url : "";
 	if (!entryUrl) return true;
 	if (!pageUrl) return false;
+	// v1.5.0 per-entry override: "exact" pins FULL hostname equality.
+	if (entryMatchMode(entry) === "exact") {
+		const entryHost = exactHost(entryUrl);
+		const pageHost = exactHost(pageUrl);
+		return Boolean(entryHost && pageHost) && entryHost === pageHost;
+	}
 	// Entries are often stored scheme-less ("github.com/acme"); pad https://
 	// exactly like popup.js formatUrl before parsing, otherwise such entries
 	// would be rejected here despite being fillable nowhere else.
@@ -1592,9 +1635,18 @@ function entryMatchesPageUrl(entryUrl, pageUrl) {
 				// violation and is rejected fail-closed. An empty string means
 				// a generic entry (no URL) — the popup's explicit fill stays
 				// allowed. A rejected fill never touches any credential field.
+				// v1.5.0 WP4: the message also carries the entry's URL match
+				// override; a missing match_mode (pre-v1.5.0 sender) falls
+				// back to "auto" — not an error.
 				if (
 					typeof message.entryUrl !== "string" ||
-					!entryMatchesPageUrl(message.entryUrl, window.location.href)
+					!entryMatchesPageUrl(
+						{
+							url: message.entryUrl,
+							url_match_mode: message.match_mode || "auto",
+						},
+						window.location.href,
+					)
 				) {
 					sendResponse({ ok: false, reason: "domain-mismatch" });
 					break;

@@ -3,6 +3,8 @@
  * Creates and manages toast notifications that auto-dismiss.
  */
 
+import { formatExtensionCaller } from "./pairCaller";
+
 const TOAST_DURATION_MS = 3000; // 3 seconds
 
 let toastContainer: HTMLDivElement | null = null;
@@ -84,7 +86,8 @@ export function showToastWithType(
 
 /**
  * Show a pairing-code toast with a large code, countdown progress bar,
- * and an OK button to dismiss early. Auto-dismisses after `duration`.
+ * an optional requesting-extension line, and an OK button to dismiss early.
+ * Auto-dismisses after `duration`.
  *
  * Styling follows the V4 "neon" design adapted to both light and dark app
  * themes via CSS variables (see `.pairing-toast` in components.css). The
@@ -93,10 +96,16 @@ export function showToastWithType(
  * @param code - The 6-digit pairing code to display
  * @param duration - Duration in milliseconds (default: 30000, kept in sync
  *                   with the backend SESSION_TTL)
+ * @param caller - The X-PwdVault-Caller label from the desktop event
+ *                  (v1.5.0 WP5). Shown as a digest (see formatExtensionCaller)
+ *                  so the user can compare it against chrome://extensions.
+ *                  AID ONLY — the label is forgeable on loopback, it is not
+ *                  an authentication signal.
  */
 export function showPairingCodeToast(
 	code: string,
 	duration: number = 30000,
+	caller?: string,
 ): void {
 	const container = ensureContainer();
 
@@ -138,6 +147,17 @@ export function showPairingCodeToast(
 	// Even though the current code is always 6 digits, this is defense-in-depth.
 	const codeEl = toast.querySelector<HTMLDivElement>(".pairing-toast-code");
 	if (codeEl) codeEl.textContent = formatted;
+
+	// v1.5.0 (WP5): requesting-extension row. Built via createElement +
+	// textContent only — the caller label is externally derived and must
+	// never touch innerHTML.
+	if (caller) {
+		const callerRow = document.createElement("div");
+		callerRow.className = "pairing-toast-caller";
+		callerRow.textContent = `请求方：${formatExtensionCaller(caller)}（核对提示，非身份认证）`;
+		const body = toast.querySelector(".pairing-toast-body");
+		if (body) body.appendChild(callerRow);
+	}
 
 	container.appendChild(toast);
 

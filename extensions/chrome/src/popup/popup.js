@@ -308,9 +308,12 @@ class PopupApp {
 		// Local pre-check: never put secrets on the wire for a page this entry
 		// cannot belong to. If tab.url is unavailable (rare), defer to the
 		// content script's authoritative gate. Same predicate semantics as
-		// sender-auth.js; an empty entryUrl (generic entry) passes.
+		// sender-auth.js; an empty entryUrl (generic entry) passes. v1.5.0:
+		// the whole entry goes in — the per-entry url_match_mode override
+		// rides along (absent field = auto, same fallback as the content
+		// script's gate).
 		const entryUrl = entry.url || "";
-		if (tab.url && !entryMatchesPageUrl(entryUrl, tab.url)) {
+		if (tab.url && !entryMatchesPageUrl(entry, tab.url)) {
 			this.showToast("Entry domain does not match this page — fill cancelled");
 			return;
 		}
@@ -321,6 +324,9 @@ class PopupApp {
 				username: fullEntry.username,
 				password: fullEntry.password,
 				entryUrl,
+				// v1.5.0: the entry's per-URL match override; the content
+				// script's gate falls back to "auto" when absent.
+				match_mode: entry.url_match_mode,
 			});
 			if (res?.ok === false) {
 				// Content script refused (domain gate). Stay open so the toast

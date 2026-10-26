@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use crate::entities::{Group, PasswordEntry, Settings};
+use crate::entities::{Group, PasswordEntry, Settings, UrlMatchMode};
 
 /// Request to create a new password entry.
 #[derive(Debug, Serialize, Deserialize)]
@@ -21,6 +21,10 @@ pub struct CreateEntryRequest {
     pub notes: Option<String>,
     pub tags: Vec<String>,
     pub group_id: Option<String>,
+    /// Per-entry URL match override for browser-extension autofill (v1.5.0).
+    /// Serde default keeps older request payloads on the status-quo Auto.
+    #[serde(default)]
+    pub url_match_mode: UrlMatchMode,
 }
 
 /// Patch request for an existing entry. Sensitive fields are optional so a
@@ -43,6 +47,11 @@ pub struct UpdateEntryRequest {
     /// value may be a plain base32 secret or a full `otpauth://` URI.
     #[serde(default)]
     pub totp_secret: Option<String>,
+    /// Per-entry URL match override (v1.5.0). Replaced wholesale on update
+    /// (metadata semantics, same as title/url/tags); the serde default keeps
+    /// older request payloads on the status-quo Auto.
+    #[serde(default)]
+    pub url_match_mode: UrlMatchMode,
 }
 
 impl From<CreateEntryRequest> for UpdateEntryRequest {
@@ -57,6 +66,7 @@ impl From<CreateEntryRequest> for UpdateEntryRequest {
             tags: request.tags,
             group_id: request.group_id,
             totp_secret: None,
+            url_match_mode: request.url_match_mode,
         }
     }
 }
@@ -85,6 +95,10 @@ pub struct TotpCodeResponse {
 /// `Some` only in `list_deleted_entries` (trash) responses. Both are
 /// device-local / tombstone metadata and are ignored by the sync domain
 /// (`SyncEntry` carries neither).
+///
+/// v1.5.0: `url_match_mode` carries the per-entry autofill match override;
+/// the serde default keeps responses from being a breaking change for any
+/// consumer that predates the field.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EntrySummary {
     pub id: String,
@@ -98,6 +112,8 @@ pub struct EntrySummary {
     pub last_used_at: Option<i64>,
     #[serde(default)]
     pub deleted_at: Option<i64>,
+    #[serde(default)]
+    pub url_match_mode: UrlMatchMode,
 }
 
 impl From<PasswordEntry> for EntrySummary {
@@ -113,6 +129,7 @@ impl From<PasswordEntry> for EntrySummary {
             updated_at: entry.updated_at,
             last_used_at: entry.last_used_at,
             deleted_at: entry.deleted_at,
+            url_match_mode: entry.url_match_mode,
         }
     }
 }

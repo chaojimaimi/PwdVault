@@ -10,16 +10,26 @@
 //! - **v2**: AES-256-GCM with AAD = `table_name || record_id || record_format_version` (§5.1.4).
 //!   Binds each record to its table and id, preventing cross-table/cross-record swap.
 //!
-//! ## Layout dual-read (format v3 groundwork)
+//! ## Layout generation chain (format v3 groundwork)
 //!
-//! The inner plaintext layout gained trailing fields (`deleted_at`,
-//! `encrypted_totp_secret`). Bincode 1.x encodes structs positionally and does
-//! NOT honor serde field defaults (upstream bincode#179), so a legacy record
-//! fails to deserialize as the current struct (EOF) and the current struct
-//! fails as a legacy record ("trailing bytes" in the other direction). Every
-//! inner deserialization therefore goes through [`decode_entry_plain`], which
-//! tries the current layout first and falls back to [`LegacyEntryV2`] — the
-//! same pattern as `LegacySettingsV1` in `database/mod.rs`.
+//! The inner plaintext layout has gained trailing fields over time. Bincode
+//! encodes structs positionally and does NOT honor serde field defaults
+//! (upstream bincode#179), so a legacy record fails to deserialize as the
+//! current struct (EOF) and the current struct fails as a legacy record
+//! ("trailing bytes" in the other direction). Every inner deserialization
+//! therefore goes through [`decode_entry_plain`], which walks the generation
+//! chain newest-first:
+//!
+//! 1. **current (v1.5.0+)**: 14 fields — the struct gained `url_match_mode`;
+//! 2. [`LegacyEntryV3`] (v1.1.5–v1.4.1): 13 fields — `url_match_mode`
+//!    defaults to [`UrlMatchMode::Auto`];
+//! 3. [`LegacyEntryV2`] (pre-v1.1.5): 11 fields — `deleted_at` /
+//!    `encrypted_totp_secret` / `url_match_mode` all default.
+//!
+//! Adding a field WITHOUT extending this chain makes every entry written by
+//! older versions unreadable (P0, caught in the v1.5.0 plan review); the
+//! permanent 13-field golden fixture in `bincode_golden.rs` is the tripwire
+//! that keeps generation 2 honest.
 
 use serde::Deserialize;
 
@@ -28,6 +38,7 @@ use crate::crypto::{
 };
 
 use super::{DatabaseError, PasswordEntry};
+use pwdvault_domain::UrlMatchMode;
 
 /// Current record format version for entries (§5.1.4: AAD introduced).
 pub const ENTRY_RECORD_FORMAT_VERSION: u32 = 2;
@@ -49,6 +60,26 @@ struct LegacyEntryV2 {
     group_id: Option<String>,
 }
 
+/// Entry layout written by v1.1.5–v1.4.1: exactly the pre-v1.5.0 13-field
+/// shape (soft delete + TOTP, no per-entry URL match mode). Deserialize-only:
+/// never written back. Generation 2 of the read chain — see the module docs.
+#[derive(Debug, Deserialize)]
+struct LegacyEntryV3 {
+    id: String,
+    title: String,
+    url: Option<String>,
+    username: String,
+    encrypted_password: Vec<u8>,
+    encrypted_notes: Option<Vec<u8>>,
+    tags: Vec<String>,
+    created_at: i64,
+    updated_at: i64,
+    last_used_at: Option<i64>,
+    group_id: Option<String>,
+    deleted_at: Option<i64>,
+    encrypted_totp_secret: Option<Vec<u8>>,
+}
+
 /// Build the AAD for an entry: `table_name || record_id || record_format_version`
 fn entry_aad(entry_id: &str) -> Vec<u8> {
     let mut aad = Vec::new();
@@ -60,13 +91,36 @@ fn entry_aad(entry_id: &str) -> Vec<u8> {
 
 /// Deserialize inner plaintext bytes as a [`PasswordEntry`].
 ///
-/// Tries the current layout first, then the legacy pre-v3 layout with the new
-/// fields defaulting to `None`. All three `open_entry` inner channels (v2
-/// AAD / v1 / plaintext migration) read records that may use either layout,
-/// so they must all route through this helper.
-fn decode_entry_plain(plain: &[u8]) -> Result<PasswordEntry, DatabaseError> {
+/// Walks the layout generation chain newest-first: current 14-field layout →
+/// [`LegacyEntryV3`] (13 fields, `url_match_mode` = Auto) → [`LegacyEntryV2`]
+/// (11 fields, the v1.5.0 fields additionally defaulting). All three
+/// `open_entry` inner channels (v2 AAD / v1 / plaintext migration) read
+/// records that may use any generation, so they must all route through this
+/// helper.
+///
+/// `pub(crate)` so the permanent 13-field golden fixture in
+/// `bincode_golden.rs` can drive the real read path.
+pub(crate) fn decode_entry_plain(plain: &[u8]) -> Result<PasswordEntry, DatabaseError> {
     if let Ok(entry) = bc_deserialize::<PasswordEntry>(plain) {
         return Ok(entry);
+    }
+    if let Ok(legacy) = bc_deserialize::<LegacyEntryV3>(plain) {
+        return Ok(PasswordEntry {
+            id: legacy.id,
+            title: legacy.title,
+            url: legacy.url,
+            username: legacy.username,
+            encrypted_password: legacy.encrypted_password,
+            encrypted_notes: legacy.encrypted_notes,
+            tags: legacy.tags,
+            created_at: legacy.created_at,
+            updated_at: legacy.updated_at,
+            last_used_at: legacy.last_used_at,
+            group_id: legacy.group_id,
+            deleted_at: legacy.deleted_at,
+            encrypted_totp_secret: legacy.encrypted_totp_secret,
+            url_match_mode: UrlMatchMode::Auto,
+        });
     }
     let legacy: LegacyEntryV2 =
         bc_deserialize(plain).map_err(|e| DatabaseError::DeserializationError(e.to_string()))?;
@@ -84,6 +138,7 @@ fn decode_entry_plain(plain: &[u8]) -> Result<PasswordEntry, DatabaseError> {
         group_id: legacy.group_id,
         deleted_at: None,
         encrypted_totp_secret: None,
+        url_match_mode: UrlMatchMode::Auto,
     })
 }
 
@@ -109,9 +164,9 @@ pub fn seal_entry(entry: &PasswordEntry, key: &[u8; 32]) -> Result<Vec<u8>, Data
 /// plaintext record is attacker-injectable (the attacker needs only file write
 /// access), so runtime callers must pass `false` and fail closed.
 ///
-/// Every inner deserialization is layout dual-read: records written before the
-/// soft-delete/TOTP fields were added are upgraded with the new fields as
-/// `None` (see [`decode_entry_plain`]).
+/// Every inner deserialization walks the layout generation chain: records
+/// written before a trailing field was added are upgraded with the new fields
+/// defaulted (see [`decode_entry_plain`]).
 pub fn open_entry(
     blob: &[u8],
     key: &[u8; 32],
@@ -225,7 +280,8 @@ mod tests {
         assert_eq!(entry.encrypted_totp_secret, None);
     }
 
-    /// Channel 2 (v1, no AAD): same dual-read guarantee for v1.0.5 records.
+    /// Channel 2 (v1, no AAD): same generation-chain guarantee for v1.0.5
+    /// records.
     #[test]
     fn legacy_layout_in_v1_channel_reads_with_new_fields_none() {
         let (id, legacy) = legacy_blob();
@@ -262,5 +318,121 @@ mod tests {
         assert_eq!(loaded.title, "Live");
         assert_eq!(loaded.deleted_at, None);
         assert_eq!(loaded.encrypted_totp_secret, None);
+    }
+
+    // -------------------------------------------------------------------
+    // v1.5.0 WP4: generation 2 (LegacyEntryV3, the 13-field layout written
+    // by v1.1.5–v1.4.1) + the 14-field round trip. The permanent golden
+    // fixture for a REAL 13-field blob lives in bincode_golden.rs; these
+    // tests cover the chain behavior on freshly produced blobs.
+    // -------------------------------------------------------------------
+
+    /// Fixture with the exact 13-field layout written by v1.1.5–v1.4.1
+    /// (serialize so tests can produce real generation-2 blobs).
+    #[derive(serde::Serialize)]
+    struct LegacyEntryV3Fixture {
+        id: String,
+        title: String,
+        url: Option<String>,
+        username: String,
+        encrypted_password: Vec<u8>,
+        encrypted_notes: Option<Vec<u8>>,
+        tags: Vec<String>,
+        created_at: i64,
+        updated_at: i64,
+        last_used_at: Option<i64>,
+        group_id: Option<String>,
+        deleted_at: Option<i64>,
+        encrypted_totp_secret: Option<Vec<u8>>,
+    }
+
+    fn v3_blob() -> (String, Vec<u8>) {
+        let fixture = LegacyEntryV3Fixture {
+            id: "v3-entry-1".to_string(),
+            title: "V3 Site".to_string(),
+            url: Some("https://v3.example".to_string()),
+            username: "v3-user".to_string(),
+            encrypted_password: vec![7, 7, 7],
+            encrypted_notes: Some(vec![8, 8, 8]),
+            tags: vec!["v3".to_string()],
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_200,
+            last_used_at: Some(1_700_000_300),
+            group_id: Some("group-9".to_string()),
+            deleted_at: None,
+            encrypted_totp_secret: Some(vec![1, 2, 3]),
+        };
+        let id = fixture.id.clone();
+        (id, bc_serialize(&fixture).unwrap())
+    }
+
+    /// Generation 2 (13-field, v1.1.5–v1.4.1) plaintext records read with
+    /// `url_match_mode` defaulted to Auto and every other field preserved.
+    #[test]
+    fn v3_layout_plaintext_reads_with_match_mode_auto() {
+        let (id, blob) = v3_blob();
+        let entry = open_entry(&blob, &TEST_KEY, &id, true).unwrap();
+        assert_eq!(entry.id, id);
+        assert_eq!(entry.title, "V3 Site");
+        assert_eq!(entry.group_id.as_deref(), Some("group-9"));
+        assert_eq!(entry.last_used_at, Some(1_700_000_300));
+        assert_eq!(entry.deleted_at, None);
+        assert_eq!(entry.encrypted_totp_secret, Some(vec![1, 2, 3]));
+        assert_eq!(entry.url_match_mode, UrlMatchMode::Auto);
+    }
+
+    /// Generation 2 records sealed under the current record format (v2 AAD)
+    /// still read — the layout chain is orthogonal to the record channel.
+    #[test]
+    fn v3_layout_in_v2_aad_channel_reads_with_match_mode_auto() {
+        let (id, legacy) = v3_blob();
+        let mut aad = Vec::new();
+        aad.extend_from_slice(b"entries");
+        aad.extend_from_slice(id.as_bytes());
+        aad.extend_from_slice(&ENTRY_RECORD_FORMAT_VERSION.to_le_bytes());
+        let enc = encrypt_with_aad(&TEST_KEY, &legacy, &aad).unwrap();
+        let blob = bc_serialize(&enc).unwrap();
+
+        let entry = open_entry(&blob, &TEST_KEY, &id, false).unwrap();
+        assert_eq!(entry.title, "V3 Site");
+        assert_eq!(entry.url_match_mode, UrlMatchMode::Auto);
+    }
+
+    /// The current 14-field layout round-trips the per-entry match mode
+    /// through all three variants (bincode variant index is positional).
+    #[test]
+    fn current_layout_roundtrips_all_match_modes() {
+        for (mode, other) in [
+            (UrlMatchMode::Auto, UrlMatchMode::Exact),
+            (UrlMatchMode::Exact, UrlMatchMode::Domain),
+            (UrlMatchMode::Domain, UrlMatchMode::Auto),
+        ] {
+            let mut entry = PasswordEntry::new("Modes".to_string(), None, "user".to_string());
+            entry.url_match_mode = mode;
+            let blob = seal_entry(&entry, &TEST_KEY).unwrap();
+            let loaded = open_entry(&blob, &TEST_KEY, &entry.id, false).unwrap();
+            assert_eq!(loaded.url_match_mode, mode);
+            assert_ne!(loaded.url_match_mode, other);
+        }
+    }
+
+    /// A current-layout entry with a NON-default match mode still round-trips
+    /// its other fields (guards a copy-paste slip in the field mapping).
+    #[test]
+    fn current_layout_roundtrip_preserves_match_mode_with_other_fields() {
+        let mut entry = PasswordEntry::new(
+            "Exact Site".to_string(),
+            Some("https://exact.example".to_string()),
+            "user".to_string(),
+        );
+        entry.url_match_mode = UrlMatchMode::Exact;
+        entry.deleted_at = Some(1_234_567_890);
+        entry.encrypted_totp_secret = Some(vec![4, 5, 6]);
+        let blob = seal_entry(&entry, &TEST_KEY).unwrap();
+
+        let loaded = open_entry(&blob, &TEST_KEY, &entry.id, false).unwrap();
+        assert_eq!(loaded.url_match_mode, UrlMatchMode::Exact);
+        assert_eq!(loaded.deleted_at, Some(1_234_567_890));
+        assert_eq!(loaded.encrypted_totp_secret, Some(vec![4, 5, 6]));
     }
 }

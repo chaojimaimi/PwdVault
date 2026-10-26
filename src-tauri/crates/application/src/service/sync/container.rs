@@ -14,7 +14,7 @@
 //! `version` field). Envelope shape:
 //!
 //! ```text
-//! { version: 1, kdf: { salt, params }, wrapped_cek: EncryptedData,
+//! { version: 2, kdf: { salt, params }, wrapped_cek: EncryptedData,
 //!   snapshot: EncryptedData }
 //! ```
 //!
@@ -37,12 +37,25 @@ use pwdvault_infrastructure::crypto::{
 
 use super::{SyncEntry, SyncGroup, SyncSnapshot};
 
-/// Container format version (D2). v1 only interoperates with v1 — cross
-/// app-version sync is gated here (see the dual-read notes in P2.1).
-pub const CONTAINER_FORMAT_VERSION: u32 = 1;
+/// Container format version (D2). Written exclusively since v1.5.0 (WP4:
+/// `SyncEntry` gained `url_match_mode`, which changes the bincode LWW
+/// fingerprint input — two devices must agree on the fingerprint bytes, so a
+/// v1.4.x peer opening a v2 container must fail cleanly at the version gate
+/// instead of silently stripping the new field on republish). Read side
+/// accepts v1 as well: see `SUPPORTED_READ_VERSIONS`.
+pub const CONTAINER_FORMAT_VERSION: u32 = 2;
 
-/// AAD binding the snapshot blob to container-v1 semantics: a snapshot can
-/// never be replayed under a different purpose or format version.
+/// Versions this build can READ. v1 = containers written by pre-v1.5.0
+/// builds (their serde_json snapshots lack `url_match_mode`; the serde
+/// default lands those entries on Auto — no legacy struct needed). v2 = the
+/// current format. The AAD constants are deliberately NOT versioned for the
+/// bump: same SNAPSHOT_AAD/WRAP_AAD_CONTAINER keeps v1 bytes decryptable.
+const SUPPORTED_READ_VERSIONS: [u32; 2] = [1, CONTAINER_FORMAT_VERSION];
+
+/// AAD binding the snapshot blob to container semantics: a snapshot can
+/// never be replayed under a different purpose. Kept at the v1 value across
+/// the format bump so v1 containers stay readable (see
+/// `SUPPORTED_READ_VERSIONS`).
 const SNAPSHOT_AAD: &[u8] = b"pwdvault-sync-container-snapshot-v1";
 
 #[derive(Error, Debug)]
@@ -149,10 +162,12 @@ pub fn unlock_container(
 fn parse_envelope(bytes: &[u8]) -> Result<SyncContainerV1, ContainerError> {
     // Version gate FIRST, envelope only: an unknown version is a distinct,
     // user-facing "upgrade needed" condition and must be decided before any
-    // key material is touched (also keeps it password-independent).
+    // key material is touched (also keeps it password-independent). Both
+    // readable generations pass (see SUPPORTED_READ_VERSIONS); anything
+    // else — including containers written by a NEWER build — fails here.
     let peek: ContainerPeek =
         serde_json::from_slice(bytes).map_err(|_| ContainerError::InvalidContainer)?;
-    if peek.version != CONTAINER_FORMAT_VERSION {
+    if !SUPPORTED_READ_VERSIONS.contains(&peek.version) {
         return Err(ContainerError::UnsupportedVersion);
     }
     serde_json::from_slice(bytes).map_err(|_| ContainerError::InvalidContainer)
@@ -278,6 +293,7 @@ fn seal_container(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pwdvault_domain::UrlMatchMode;
     use serde_json::json;
 
     use pwdvault_infrastructure::crypto::WRAP_AAD_BIO;
@@ -332,6 +348,7 @@ mod tests {
                 created_at: 1_700_000_000,
                 updated_at: 1_700_000_050,
                 deleted_at: None,
+                url_match_mode: UrlMatchMode::Auto,
             }],
             groups: vec![],
         }
@@ -410,6 +427,9 @@ mod tests {
     fn unknown_container_version_is_reported_before_crypto() {
         let bytes = seal_with_weak_params(&sample_snapshot());
         let mut value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        // A version NEITHER readable generation accepts (3 = newer than this
+        // build). Version 1 readability is pinned by the permanent fixture
+        // below.
         value["version"] = json!(CONTAINER_FORMAT_VERSION + 1);
         let future = serde_json::to_vec(&value).unwrap();
         assert!(matches!(
@@ -420,6 +440,63 @@ mod tests {
             open_container(wrong_password(), &future),
             Err(ContainerError::UnsupportedVersion)
         ));
+    }
+
+    /// PERMANENT FIXTURE — NEVER RECAPTURE (v1.5.0 WP4).
+    ///
+    /// Real bytes of a container written by the v1 format path (pre-v1.5.0:
+    /// `version: 1`, snapshot JSON WITHOUT `url_match_mode`), captured with
+    /// `create_container` immediately before the 1→2 version bump for the
+    /// sample snapshot asserted below. Recapturing this constant against any
+    /// newer writer would launder a v1-readability regression — the exact P0
+    /// class the v1.5.0 plan review exists to prevent. If this test goes
+    /// red, the reader for pre-v1.5.0 containers broke: fix the reader,
+    /// never the fixture.
+    #[test]
+    fn v1_container_real_bytes_still_open() {
+        const V1_CONTAINER_HEX: &str = "7b2276657273696f6e223a312c226b6466223a7b2273616c74223a5b35362c3232392c3131342c3139342c3137332c3234362c3137362c3132372c37372c3135362c3137352c38332c34362c392c34372c38335d2c22706172616d73223a7b226d5f636f7374223a33383931322c22745f636f7374223a322c22705f636f7374223a347d7d2c22777261707065645f63656b223a7b226e6f6e6365223a5b3234352c3234322c3231372c3139362c3231392c3134332c37312c3130392c3139332c3131322c3135372c39355d2c2263697068657274657874223a5b38372c3131322c322c3139362c3139332c34342c3138372c3230352c3130342c3133392c32302c3230302c33372c31382c32302c3137342c3231382c3232362c3138312c3235322c34362c31382c3133342c3235352c33302c3136392c36382c38382c31352c37382c35302c33342c34362c322c3133322c3133362c3231352c37372c36382c3231352c33392c35302c31342c38312c3138322c3138382c3233372c3136305d7d2c22736e617073686f74223a7b226e6f6e6365223a5b37352c3130322c3139392c37352c36372c3230322c31372c3137332c3135392c3230312c34342c32305d2c2263697068657274657874223a5b34342c36372c3231342c3232342c3133372c37392c3133352c3131362c3230352c3138322c3139362c3138392c3132362c31332c39302c3134372c3133382c3132382c3233392c33382c38322c3132342c37372c3233342c3133382c3130372c3232352c3133352c3230352c382c31332c3136332c35342c3234312c35312c3130392c322c37312c31322c3131302c39372c33342c38342c3136392c31322c3139322c39342c3136392c36322c33372c3137362c3233322c3231392c39352c3138302c3138332c3135392c35302c3230302c33352c3130392c3131312c3138362c3234392c39362c3232362c3232382c3139382c38382c37352c3130372c3139362c3139392c3135382c3232372c31332c33382c3232362c34312c35332c3137312c36362c3139322c3234362c3139392c3139332c3132312c37382c3233382c33312c33342c31322c3137382c3234382c32382c35322c31322c322c35322c3231392c3231372c3139322c36352c3232322c36302c35392c37312c35302c39382c3235332c3133322c3232362c3135342c3134332c3232332c33342c31392c3138392c322c32382c33332c3132372c38322c3136302c3136302c39312c38372c3230302c3135372c3132352c34392c3131312c3230352c3131332c3133312c3130382c3235322c3136342c31372c3132322c3234312c37392c3136302c3137362c3138342c33342c3230382c3136382c3139332c3234362c3132392c36352c38362c35322c31372c3133392c38322c3232342c36302c3136322c3138382c3130342c3137302c3133342c3137362c3132332c35312c39342c3132352c36362c3132372c31382c3137362c3130362c3235322c35372c37312c3136352c3234372c3138312c34332c3139362c3137312c33342c3233332c3138362c3132322c3139302c3232352c38382c3130312c3235352c3137342c3235352c3139332c392c3133342c39312c39372c3137352c3139332c3139342c3130332c36362c37372c34332c39362c3131382c36302c3139322c37352c3134352c392c3231322c3133312c3130322c35382c39372c3136382c3135352c36382c3231312c3233342c3233312c3135322c38342c3132352c3134352c38302c3232342c3134302c36392c3135322c36322c302c3234392c3234342c3139302c3131362c3231382c3134392c37392c3230342c37312c3133362c3136302c3234302c3138362c3131392c37362c3133322c3231392c31382c39312c3134342c3131322c3234322c31362c3134322c3234342c3132332c32322c3137342c3233332c3231392c3139312c3230392c3139382c31302c31382c3135372c3233342c3136322c3131372c3138362c33392c3232382c392c39342c38342c3137392c3132312c3131352c36392c3231352c3230352c3139382c3139392c3133322c3130392c31392c34362c3132302c3136382c32392c3132342c3233392c302c3130382c3132392c37302c3233382c352c37342c3138372c35342c3233332c3231312c3136342c34382c35332c3132302c3233342c3137392c39342c36342c3137302c3131312c35332c3231312c3233362c3136352c3232382c3133362c3233312c3134372c38352c33302c3139302c3138352c36302c3138352c3138372c3134302c3230302c33302c37362c3130322c3233302c37372c302c3137322c3132332c3234322c36312c3135342c32322c3231342c3134362c34362c3134302c32392c3231302c3137382c3138302c37352c3138342c35352c3235342c36352c36382c3131372c3138312c3230302c34342c3134302c31322c3139332c34392c3232312c31342c3233382c3134322c3138362c34302c3138352c3235322c3136362c3134302c34342c32302c36312c3137362c33332c3132392c332c34342c31392c39352c3133312c3136382c37312c35352c3130382c32332c36322c3230352c3138372c3136332c36352c3136382c3138302c3132342c36352c3231342c3135342c3234312c3130322c3133302c3130392c3133302c3138302c34392c32362c39332c39342c3135332c3132372c3133372c36362c3137382c38372c39302c372c3130352c37372c3134312c35322c38312c3234372c3134312c33382c3132392c3132382c34312c31372c33372c3235312c3135322c3131322c3135392c36392c3132342c37362c35312c3235352c38312c35312c3133332c3130312c39382c36332c39392c3132332c39352c3137362c3233302c3230392c34382c37362c38382c3230382c3135352c35372c3132392c3231382c3233332c34332c35342c3232382c3130382c35342c33372c3134352c3135362c3132342c3136342c3130332c37372c3138382c3136312c3234342c34392c3234362c38382c3137352c372c3232302c3233362c3133352c3137312c3231322c3231352c3233312c31372c3138322c3135342c3133332c3130362c3233382c3232302c3134382c3130372c31362c3232302c3130382c3132322c31332c3139382c3137332c3230332c3135362c3134392c39312c3138372c3139362c3234342c32322c33325d7d7d";
+        let bytes = decode_hex(V1_CONTAINER_HEX);
+        let opened = open_container(password(), &bytes).unwrap();
+        // The v1 snapshot payload carries no `url_match_mode` key; the
+        // serde default landing every entry on Auto is the load-bearing
+        // read-side compatibility measure (asserted by exact equality).
+        assert_eq!(
+            opened,
+            SyncSnapshot {
+                rev: 7,
+                device_id: "device-capture-v1".to_string(),
+                generated_at: 1_760_000_000,
+                entries: vec![SyncEntry {
+                    id: "capture-entry-1".to_string(),
+                    title: "Capture Title".to_string(),
+                    url: Some("https://capture.example.com/login".to_string()),
+                    username: "capture-user".to_string(),
+                    password: Some("capture-pass".to_string()),
+                    notes: Some("capture note".to_string()),
+                    totp_secret: None,
+                    tags: vec!["capture".to_string()],
+                    group_id: Some("capture-group-1".to_string()),
+                    created_at: 1_759_000_000,
+                    updated_at: 1_759_500_000,
+                    deleted_at: None,
+                    url_match_mode: UrlMatchMode::Auto,
+                }],
+                groups: vec![SyncGroup {
+                    id: "capture-group-1".to_string(),
+                    name: "Capture Group".to_string(),
+                    created_at: 1_759_000_000,
+                    updated_at: 1_759_000_000,
+                    deleted_at: None,
+                }],
+            }
+        );
+    }
+
+    fn decode_hex(s: &str) -> Vec<u8> {
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("fixture hex is well-formed"))
+            .collect()
     }
 
     /// P3.6 item 3: garbage, versionless JSON, truncated envelopes and
@@ -559,13 +636,23 @@ mod bincode_golden {
     use pwdvault_infrastructure::crypto::{bc_deserialize, bc_serialize};
 
     use super::{SyncEntry, SyncGroup};
+    use pwdvault_domain::UrlMatchMode;
 
     /// All-empty / all-`None` `SyncEntry`.
-    const SYNC_ENTRY_MINIMAL_HEX: &str = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+    ///
+    /// v1.5.0 DELIBERATE UPDATE (WP4): `SyncEntry` gained `url_match_mode`
+    /// (`#[serde(default)]`), which changes the fingerprint input layout —
+    /// this fixture was re-captured for the CURRENT 13-field shape (trailing
+    /// u32 enum variant index, Auto = 0).
+    const SYNC_ENTRY_MINIMAL_HEX: &str = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
     /// Fully populated `SyncEntry`: UTF-8 fields, password/notes/totp/group
-    /// set, tombstone, `updated_at = i64::MAX`.
-    const SYNC_ENTRY_FULL_UTF8_HEX: &str = "140000000000000073796e632d656e7472792d757569642df09f94901200000000000000e5908ce6ada5e69da1e79bae2d456e74727901240000000000000068747470733a2f2f73796e632e6578616d706c652e6a702fe383ade382b0e382a4e383b3150000000000000073796e632d75736572406578616d706c652e636f6d010f0000000000000070407373773072642de5af86e7a0810119000000000000006e6f74652d776974682de5a49ae5ad97e88a822d6368617273012b000000000000006f7470617574683a2f2f746f74702f746573743f7365637265743d4a425357593344504548504b335058500200000000000000040000000000000073796e630600000000000000e5908ce6ada5010c0000000000000073796e632d67726f75702d3100f1536500000000ffffffffffffff7f011018546500000000";
+    /// set, tombstone, `updated_at = i64::MAX`, `url_match_mode = Exact`
+    /// (non-zero sentinel so the trailing field's bytes carry data).
+    ///
+    /// v1.5.0 DELIBERATE UPDATE (WP4): re-captured for the 13-field layout
+    /// (same rule as SYNC_ENTRY_MINIMAL_HEX above).
+    const SYNC_ENTRY_FULL_UTF8_HEX: &str = "140000000000000073796e632d656e7472792d757569642df09f94901200000000000000e5908ce6ada5e69da1e79bae2d456e74727901240000000000000068747470733a2f2f73796e632e6578616d706c652e6a702fe383ade382b0e382a4e383b3150000000000000073796e632d75736572406578616d706c652e636f6d010f0000000000000070407373773072642de5af86e7a0810119000000000000006e6f74652d776974682de5a49ae5ad97e88a822d6368617273012b000000000000006f7470617574683a2f2f746f74702f746573743f7365637265743d4a425357593344504548504b335058500200000000000000040000000000000073796e630600000000000000e5908ce6ada5010c0000000000000073796e632d67726f75702d3100f1536500000000ffffffffffffff7f01101854650000000001000000";
 
     /// All-empty / all-`None` `SyncGroup`.
     const SYNC_GROUP_MINIMAL_HEX: &str =
@@ -620,6 +707,7 @@ mod bincode_golden {
             created_at: 0,
             updated_at: 0,
             deleted_at: None,
+            url_match_mode: UrlMatchMode::Auto,
         };
         assert_golden(SYNC_ENTRY_MINIMAL_HEX, &entry);
     }
@@ -639,6 +727,7 @@ mod bincode_golden {
             created_at: 1700000000,
             updated_at: i64::MAX,
             deleted_at: Some(1700010000),
+            url_match_mode: UrlMatchMode::Exact,
         };
         assert_golden(SYNC_ENTRY_FULL_UTF8_HEX, &entry);
     }

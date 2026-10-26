@@ -200,6 +200,7 @@ mod tests {
 
     fn sync_entry(id: &str) -> SyncEntry {
         SyncEntry {
+            url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
             id: id.to_string(),
             title: format!("Title {id}"),
             url: None,
@@ -412,6 +413,7 @@ mod tests {
             .map(|i| format!("tag-{}-{i}", rng.gen_range(0..20)))
             .collect();
         SyncEntry {
+            url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
             id: id.to_string(),
             title: format!("title-{}", rng.gen_range(0..500)),
             url: rng

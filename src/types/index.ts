@@ -1,5 +1,13 @@
 // API Types - matches Rust backend
 
+/**
+ * Per-entry URL matching override for the browser-extension autofill gates
+ * (v1.5.0). Mirrors Rust `UrlMatchMode` (domain/entities.rs, serde lowercase:
+ * the wire values are exactly these strings). Absent/unknown on the wire
+ * degrades to "auto" on every consumer.
+ */
+export type UrlMatchMode = 'auto' | 'exact' | 'domain';
+
 export interface CreateEntryRequest {
   title: string;
   url?: string;
@@ -8,6 +16,8 @@ export interface CreateEntryRequest {
   notes?: string;
   tags: string[];
   group_id?: string | null;
+  /** Omit = auto (the Rust side carries `#[serde(default)]`). */
+  url_match_mode?: UrlMatchMode;
 }
 
 export interface UpdateEntryRequest {
@@ -27,6 +37,8 @@ export interface UpdateEntryRequest {
    * plain base32 secret or a full otpauth:// URI (the backend parses both).
    */
   totp_secret?: string;
+  /** Replaced wholesale on update; omit = auto (serde default). */
+  url_match_mode?: UrlMatchMode;
 }
 
 export type ResourceStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -50,6 +62,11 @@ export interface EntrySummary {
   last_used_at?: number | null;
   /** v1.4.0: set only on trash (list_deleted_entries) rows. */
   deleted_at?: number | null;
+  /**
+   * v1.5.0: per-entry autofill match override. Optional because responses
+   * from a pre-v1.5.0 desktop lack the field; treat as "auto".
+   */
+  url_match_mode?: UrlMatchMode;
 }
 
 export interface Group {
@@ -94,7 +111,7 @@ export type VaultError =
 
 // App State Types
 
-export type AppScreen = 'setup' | 'unlock' | 'vault' | 'entry' | 'generator' | 'groupManager' | 'settings' | 'importExport' | 'recovery';
+export type AppScreen = 'setup' | 'unlock' | 'vault' | 'entry' | 'generator' | 'groupManager' | 'settings' | 'importExport' | 'recovery' | 'dashboard';
 
 // Phase 1 security: mirrors pwdvault_domain::BiometricStatus. `available` —
 // the platform can prompt for biometry (device support + enrollment);
@@ -184,6 +201,12 @@ export interface Settings {
   /** Global show-vault shortcut (v1.4.0). Registration lives in Rust. */
   global_shortcut_enabled: boolean;
   global_shortcut: string;
+  /**
+   * Trash auto-purge (v1.5.0): tombstones older than this many days are
+   * physically deleted by the post-unlock sweep (one ≤500-row batch per
+   * unlock). 0 = off; the UI offers 0/7/30/90.
+   */
+  trash_auto_purge_days: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -197,6 +220,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sort_mode: "recent",
   global_shortcut_enabled: true,
   global_shortcut: "CmdOrCtrl+Shift+Space",
+  trash_auto_purge_days: 0,
 };
 
 // Backup/Restore Types
@@ -218,4 +242,59 @@ export interface VaultBackup {
 export interface ImportResult {
   entries_imported: number;
   groups_imported: number;
+}
+
+// Security Dashboard (v1.5.0 WP1) — mirrors
+// pwdvault_application::SecurityReport. The report is the security contract:
+// ids, counts, and scores only — the backend never sends plaintext secrets.
+
+export interface SecurityReportWeakEntry {
+  id: string;
+  /** 0-100 on the shared getPasswordStrength heuristic. */
+  score: number;
+}
+
+export interface SecurityReport {
+  generated_at: number;
+  /** Live entries scanned. */
+  total: number;
+  /** Entries scoring ≤ 40 ("Very Weak"/"Weak" on the strength meter). */
+  weak: SecurityReportWeakEntry[];
+  /** Groups of ≥ 2 entries sharing the identical password. */
+  reused: string[][];
+  /** Entries not modified for more than a year (updated_at-based). */
+  stale: string[];
+}
+
+// Third-party CSV import (v1.5.0 WP2) — mirrors
+// pwdvault_application::CsvImportPreview / CsvImportResult. Preview rows
+// carry password PRESENCE flags, never values (the plaintext stays in the
+// backend staging between open and commit).
+
+export interface CsvImportPreviewRow {
+  title: string;
+  username: string;
+  url?: string | null;
+  group?: string | null;
+  has_password: boolean;
+  has_notes: boolean;
+  has_totp: boolean;
+}
+
+export interface CsvImportPreview {
+  /** "Bitwarden" | "1Password" | "Chrome" | "KeePassXC". */
+  preset: string;
+  /** Data rows in the file (header excluded, blank lines included). */
+  total_rows: number;
+  /** Rows that will NOT import (blank lines + validation failures). */
+  skipped_rows: number;
+  /** Staged rows whose (username, url) pair already exists in the vault. */
+  duplicate_candidates: number;
+  rows: CsvImportPreviewRow[];
+}
+
+export interface CsvImportResult {
+  created_entries: number;
+  created_groups: number;
+  skipped_rows: number;
 }

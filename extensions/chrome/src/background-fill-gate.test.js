@@ -87,3 +87,47 @@ describe("generator mode passthrough (v1.4.0)", () => {
 		expect(genBody).toMatch(/mode:\s*mode|mode,\s*\.\.\./);
 	});
 });
+
+describe("AUTOFILL match_mode passthrough (v1.5.0 WP4)", () => {
+	// The desktop pins the per-entry override on every EntrySummary; it only
+	// reaches the content script's authoritative gate if every AUTOFILL
+	// constructor relays it. Source-text contract: popup/content scripts have
+	// no importable surface (same rationale as the guards above).
+	const content = readFileSync(join(here, "content.js"), "utf8");
+	const popup = readFileSync(join(here, "popup", "popup.js"), "utf8");
+
+	it("both live background constructors forward the entry's match override", () => {
+		// Exactly two REAL constructor sites carry entry.url_match_mode; the
+		// dead-code relay arm carries message.match_mode (next test).
+		expect(
+			background.split("match_mode: entry.url_match_mode").length - 1,
+		).toBe(2);
+	});
+
+	it("the dead-code relay arm forwards match_mode as-is and says so", () => {
+		const start = background.indexOf('case "AUTOFILL":');
+		expect(start).toBeGreaterThanOrEqual(0);
+		const arm = background.slice(start, start + 1400);
+		expect(arm).toContain("match_mode: message.match_mode");
+		// The self-comment must keep declaring the arm dead AND document the
+		// match_mode forward (the plan required one of forward-or-comment,
+		// written down, never "decide later").
+		expect(arm).toContain("Dead code");
+		expect(arm).toContain("message.match_mode");
+	});
+
+	it("the popup constructor carries match_mode and passes the entry to the gate", () => {
+		const start = popup.indexOf("async autofill(entry)");
+		expect(start).toBeGreaterThanOrEqual(0);
+		const body = popup.slice(start, start + 1800);
+		expect(body).toContain("match_mode: entry.url_match_mode");
+		expect(body).toContain("entryMatchesPageUrl(entry, tab.url)");
+	});
+
+	it("the content gate falls back to auto for a missing match_mode", () => {
+		expect(content).toContain('url_match_mode: message.match_mode || "auto"');
+		// The strict URL-shape check stays fail-closed: a missing entryUrl is
+		// still a protocol violation even though a missing MODE is not.
+		expect(content).toContain('typeof message.entryUrl !== "string"');
+	});
+});

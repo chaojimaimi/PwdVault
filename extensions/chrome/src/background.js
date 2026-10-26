@@ -645,6 +645,9 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 					// entry URL (fail closed). getEntriesForUrl above guarantees a
 					// non-empty entry.url on this path.
 					entryUrl: entry.url,
+					// v1.5.0: the entry's per-URL match override rides along; the
+					// content script falls back to "auto" when absent.
+					match_mode: entry.url_match_mode,
 				});
 			}
 		} else {
@@ -733,13 +736,15 @@ async function handleMessage(message, sender) {
 			return getSettings();
 
 		case "AUTOFILL": {
-			// Dead code (verified 2026-09): every AUTOFILL sender targets the
-			// tab directly via chrome.tabs.sendMessage (popup.js autofill, the
-			// context-menu handler and the keyboard command below) — nothing
-			// relays through the background. Kept deliberately: removing it is
-			// out of scope here. If it is ever revived, it MUST forward
-			// message.entryUrl — the content script rejects AUTOFILL without
-			// it (fail closed).
+			// Dead code (verified 2026-09, re-verified 2026-10 v1.5.0): every
+			// AUTOFILL sender targets the tab directly via
+			// chrome.tabs.sendMessage (popup.js autofill, the context-menu
+			// handler and the keyboard command below) — nothing relays through
+			// the background. Kept deliberately: removing it is out of scope
+			// here. If it is ever revived, it MUST forward message.entryUrl —
+			// the content script rejects AUTOFILL without it (fail closed) —
+			// and message.match_mode (v1.5.0; the content script defaults its
+			// absence to "auto", forwarded here as-is).
 			const [tab] = await chrome.tabs.query({
 				active: true,
 				currentWindow: true,
@@ -749,6 +754,7 @@ async function handleMessage(message, sender) {
 					type: "AUTOFILL",
 					username: message.username,
 					password: message.password,
+					match_mode: message.match_mode,
 				});
 			}
 			return { success: true };
@@ -855,6 +861,8 @@ chrome.commands.onCommand.addListener(async (command) => {
 						// Content script rejects AUTOFILL without the entry URL
 						// (fail closed). getEntriesForUrl guarantees non-empty.
 						entryUrl: entry.url,
+						// v1.5.0: the entry's per-URL match override rides along.
+						match_mode: entry.url_match_mode,
 					});
 				}
 			} catch (error) {

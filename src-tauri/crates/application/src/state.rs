@@ -148,6 +148,11 @@ pub struct AppState {
     /// only if the epoch still matches — a manual/auto lock during the
     /// window is never silently revoked by the window's republish.
     pub lock_epoch: AtomicU64,
+    /// WP2 (v1.5.0): staged plaintext rows for the third-party CSV importer
+    /// (open → preview → commit). The struct derives Zeroize/ZeroizeOnDrop;
+    /// committing consumes it, re-staging supersedes it, and `lock_vault`
+    /// drops it — a staged import never outlives its unlocked session.
+    pub csv_import_staging: Mutex<Option<crate::service::csv_import::CsvStagedImport>>,
     /// Test seams (cfg(test)): one-shot parks placed right after each D8
     /// window's drain. See [`WindowGate`].
     #[cfg(test)]
@@ -219,6 +224,12 @@ impl AppState {
         // makes their republish skip instead of re-unlocking the vault.
         self.lock_epoch.fetch_add(1, Ordering::Release);
         self.session.exclusive_lock_and_clear();
+        // WP2: staged CSV plaintext is session-scoped — drop (zeroizing) it
+        // on every lock path (manual, tray, auto-lock all funnel here).
+        *self
+            .csv_import_staging
+            .lock()
+            .expect("csv staging lock poisoned") = None;
         self.update_lock_menu("Unlock Vault");
     }
 }
@@ -240,6 +251,7 @@ impl Default for AppState {
             sync_secret_store: platform_sync_default(),
             exclusive_window: Mutex::new(()),
             lock_epoch: AtomicU64::new(0),
+            csv_import_staging: Mutex::new(None),
             #[cfg(test)]
             merge_window_gate: WindowGate::default(),
             #[cfg(test)]

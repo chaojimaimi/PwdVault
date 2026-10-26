@@ -45,6 +45,7 @@ use std::collections::HashMap;
 use std::mem;
 
 use pwdvault_domain::validation::normalize_url;
+use pwdvault_domain::UrlMatchMode;
 use pwdvault_infrastructure::crypto::{bc_serialize, encrypt, KEY_SIZE};
 use pwdvault_infrastructure::database::PasswordEntry;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -90,6 +91,15 @@ pub struct SyncEntry {
     pub created_at: i64,
     pub updated_at: i64,
     pub deleted_at: Option<i64>,
+    /// Per-entry URL match override for the extension's autofill gates
+    /// (v1.5.0 WP4). `#[serde(default)]` is LOAD-BEARING for read-side v1
+    /// container compatibility: the snapshot payload is serde_json (not
+    /// bincode), so containers written before the field existed deserialize
+    /// with every entry on Auto. Bincode IS used for the LWW fingerprint —
+    /// both devices must therefore run the same container format version
+    /// (the reason CONTAINER_FORMAT_VERSION bumped to 2).
+    #[serde(default)]
+    pub url_match_mode: UrlMatchMode,
 }
 
 /// One group in sync (plaintext-domain) form (D2).
@@ -151,6 +161,7 @@ pub fn entries_to_sync(
                 created_at: entry.created_at,
                 updated_at: entry.updated_at,
                 deleted_at: entry.deleted_at,
+                url_match_mode: entry.url_match_mode,
             }
         })
         .collect()
@@ -167,7 +178,8 @@ pub fn sync_to_entry(
 ) -> Result<PasswordEntry, VaultError> {
     // `SyncEntry` is ZeroizeOnDrop — partial moves are forbidden (E0509).
     // Take each owned field instead: the values flow on exactly as before
-    // and the emptied shell is wiped when `entry` drops.
+    // and the emptied shell is wiped when `entry` drops. `url_match_mode`
+    // is Copy, so it is read (copied) out alongside the takes.
     let id = mem::take(&mut entry.id);
     let title = mem::take(&mut entry.title);
     let url = normalize_url(mem::take(&mut entry.url));
@@ -176,6 +188,7 @@ pub fn sync_to_entry(
     let totp_secret = mem::take(&mut entry.totp_secret);
     let tags = mem::take(&mut entry.tags);
     let group_id = mem::take(&mut entry.group_id);
+    let url_match_mode = entry.url_match_mode;
 
     let mut sealed = PasswordEntry::new(title, url, username);
     sealed.id = id;
@@ -198,6 +211,7 @@ pub fn sync_to_entry(
     sealed.created_at = entry.created_at;
     sealed.updated_at = entry.updated_at;
     sealed.deleted_at = entry.deleted_at;
+    sealed.url_match_mode = url_match_mode;
     Ok(sealed)
 }
 
@@ -233,6 +247,7 @@ mod tests {
             created_at: 1_700_000_000,
             updated_at: 1_700_000_100,
             deleted_at: None,
+            url_match_mode: UrlMatchMode::Auto,
         }
     }
 
@@ -240,7 +255,9 @@ mod tests {
     /// secrets sealed exactly like the CRUD service writes them.
     #[test]
     fn conversion_roundtrip_preserves_fields_and_secrets() {
-        let entry = sync_entry("e1");
+        let mut entry = sync_entry("e1");
+        // v1.5.0 WP4: a non-default match mode must survive both directions.
+        entry.url_match_mode = UrlMatchMode::Exact;
         let sealed = sync_to_entry(entry.clone(), &ENC_KEY).unwrap();
         assert_eq!(sealed.id, "e1");
         assert_eq!(sealed.tags, entry.tags);
@@ -248,6 +265,7 @@ mod tests {
         assert_eq!(sealed.created_at, entry.created_at);
         assert_eq!(sealed.updated_at, entry.updated_at);
         assert_eq!(sealed.deleted_at, None);
+        assert_eq!(sealed.url_match_mode, UrlMatchMode::Exact);
         assert_eq!(decrypt_inner(&sealed.encrypted_password), "s3cret");
         assert!(sealed.encrypted_notes.is_some());
         assert!(sealed.encrypted_totp_secret.is_some());
@@ -328,5 +346,7 @@ mod tests {
         assert_eq!(entry.created_at, 0);
         assert_eq!(entry.updated_at, 0);
         assert_eq!(entry.deleted_at, None);
+        // The match override zeroes back to the default (Auto), not garbage.
+        assert_eq!(entry.url_match_mode, UrlMatchMode::Auto);
     }
 }

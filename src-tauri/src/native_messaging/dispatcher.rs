@@ -23,6 +23,19 @@ fn vault_error_to_message(err: VaultError) -> String {
     err.public_message()
 }
 
+/// WP5 (v1.5.0): payload of the `pair-request` desktop event. The caller
+/// label rides along so the desktop toast can show an ID digest the user can
+/// compare against chrome://extensions / about:addons.
+///
+/// SECURITY POSITIONING: `X-PwdVault-Caller` is derived by the native host
+/// from browser process arguments, but on a loopback socket any local
+/// process can forge the header (protocol.rs origin note) — the digest is a
+/// comparison AID for the user, NOT an authentication signal. The pairing
+/// code itself remains the secret being displayed.
+fn pair_request_payload(code: &str, caller: &str) -> serde_json::Value {
+    serde_json::json!({ "code": code, "caller": caller })
+}
+
 pub(super) fn execute_command(
     req: NativeRequest,
     state: Arc<AppState>,
@@ -58,15 +71,18 @@ pub(super) fn execute_command(
         // Extension pairing — returns API token (no auth required, origin checked in handle_request)
         // Rate limited to prevent token enumeration attacks
         "pair" => {
-            let caller = caller.as_deref().ok_or("Browser caller required")?;
+            let caller_label = caller.as_deref().ok_or("Browser caller required")?;
             enforce_pair_rate_limit(&state)?;
 
-            let challenge = pwdvault_infrastructure::pairing::create_session(caller);
+            let challenge = pwdvault_infrastructure::pairing::create_session(caller_label);
             // Notify desktop UI to display the pairing code. SF-P3c: an emit
             // failure must not stay silent — the pairing would stall with no
-            // code shown anywhere and no trace of why.
+            // code shown anywhere and no trace of why. WP5: the payload now
+            // carries the caller label (see `pair_request_payload` for the
+            // security positioning — comparison aid, not authentication).
             if let Some(handle) = app_handle {
-                if let Err(error) = handle.emit("pair-request", &challenge.code) {
+                let payload = pair_request_payload(&challenge.code, caller_label);
+                if let Err(error) = handle.emit("pair-request", &payload) {
                     tracing::error!("could not surface the pair-request code: {}", error);
                 }
             }
@@ -117,9 +133,18 @@ pub(super) fn execute_command(
 
         "unlock_vault" => {
             let password = req.password.ok_or("Password required".to_string())?;
-            service::unlock_vault(&state, password)
-                .map(|ok| serde_json::to_value(ok).expect("bool serializable"))
-                .map_err(vault_error_to_message)
+            let unlocked =
+                service::unlock_vault(&state, password).map_err(vault_error_to_message)?;
+            // WP3 (v1.5.0): same post-unlock trash auto-purge as the Tauri
+            // unlock commands — runs after the keys are published, one batch
+            // (≤500 rows) per unlock; count=0 is not emitted. A failed sweep
+            // is logged inside the helper, never surfaced as an unlock error.
+            if unlocked {
+                if let Some(handle) = app_handle.as_ref() {
+                    crate::unlock_effects::sweep_trash_and_emit(handle, &state);
+                }
+            }
+            Ok(serde_json::to_value(unlocked).expect("bool serializable"))
         }
 
         "lock_vault" => {
@@ -149,6 +174,9 @@ pub(super) fn execute_command(
                 notes: req.notes,
                 tags: req.tags.unwrap_or_default(),
                 group_id: req.group_id,
+                // v1.5.0 WP4: the serde default (Auto) covers pre-v1.5.0
+                // extension payloads that omit the field.
+                url_match_mode: req.url_match_mode,
             };
             service::create_entry(&state, request)
                 .map(|summary| serde_json::to_value(summary).expect("entry serializable"))
@@ -216,6 +244,9 @@ pub(super) fn execute_command(
                 // totp_code is Tauri-only (D6); the extension never patches
                 // TOTP secrets.
                 totp_secret: None,
+                // v1.5.0 WP4: the serde default (Auto) covers pre-v1.5.0
+                // extension payloads that omit the field.
+                url_match_mode: req.url_match_mode,
             };
             service::update_entry(&state, id, request)
                 .map(|summary| serde_json::to_value(summary).expect("entry serializable"))
@@ -281,5 +312,31 @@ pub(super) fn execute_command(
         }
 
         _ => Err("Unknown command".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pair_request_payload;
+
+    /// WP5: the desktop `pair-request` payload carries BOTH the code and the
+    /// caller label. The frontend formats the label for display (Chrome ids
+    /// truncated to first4…last4); the raw label shape is pinned here so a
+    /// payload-shape drift cannot silently blank the toast's 请求方 row.
+    #[test]
+    fn pair_request_payload_carries_code_and_caller() {
+        let payload = pair_request_payload(
+            "123456",
+            "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
+        );
+        assert_eq!(payload["code"], "123456");
+        assert_eq!(
+            payload["caller"],
+            "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
+        );
+
+        let firefox = pair_request_payload("654321", "moz-extension://pwdvault@pwdvault.app");
+        assert_eq!(firefox["code"], "654321");
+        assert_eq!(firefox["caller"], "moz-extension://pwdvault@pwdvault.app");
     }
 }

@@ -304,6 +304,7 @@ fn assert_write_rejected_during_window(state: &Arc<AppState>) {
     let write = crate::create_entry(
         state,
         crate::CreateEntryRequest {
+            url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
             title: "during-window".to_string(),
             url: None,
             username: "user".to_string(),

@@ -27,6 +27,7 @@ use crate::crypto::{
     bc_deserialize, bc_serialize, AdaptiveParams, EncryptedData, VerificationData,
 };
 use crate::vault_header::VaultHeader;
+use pwdvault_domain::UrlMatchMode;
 
 use super::{Group, PasswordEntry, Settings};
 
@@ -41,11 +42,38 @@ const ENCRYPTED_DATA_EMPTY_HEX: &str = "00000000000000000000000000000000";
 const ENCRYPTED_DATA_POPULATED_HEX: &str = "0c00000000000000000102030405060708090a0b010100000000000000070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900";
 
 /// All-empty / all-`None` `PasswordEntry` (zero timestamps).
-const PASSWORD_ENTRY_MINIMAL_HEX: &str = "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+///
+/// v1.5.0 DELIBERATE UPDATE (WP4): the struct gained `url_match_mode`
+/// (`#[serde(default)]`) — the trailing u32 enum variant index (Auto = 0)
+/// changes the bincode layout, so this fixture was re-captured for the
+/// CURRENT 14-field shape. Older layouts stay readable via the codec's
+/// generation chain (`entry_codec::decode_entry_plain`), pinned by the
+/// permanent 13-field fixture below.
+const PASSWORD_ENTRY_MINIMAL_HEX: &str = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
 /// Fully populated `PasswordEntry`: UTF-8 ids/titles/tags, populated secret
-/// blobs, tombstone + TOTP + group set.
-const PASSWORD_ENTRY_FULL_UTF8_HEX: &str = "1400000000000000656e7472792d757569642de697a5e69cace8aa9e1100000000000000e6a087e9a2982d5469746c652df09f8e8b011a0000000000000068747470733a2f2f6578616d706c652e636f6d2fe8aaace6988e100000000000000075736572406578616d706c652e636f6d3000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f012000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f03000000000000000400000000000000776f726b0600000000000000e993b6e8a18c2b000000000000007461672d776974682d766572792d6c6f6e672d6e616d652d666f722d6c656e6774682d636f76657261676500f1536500000000d2f5536500000000010f1854650000000001070000000000000067726f75702d31011018546500000000011400000000000000000102030405060708090a0b0c0d0e0f10111213";
+/// blobs, tombstone + TOTP + group set, `url_match_mode = Exact` (non-zero
+/// sentinel so the trailing field's bytes carry data).
+///
+/// v1.5.0 DELIBERATE UPDATE (WP4): re-captured for the 14-field layout
+/// (same rule as PASSWORD_ENTRY_MINIMAL_HEX above).
+const PASSWORD_ENTRY_FULL_UTF8_HEX: &str = "1400000000000000656e7472792d757569642de697a5e69cace8aa9e1100000000000000e6a087e9a2982d5469746c652df09f8e8b011a0000000000000068747470733a2f2f6578616d706c652e636f6d2fe8aaace6988e100000000000000075736572406578616d706c652e636f6d3000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f012000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f03000000000000000400000000000000776f726b0600000000000000e993b6e8a18c2b000000000000007461672d776974682d766572792d6c6f6e672d6e616d652d666f722d6c656e6774682d636f76657261676500f1536500000000d2f5536500000000010f1854650000000001070000000000000067726f75702d31011018546500000000011400000000000000000102030405060708090a0b0c0d0e0f1011121301000000";
+
+/// PERMANENT FIXTURE — NEVER RECAPTURE (v1.5.0 WP4).
+///
+/// Real bytes of the 13-field `PasswordEntry` layout written by
+/// v1.1.5–v1.4.1 (soft delete + TOTP, NO `url_match_mode`), generated from
+/// the same logical sample as `PASSWORD_ENTRY_FULL_UTF8_HEX` via a
+/// test-only 13-field `Serialize` struct (the entry_codec.rs fixture
+/// pattern — not hand-assembled hex) and captured immediately before the
+/// 14th field landed. Recapturing this constant against ANY current-shape
+/// struct would launder a legacy-readability regression: the v1.5.0 plan
+/// review flagged exactly this (a naive field addition made every
+/// v1.1.5–v1.4.1 entry unreadable while the freshly re-captured current
+/// fixtures stayed green). If this test goes red, the generation chain in
+/// `entry_codec::decode_entry_plain` broke — fix the reader, never the
+/// fixture.
+const PASSWORD_ENTRY_V3_13_FIELD_HEX: &str = "1400000000000000656e7472792d757569642de697a5e69cace8aa9e1100000000000000e6a087e9a2982d5469746c652df09f8e8b011a0000000000000068747470733a2f2f6578616d706c652e636f6d2fe8aaace6988e100000000000000075736572406578616d706c652e636f6d3000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f012000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f03000000000000000400000000000000776f726b0600000000000000e993b6e8a18c2b000000000000007461672d776974682d766572792d6c6f6e672d6e616d652d666f722d6c656e6774682d636f76657261676500f1536500000000d2f5536500000000010f1854650000000001070000000000000067726f75702d31011018546500000000011400000000000000000102030405060708090a0b0c0d0e0f10111213";
 
 /// All-empty / all-`None` `Group`.
 const GROUP_MINIMAL_HEX: &str =
@@ -55,19 +83,22 @@ const GROUP_MINIMAL_HEX: &str =
 const GROUP_FULL_EXTREMES_HEX: &str = "0f0000000000000067726f75702d757569642df09f8eaf1200000000000000e5b7a5e4bd9c2fe4b8aae4baba2d42616e6b000000000000008000f153650000000001ffffffffffffff7f";
 
 /// `Settings::default()` (600s / 16 / all-true / "recent" / shortcut on +
-/// "CmdOrCtrl+Shift+Space").
+/// "CmdOrCtrl+Shift+Space" / trash_auto_purge_days 0).
 ///
 /// v1.4.0 DELIBERATE UPDATE: the Settings struct gained `sort_mode`,
 /// `global_shortcut_enabled`, `global_shortcut` (all `#[serde(default)]`).
-/// This re-captured fixture pins the CURRENT shape; the legacy READ path is
-/// unaffected (old rows go through `LegacySettingsV1`/bincode fallbacks in
+/// v1.5.0 DELIBERATE UPDATE (WP3): the struct gained `trash_auto_purge_days`
+/// (`#[serde(default)]`, default 0 = off) — the trailing u32 changes the
+/// bincode layout, so this fixture was re-captured for the CURRENT shape.
+/// The legacy READ path is unaffected (old rows go through
+/// `LegacySettingsV1`/bincode fallbacks or the JSON path in
 /// `database::load_settings`, whose shapes did not change, and the current
 /// write path stores JSON anyway).
-const SETTINGS_DEFAULT_HEX: &str = "5802000000000000100000000000000001010101010600000000000000726563656e74011500000000000000436d644f724374726c2b53686966742b5370616365";
+const SETTINGS_DEFAULT_HEX: &str = "5802000000000000100000000000000001010101010600000000000000726563656e74011500000000000000436d644f724374726c2b53686966742b537061636500000000";
 
-/// `Settings` at `u64::MAX` / `usize::MAX` / all-false.
+/// `Settings` at `u64::MAX` / `usize::MAX` / all-false / `u32::MAX` days.
 const SETTINGS_EXTREMES_HEX: &str =
-    "ffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000";
+    "ffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000ffffffff";
 
 /// `VerificationData` with zero salt, default params, empty header blob.
 const VERIFICATION_DATA_BASELINE_HEX: &str =
@@ -173,6 +204,7 @@ fn password_entry_minimal() {
         group_id: None,
         deleted_at: None,
         encrypted_totp_secret: None,
+        url_match_mode: UrlMatchMode::Auto,
     };
     assert_golden(PASSWORD_ENTRY_MINIMAL_HEX, &entry);
 }
@@ -197,8 +229,52 @@ fn password_entry_full_utf8() {
         group_id: Some("group-1".to_string()),
         deleted_at: Some(1700010000),
         encrypted_totp_secret: Some((0..20u8).collect()),
+        url_match_mode: UrlMatchMode::Exact,
     };
     assert_golden(PASSWORD_ENTRY_FULL_UTF8_HEX, &entry);
+}
+
+/// PERMANENT FIXTURE (see `PASSWORD_ENTRY_V3_13_FIELD_HEX`): a real
+/// v1.1.5–v1.4.1 13-field blob must still open as a current entry through
+/// the codec's generation chain, with `url_match_mode` defaulted to Auto
+/// and every stored field preserved. Drives the real read path
+/// (`decode_entry_plain`), not a bare `bc_deserialize` — the chain is the
+/// contract.
+#[test]
+fn password_entry_v3_13_field_blob_still_reads() {
+    let bytes = decode_hex(PASSWORD_ENTRY_V3_13_FIELD_HEX);
+    // A bare current-struct deserialize MUST fail on a 13-field blob (that
+    // failure is why the chain exists).
+    assert!(
+        bc_deserialize::<PasswordEntry>(&bytes).is_err(),
+        "13-field blob must not parse as the current 14-field layout"
+    );
+    let entry = super::entry_codec::decode_entry_plain(&bytes)
+        .expect("the v1.1.5-v1.4.1 13-field entry layout must stay readable");
+    assert_eq!(entry.id, "entry-uuid-日本語");
+    assert_eq!(entry.title, "标题-Title-🎋");
+    assert_eq!(entry.url.as_deref(), Some("https://example.com/説明"));
+    assert_eq!(entry.username, "user@example.com");
+    assert_eq!(entry.encrypted_password, (0..48u8).collect::<Vec<u8>>());
+    assert_eq!(entry.encrypted_notes, Some((0..32u8).collect::<Vec<u8>>()));
+    assert_eq!(
+        entry.tags,
+        vec![
+            "work".to_string(),
+            "银行".to_string(),
+            "tag-with-very-long-name-for-length-coverage".to_string(),
+        ]
+    );
+    assert_eq!(entry.created_at, 1700000000);
+    assert_eq!(entry.updated_at, 1700001234);
+    assert_eq!(entry.last_used_at, Some(1700009999));
+    assert_eq!(entry.group_id.as_deref(), Some("group-1"));
+    assert_eq!(entry.deleted_at, Some(1700010000));
+    assert_eq!(
+        entry.encrypted_totp_secret,
+        Some((0..20u8).collect::<Vec<u8>>())
+    );
+    assert_eq!(entry.url_match_mode, UrlMatchMode::Auto);
 }
 
 #[test]
@@ -243,6 +319,7 @@ fn settings_extremes() {
         sort_mode: String::new(),
         global_shortcut_enabled: false,
         global_shortcut: String::new(),
+        trash_auto_purge_days: u32::MAX,
     };
     assert_golden(SETTINGS_EXTREMES_HEX, &settings);
 }

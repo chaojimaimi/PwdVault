@@ -1,4 +1,4 @@
-import type { CreateEntryRequest, UpdateEntryRequest, EntrySecretResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, Group, BiometricStatus, RecoveryEnableResult, SyncConfig, SyncStatusResponse, TotpCodeResponse, BaiduAuthStart } from '../types';
+import type { CreateEntryRequest, UpdateEntryRequest, EntrySecretResponse, EntrySummary, PasswordGeneratorOptions, Settings, VaultBackup, ImportResult, Group, BiometricStatus, RecoveryEnableResult, SyncConfig, SyncStatusResponse, TotpCodeResponse, BaiduAuthStart, SecurityReport, CsvImportPreview, CsvImportResult } from '../types';
 import { isTauriEnvironment } from '../utils/environment';
 
 // Unified invoke function that works in both Tauri and browser environments
@@ -281,4 +281,40 @@ export async function baiduStartAuth(): Promise<BaiduAuthStart> {
 /** `null`/empty consumes the code captured by the pending callback. */
 export async function baiduCompleteAuth(code: string | null): Promise<void> {
   return invoke('baidu_complete_auth', { code });
+}
+
+// Security dashboard (v1.5.0 WP1) + third-party CSV import (WP2) — Tauri IPC
+// only (D6). The report carries ids/scores only; the CSV staging keeps the
+// plaintext rows inside the backend between open and commit.
+
+/** Aggregate the security dashboard report (weak / reused / stale). */
+export async function getSecurityReport(): Promise<SecurityReport> {
+  return invoke('security_report');
+}
+
+/**
+ * Pick a CSV file through the NATIVE open dialog, stage it in the backend,
+ * and return the password-free preview. `null` means the dialog was
+ * cancelled — not an error.
+ */
+export async function importCsvOpen(): Promise<CsvImportPreview | null> {
+  return invoke('import_csv_open', { bytes: null });
+}
+
+/**
+ * Browser-fallback twin of importCsvOpen: the webview reads the file first
+ * and ships the bytes (UTF-8 text as a byte array — serde's Vec<u8> wants a
+ * JSON number array) to the same command. The plaintext crosses the webview
+ * on this path — risk accepted in the plan; it only exists for non-Tauri
+ * frontends.
+ */
+export async function importCsvOpenBytes(text: string): Promise<CsvImportPreview | null> {
+  return invoke('import_csv_open', {
+    bytes: Array.from(new TextEncoder().encode(text)),
+  });
+}
+
+/** Commit the staged import (the staging the last successful preview showed). */
+export async function importCsvCommit(): Promise<CsvImportResult> {
+  return invoke('import_csv_commit');
 }

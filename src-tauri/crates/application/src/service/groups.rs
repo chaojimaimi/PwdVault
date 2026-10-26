@@ -181,6 +181,7 @@ mod tests {
         create_entry(
             state,
             crate::CreateEntryRequest {
+                url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
                 title: "Member entry".to_string(),
                 url: None,
                 username: "user".to_string(),

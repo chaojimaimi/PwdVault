@@ -387,6 +387,7 @@ fn concurrent_writes_during_change_password_do_not_corrupt_vault() {
             while !stop_writes.load(std::sync::atomic::Ordering::SeqCst) && i < 5_000 {
                 let id = &entry_ids[i % entry_ids.len()];
                 let request = pwdvault_domain::UpdateEntryRequest {
+                    url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
                     title: format!("w{w}-{i}"),
                     url: None,
                     username: format!("writer-{w}"),

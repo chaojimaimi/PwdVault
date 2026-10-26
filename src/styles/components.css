@@ -645,6 +645,15 @@
   user-select: all;
 }
 
+/* v1.5.0 (WP5): requesting-extension digest row. The text is set via
+   textContent in toast.ts (XSS-safe); this only styles it. */
+.pairing-toast-caller {
+  font-size: 11px;
+  margin: -8px 0 0;
+  opacity: 0.85;
+  word-break: break-all;
+}
+
 .pairing-toast-progress {
   height: 3px;
   overflow: hidden;

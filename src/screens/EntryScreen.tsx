@@ -23,6 +23,7 @@ import type {
 	CreateEntryRequest,
 	EntrySummary,
 	UpdateEntryRequest,
+	UrlMatchMode,
 } from "../types";
 
 /**
@@ -37,12 +38,49 @@ export function sameTags(a: string[], b: string[]): boolean {
 }
 
 /**
+ * v1.5.0 WP4: the URL match override as a normalizable accessor — a summary
+ * from a pre-v1.5.0 desktop (or any absent value) reads as "auto", matching
+ * the Rust serde default and the extension's fallback. Unknown strings (the
+ * TS type is an IPC trust boundary, not a runtime guarantee) degrade to
+ * "auto" too, same as the extension's `|| "auto"`.
+ */
+export function normalizeMatchMode(
+	mode: UrlMatchMode | undefined,
+): UrlMatchMode {
+	return mode === "exact" || mode === "domain" ? mode : "auto";
+}
+
+/** Select options + confirmation-modal display values (single source). */
+export const URL_MATCH_MODE_OPTIONS: {
+	value: UrlMatchMode;
+	label: string;
+	hint: string;
+}[] = [
+	{
+		value: "auto",
+		label: "Auto (recommended)",
+		hint: "Fills on the site's registrable domain — subdomains of the stored URL's site are allowed.",
+	},
+	{
+		value: "exact",
+		label: "Exact host",
+		hint: "Fills only on exactly this host (subdomains and www variants do not match).",
+	},
+	{
+		value: "domain",
+		label: "Registrable domain",
+		hint: "Always matches by registrable domain (eTLD+1), pinned even if Auto matching evolves.",
+	},
+];
+
+/**
  * Pure diff between the saved entry and the current form, for the save
  * confirmation modal. Every "changed" flag is passed in explicitly (secrets
  * are fetched on demand, so password/notes/TOTP edits are tracked outside
  * `current`); `totpChanged` implements the TOTP tri-state (untouched / cleared / set).
+ * Exported for the pure-function test matrix (sameTags precedent).
  */
-function detectChanges(
+export function detectChanges(
 	originalMeta: EntrySummary,
 	originalSecret: { password: string; notes: string } | null,
 	current: CreateEntryRequest,
@@ -66,6 +104,21 @@ function detectChanges(
 			label: "URL",
 			oldValue: originalMeta.url || "",
 			newValue: current.url || "",
+			valueType: "text",
+		});
+	}
+	if (
+		normalizeMatchMode(originalMeta.url_match_mode) !==
+		normalizeMatchMode(current.url_match_mode)
+	) {
+		const labelOf = (mode: UrlMatchMode | undefined) =>
+			URL_MATCH_MODE_OPTIONS.find((o) => o.value === normalizeMatchMode(mode))
+				?.label ?? "";
+		changes.push({
+			fieldId: "url_match_mode",
+			label: "URL Match",
+			oldValue: labelOf(originalMeta.url_match_mode),
+			newValue: labelOf(current.url_match_mode),
 			valueType: "text",
 		});
 	}
@@ -143,6 +196,7 @@ export function EntryScreen() {
 		notes: "",
 		tags: [],
 		group_id: null,
+		url_match_mode: "auto",
 	});
 	const [originalSecret, setOriginalSecret] = useState<{
 		password: string;
@@ -185,6 +239,8 @@ export function EntryScreen() {
 				notes: "",
 				tags: state.selectedEntry.tags,
 				group_id: state.selectedEntry.group_id || null,
+				// Absent on pre-v1.5.0 summaries → reads as "auto" (serde default).
+				url_match_mode: normalizeMatchMode(state.selectedEntry.url_match_mode),
 			});
 			setOriginalSecret(null);
 			setPasswordChanged(false);
@@ -202,6 +258,7 @@ export function EntryScreen() {
 				notes: "",
 				tags: [],
 				group_id: null,
+				url_match_mode: "auto",
 			});
 			setOriginalSecret(null);
 			setPasswordChanged(false);
@@ -222,18 +279,23 @@ export function EntryScreen() {
 					formData.password ||
 					formData.notes ||
 					formData.tags.length ||
-					formData.group_id,
+					formData.group_id ||
+					// A non-default match override is unsaved content on a new entry.
+					normalizeMatchMode(formData.url_match_mode) !== "auto",
 			);
 		}
-	return (
-		state.selectedEntry.title !== formData.title ||
-		(state.selectedEntry.url || "") !== (formData.url || "") ||
-		state.selectedEntry.username !== formData.username ||
-		!sameTags(state.selectedEntry.tags || [], formData.tags) ||
-		(state.selectedEntry.group_id || null) !== (formData.group_id || null)
-	);
+		return (
+			state.selectedEntry.title !== formData.title ||
+			(state.selectedEntry.url || "") !== (formData.url || "") ||
+			normalizeMatchMode(state.selectedEntry.url_match_mode) !==
+				normalizeMatchMode(formData.url_match_mode) ||
+			state.selectedEntry.username !== formData.username ||
+			!sameTags(state.selectedEntry.tags || [], formData.tags) ||
+			(state.selectedEntry.group_id || null) !== (formData.group_id || null)
+		);
 	}, [formData, state.selectedEntry]);
-	const isDirty = metadataDirty || passwordChanged || notesChanged || totpChanged;
+	const isDirty =
+		metadataDirty || passwordChanged || notesChanged || totpChanged;
 
 	useEffect(() => {
 		const warn = (event: BeforeUnloadEvent) => {
@@ -310,6 +372,8 @@ export function EntryScreen() {
 			update_notes: notesChanged,
 			tags: formData.tags,
 			group_id: formData.group_id,
+			// v1.5.0: replaced wholesale with every update (metadata semantics).
+			url_match_mode: normalizeMatchMode(formData.url_match_mode),
 			// TOTP tri-state: omit when untouched, "" clears, value sets.
 			...(totpChanged ? { totp_secret: totpSecret.trim() } : {}),
 		});
@@ -491,6 +555,36 @@ export function EntryScreen() {
 						onChange={(e) => setFormData({ ...formData, url: e.target.value })}
 						placeholder="https://example.com"
 					/>
+					{/* v1.5.0 WP4: per-entry autofill match override. The label
+					    references the visible option text (no aria-label), and the
+					    hint is programmatically associated so screen readers get the
+					    explanation with the control. */}
+					<label htmlFor="entry-url-match-mode">Browser autofill matches</label>
+					<select
+						id="entry-url-match-mode"
+						className="form-input"
+						value={normalizeMatchMode(formData.url_match_mode)}
+						onChange={(e) =>
+							setFormData({
+								...formData,
+								url_match_mode: e.target.value as UrlMatchMode,
+							})
+						}
+						aria-describedby="entry-url-match-mode-hint"
+					>
+						{URL_MATCH_MODE_OPTIONS.map((opt) => (
+							<option key={opt.value} value={opt.value}>
+								{opt.label}
+							</option>
+						))}
+					</select>
+					<p className="url-match-hint" id="entry-url-match-mode-hint">
+						{
+							URL_MATCH_MODE_OPTIONS.find(
+								(o) => o.value === normalizeMatchMode(formData.url_match_mode),
+							)?.hint
+						}
+					</p>
 				</div>
 
 				<div className="form-group">

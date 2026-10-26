@@ -475,6 +475,7 @@ fn legacy_fixtures_full_chain_round_trip() {
     let new_id = create_entry(
         &state,
         crate::CreateEntryRequest {
+            url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
             title: "Chain New Entry".to_string(),
             url: Some("https://chain.example.test".to_string()),
             username: "chain-user".to_string(),
@@ -600,6 +601,7 @@ fn legacy_fixtures_full_chain_round_trip() {
     let sealed_new_id = create_entry(
         &state2,
         crate::CreateEntryRequest {
+            url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
             title: "Sealed Chain Entry".to_string(),
             url: None,
             username: "sealed-user".to_string(),

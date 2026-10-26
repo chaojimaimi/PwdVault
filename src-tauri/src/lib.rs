@@ -10,6 +10,9 @@
 mod commands;
 pub mod native_messaging;
 pub mod shortcuts;
+// WP3 (v1.5.0): post-unlock trash auto-purge, shared by the IPC unlock
+// commands and the NM dispatcher unlock arm (the emit-capable adapters).
+mod unlock_effects;
 
 // Re-export the application layer so external callers (tests, benches) can
 // still write `pwdvault_lib::AppState`, `pwdvault_lib::VaultError`, etc.
@@ -422,6 +425,13 @@ pub fn run() {
             // handles cloud credentials.
             commands::baidu_start_auth,
             commands::baidu_complete_auth,
+            // v1.5.0 — Tauri IPC only (D6): the security dashboard report
+            // carries ids/scores only, and the CSV importer stages plaintext
+            // rows in AppState; neither is ever reachable via the extension
+            // bridge.
+            commands::security_report,
+            commands::import_csv_open,
+            commands::import_csv_commit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

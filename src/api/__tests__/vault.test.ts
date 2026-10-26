@@ -12,6 +12,10 @@ import {
   importVault,
   isVaultInitialized,
   unlockVault,
+  getSecurityReport,
+  importCsvOpen,
+  importCsvOpenBytes,
+  importCsvCommit,
 } from '../vault';
 import type { VaultBackup } from '../../types';
 
@@ -91,6 +95,63 @@ describe('vault API client', () => {
         backup,
         importPassword: 'import-password',
       });
+    });
+
+    // v1.5.0 (WP1/WP2): security dashboard + CSV importer wrappers.
+
+    it('calls security_report without arguments', async () => {
+      asTauriWindow().__TAURI_INTERNALS__ = {};
+
+      const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
+      (tauriInvoke as ReturnType<typeof vi.fn>).mockResolvedValue({});
+
+      await getSecurityReport();
+
+      expect(tauriInvoke).toHaveBeenCalledWith('security_report', undefined);
+    });
+
+    it('passes bytes: null to import_csv_open for the native dialog path', async () => {
+      asTauriWindow().__TAURI_INTERNALS__ = {};
+
+      const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
+      (tauriInvoke as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+      const result = await importCsvOpen();
+
+      expect(result).toBeNull();
+      expect(tauriInvoke).toHaveBeenCalledWith('import_csv_open', {
+        bytes: null,
+      });
+    });
+
+    it('encodes fallback bytes as a UTF-8 byte array for import_csv_open', async () => {
+      asTauriWindow().__TAURI_INTERNALS__ = {};
+
+      const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
+      (tauriInvoke as ReturnType<typeof vi.fn>).mockResolvedValue({});
+
+      await importCsvOpenBytes('name,url');
+
+      expect(tauriInvoke).toHaveBeenCalledWith('import_csv_open', {
+        // "name,url" has no non-ASCII characters — plain char codes.
+        bytes: [110, 97, 109, 101, 44, 117, 114, 108],
+      });
+    });
+
+    it('calls import_csv_commit without arguments', async () => {
+      asTauriWindow().__TAURI_INTERNALS__ = {};
+
+      const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
+      (tauriInvoke as ReturnType<typeof vi.fn>).mockResolvedValue({
+        created_entries: 2,
+        created_groups: 1,
+        skipped_rows: 0,
+      });
+
+      const result = await importCsvCommit();
+
+      expect(result.created_entries).toBe(2);
+      expect(tauriInvoke).toHaveBeenCalledWith('import_csv_commit', undefined);
     });
   });
 });
