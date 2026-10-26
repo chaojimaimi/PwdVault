@@ -265,6 +265,20 @@ describe("VaultScreen trash (v1.4.0)", () => {
 		expect(screen.queryByText("Old Site")).toBeNull();
 	});
 
+	it("returns to the main list via the explicit Back button (v1.5.1)", async () => {
+		// Two real-device QA rounds flagged the toggle-only return as
+		// undiscoverable — the header carries an explicit affordance again.
+		const { VaultScreen } = await import("../VaultScreen");
+		render(<VaultScreen />);
+
+		fireEvent.click(screen.getByRole("button", { name: "Trash" }));
+		await screen.findByText("Old Site");
+
+		fireEvent.click(screen.getByLabelText("Back to passwords"));
+		expect(screen.getByLabelText("Search passwords")).toBeTruthy();
+		expect(screen.queryByText("Old Site")).toBeNull();
+	});
+
 	it("a group tab exits the trash without ever co-activating with it", async () => {
 		// The mock bypasses the real reducer: selectGroup must update the
 		// holder or the post-click active state would never render.

@@ -379,6 +379,13 @@
   font-size: var(--text-h2);
 }
 
+/* Scoped `.btn` width override — without it the global width:100% is the
+   flex base size and Empty trash stretches across the whole header row. */
+.trash-header .btn-danger {
+  width: auto;
+  flex-shrink: 0;
+}
+
 .trash-list {
   list-style: none;
   margin: 0;

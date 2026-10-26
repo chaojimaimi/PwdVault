@@ -120,7 +120,9 @@ export function DashboardScreen() {
 						<div className="settings-section">
 							<div className="dashboard-summary">
 								<ShieldIcon size={28} className="dashboard-summary-icon" />
-								<div>
+								{/* flex:1 + min-width:0 — without it the summary text
+								    collapses to one word per line (v1.5.1 fix). */}
+								<div className="dashboard-summary-text">
 									<h3 className="settings-section-title">
 										{pending
 											? "Scanning your vault…"

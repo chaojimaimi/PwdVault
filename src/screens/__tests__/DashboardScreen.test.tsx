@@ -152,6 +152,8 @@ describe("DashboardScreen", () => {
 		expect(screen.getByText(/Unchanged for over a year/i)).toBeTruthy();
 		expect(screen.getByText("Ancient")).toBeTruthy();
 		expect(screen.getByText(/4 passwords scanned/)).toBeTruthy();
+		// Summary row: title, hint and re-run button coexist in one row.
+		expect(screen.getByText("Re-run check")).toBeTruthy();
 		expect(vaultActions.loadEntries).toHaveBeenCalled();
 	});
 

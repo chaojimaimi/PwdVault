@@ -168,6 +168,15 @@
   margin-top: var(--space-sm);
 }
 
+/* Shared by Security AND Cloud Sync rows: without this the global
+   `.btn { width: 100% }` acts as the flex base size and stretches the
+   row's buttons across the panel (v1.5.1 — same trap as the trash
+   header; content-width buttons are the intended form here). */
+.security-status-row .btn {
+  width: auto;
+  flex-shrink: 0;
+}
+
 .security-enabled-badge {
   font-size: var(--text-label);
   font-weight: 600;
@@ -258,9 +267,17 @@
   margin-top: var(--space-xs);
 }
 
+.dashboard-summary-text {
+  flex: 1;
+  min-width: 0;
+}
+
 .dashboard-rerun {
   margin-left: auto;
   flex-shrink: 0;
+  /* Scoped `.btn` width override — the global width:100% acts as the flex
+     base size here and would push this button past the right edge. */
+  width: auto;
 }
 
 .dashboard-healthy {

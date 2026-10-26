@@ -18,6 +18,7 @@ import { EntryRow } from "../components/EntryRow";
 import DeleteConfirmModal from "../components/DeleteConfirmModal";
 import {
 	PlusIcon,
+	BackIcon,
 	GenerateIcon,
 	SettingsIcon,
 	LockIcon,
@@ -378,17 +379,27 @@ export function VaultScreen() {
 				// Trash view (v1.4.0): standalone simple list — NOT part of the
 				// search index or the sort. Deleted time + restore/purge per row.
 				// -----------------------------------------------------------
-				<div className="trash-screen">
-					<div className="trash-header">
-						{/* v1.4.1: no Back button — the pinned Trash tab in the group
-						    tabs row (still visible above) toggles back to the main list. */}
-						<h2>Trash</h2>
-						<button
-							className="btn btn-danger btn-sm"
-							onClick={() => setEmptyConfirm(true)}
-							disabled={trashBusy || trashList.length === 0}
-						>
-							Empty trash
+					<div className="trash-screen">
+						<div className="trash-header">
+							{/* v1.5.1: explicit Back affordance restored — two real-device
+							    QA rounds flagged the toggle-only return as undiscoverable.
+							    The Trash tab's toggle still works (it is the only return
+							    path when no groups exist). */}
+							<button
+								className="btn btn-icon"
+								onClick={() => setTrashOpen(false)}
+								title="Back to passwords"
+								aria-label="Back to passwords"
+							>
+								<BackIcon />
+							</button>
+							<h2>Trash</h2>
+							<button
+								className="btn btn-danger btn-sm"
+								onClick={() => setEmptyConfirm(true)}
+								disabled={trashBusy || trashList.length === 0}
+							>
+								Empty trash
 						</button>
 					</div>
 					<div className="entry-list screen-scroll-region" role="list">
