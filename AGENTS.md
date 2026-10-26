@@ -2,10 +2,10 @@
 
 A secure, local-first password manager built with Tauri + React.
 
-**Last Updated**: 2026-10-25
+**Last Updated**: 2026-10-26
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.4.0
-**Current Version**: `v1.4.0` — 2026-10-25 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) on top of v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.4.1
+**Current Version**: `v1.4.1` — 2026-10-26 UI patch (recycle bin entry relocated from an icon-only search-bar button to a labeled Trash tab pinned in the group-tabs row, trash renders in place, navigation-exclusive with group tabs) on top of v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -201,7 +201,7 @@ PwdVault/
 | Rust infrastructure crate | 121 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                 | (same run)                                |
 | Rust domain crate         | 4                                                                                                                              | (same run)                                |
 | Rust native-host          | 23                                                                                                                             | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 387 (61 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
+| Frontend (total)          | 391 (61 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -315,6 +315,40 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-10-26 (v1.4.1 — trash entry relocated to group-tabs Trash tab + main-red guard fix)
+
+Compact pipeline (QA feedback → mini-plan R1 → plan-reviewer REVISE with
+4×P1: the default `.icon` class's 24px rule beats the svg width/height
+attribute so the tab icon needs a CSS suppression rule; D1/D6 contradicted
+each other on `.group-manage-first`'s fate; trash-open state had no
+navigation exclusivity — group-tab active/aria-current need a `!trashOpen`
+condition; idle/loading states unspecified for the now-always-rendered row
+→ R2 → re-review **PASS** with a condition: the exclusivity test must
+assert DURING trash-open, not only after exit → ds-worker → react-reviewer
+APPROVE (P2: injected groups state leaked across test cases via the
+partial beforeEach reset; P3: Virtuoso mock key warning — both fixed
+before landing) → gates → release. Shipped: Trash tab (icon + text,
+toggle, aria-current, no aria-label — visible text is the name) pinned
+right in the group-tabs row behind a divider beside the gear; trash
+renders in place; trash and group tabs are mutually exclusive; the tabs
+row is always rendered (idle/loading = empty scroll area, zero groups =
+Create-group CTA shares the row, error retry inlined with a scoped
+padding override); the old search-bar icon button is gone with a negative
+test pinning its absence; `.group-tab-trash svg` 12px suppression (jsdom
+cannot see it — T38 covers on-device, both themes). **Incidental**: main's
+Quality Gates had been red since 63932d2 (the v1.4.0-closing formatter
+pass flipped sender-auth.js to double quotes while the
+background-fill-gate guard regex pinned single quotes) — that push landed
+without watching CI; discovered while triaging a worker-reported failure,
+fixed quote-agnostically (8f501f6, backreference form) with the lesson
+memorialized: watch CI after every main push, and source-text guard
+regexes use quote-agnostic forms. The formatter hook's post-commit
+reformat of the two touched test files was collected as db9cf24
+(minimal-escaping preserved the import assertion's inner quotes; 416/416
+re-verified). Tests: 391 frontend CI-true (61 files; +4 in
+VaultScreen.trash) / Rust & native-host unchanged. Plan:
+fix_impl_plan_v1.4.1.md (R2). Manual QA T38 appended.
 
 ### 2026-10-25 (v1.4.0 — S-tier product batch + updater/wry modernization)
 
