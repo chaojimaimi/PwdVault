@@ -447,11 +447,14 @@ describe("editor wiring", () => {
 		vaultState.selectedEntry = baseMeta({
 			custom_fields: [{ label: "api_key", secret: true }],
 		});
-		let releaseFetch: (() => void) | null = null;
+		// Holder object, not a bare `let`: the assignment happens inside the
+		// mock closure, so control-flow analysis would permanently narrow a
+		// let to null here and `release?.()` fails test-tsconfig (TS2349).
+		const fetchGate: { release: (() => void) | null } = { release: null };
 		getEntrySecret.mockImplementation(
 			() =>
 				new Promise((resolve) => {
-					releaseFetch = () =>
+					fetchGate.release = () =>
 						resolve({
 							password: "stored-pw",
 							notes: "",
@@ -476,7 +479,7 @@ describe("editor wiring", () => {
 		fireEvent.click(save);
 		expect(getEntrySecret).toHaveBeenCalledOnce(); // still exactly one
 
-		releaseFetch?.();
+		fetchGate.release?.();
 		fireEvent.click(await screen.findByText("I've reviewed these changes"));
 		fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
 		await waitFor(() => expect(updateEntry).toHaveBeenCalledOnce());
