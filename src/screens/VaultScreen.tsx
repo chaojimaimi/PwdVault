@@ -24,7 +24,6 @@ import {
 	SearchIcon,
 	FolderIcon,
 	TrashIcon,
-	BackIcon,
 } from "../components/Icons";
 import type { EntrySummary, SortMode } from "../types";
 
@@ -249,21 +248,131 @@ export function VaultScreen() {
 				</div>
 			</header>
 
-			{trashOpen ? (
+			{!trashOpen && (
+				<div className="search-bar">
+					<div className="search-input-wrapper">
+						<SearchIcon className="search-icon" />
+						<input
+							aria-label="Search passwords"
+							type="text"
+							className="search-input"
+							placeholder="Search passwords..."
+							value={state.searchQuery}
+							onChange={(e) => actions.setSearchQuery(e.target.value)}
+						/>
+					</div>
+					{/* v1.4.0: persisted sort control — applies after filter+search. */}
+					<select
+						className="sort-select"
+						aria-label="Sort passwords"
+						value={sortMode}
+						onChange={(e) => handleSortChange(e.target.value as SortMode)}
+					>
+						{SORT_OPTIONS.map((opt) => (
+							<option key={opt.value} value={opt.value}>
+								{opt.label}
+							</option>
+						))}
+					</select>
+				</div>
+			)}
+
+			{/* v1.4.1: the tabs row is always rendered — Trash and the group
+			    manager stay reachable while groups are loading or failed to load,
+			    and the trash view below renders in place (tabs stay visible)
+			    instead of replacing the whole screen. */}
+			<div className="group-tabs">
+				<div className="group-tabs-scroll">
+					{state.groupsStatus === "success" && state.groups.length > 0 && (
+						<>
+							<button
+								className={`group-tab ${!state.selectedGroupId && !trashOpen ? "active" : ""}`}
+								onClick={() => {
+									// Navigation mutex: picking a group always leaves the
+									// trash view (v1.4.1).
+									setTrashOpen(false);
+									actions.selectGroup(null);
+								}}
+								aria-current={
+									(!state.selectedGroupId && !trashOpen) || undefined
+								}
+							>
+								All
+							</button>
+							{state.groups.map((g) => (
+								<button
+									key={g.id}
+									className={`group-tab ${state.selectedGroupId === g.id && !trashOpen ? "active" : ""}`}
+									onClick={() => {
+										setTrashOpen(false);
+										actions.selectGroup(g.id);
+									}}
+									aria-current={
+										(state.selectedGroupId === g.id && !trashOpen) ||
+										undefined
+									}
+								>
+									{g.name}
+								</button>
+							))}
+						</>
+					)}
+					{state.groupsStatus === "success" && state.groups.length === 0 && (
+						<button
+							className="group-manage-btn group-manage-first"
+							onClick={handleManageGroups}
+						>
+							<FolderIcon size={14} />
+							Create group
+						</button>
+					)}
+					{state.groupsStatus === "error" && (
+						<div
+							className="resource-error resource-error-compact"
+							role="alert"
+						>
+							<span>Could not load groups.</span>
+							<button
+								className="btn btn-link"
+								onClick={() => void actions.loadGroups()}
+							>
+								Retry
+							</button>
+						</div>
+					)}
+				</div>
+				<div className="group-tabs-actions">
+					<div className="group-tabs-divider" />
+					{/* Pinned trash tab (v1.4.1): the visible text is the accessible
+					    name — no aria-label that could override it. */}
+					<button
+						className={`group-tab group-tab-trash ${trashOpen ? "active" : ""}`}
+						onClick={() => setTrashOpen((v) => !v)}
+						aria-current={trashOpen || undefined}
+					>
+						<TrashIcon size={12} />
+						Trash
+					</button>
+					<button
+						className="group-manage-btn"
+						onClick={handleManageGroups}
+						title="Manage groups"
+						aria-label="Manage groups"
+					>
+						<SettingsIcon size={14} />
+					</button>
+				</div>
+			</div>
+
+			{trashOpen && (
 				// -----------------------------------------------------------
 				// Trash view (v1.4.0): standalone simple list — NOT part of the
 				// search index or the sort. Deleted time + restore/purge per row.
 				// -----------------------------------------------------------
 				<div className="trash-screen">
 					<div className="trash-header">
-						<button
-							className="btn btn-icon"
-							onClick={() => setTrashOpen(false)}
-							title="Back to passwords"
-							aria-label="Back to passwords"
-						>
-							<BackIcon />
-						</button>
+						{/* v1.4.1: no Back button — the pinned Trash tab in the group
+						    tabs row (still visible above) toggles back to the main list. */}
 						<h2>Trash</h2>
 						<button
 							className="btn btn-danger btn-sm"
@@ -356,162 +465,73 @@ export function VaultScreen() {
 						isDeleting={trashBusy}
 					/>
 				</div>
-			) : (
-				<>
-					<div className="search-bar">
-						<div className="search-input-wrapper">
-							<SearchIcon className="search-icon" />
-							<input
-								aria-label="Search passwords"
-								type="text"
-								className="search-input"
-								placeholder="Search passwords..."
-								value={state.searchQuery}
-								onChange={(e) => actions.setSearchQuery(e.target.value)}
-							/>
-						</div>
-						{/* v1.4.0: persisted sort control — applies after filter+search. */}
-						<select
-							className="sort-select"
-							aria-label="Sort passwords"
-							value={sortMode}
-							onChange={(e) => handleSortChange(e.target.value as SortMode)}
-						>
-							{SORT_OPTIONS.map((opt) => (
-								<option key={opt.value} value={opt.value}>
-									{opt.label}
-								</option>
-							))}
-						</select>
-						<button
-							className="btn btn-icon"
-							onClick={() => setTrashOpen(true)}
-							title="Open trash"
-							aria-label="Open trash"
-						>
-							<TrashIcon />
-						</button>
-					</div>
+			)}
 
-					{state.groupsStatus === "success" && state.groups.length > 0 && (
-						<div className="group-tabs">
-							<div className="group-tabs-scroll">
-								<button
-									className={`group-tab ${!state.selectedGroupId ? "active" : ""}`}
-									onClick={() => actions.selectGroup(null)}
-									aria-current={!state.selectedGroupId || undefined}
-								>
-									All
-								</button>
-								{state.groups.map((g) => (
-									<button
-										key={g.id}
-										className={`group-tab ${state.selectedGroupId === g.id ? "active" : ""}`}
-										onClick={() => actions.selectGroup(g.id)}
-										aria-current={state.selectedGroupId === g.id || undefined}
-									>
-										{g.name}
-									</button>
-								))}
-							</div>
-							<button
-								className="group-manage-btn"
-								onClick={handleManageGroups}
-								title="Manage groups"
-								aria-label="Manage groups"
-							>
-								<SettingsIcon size={14} />
-							</button>
+			{/* The live list is the trash's sibling, not its parent: opening the
+			    trash unmounts search/sort and the list (v1.4.0 rule, unchanged). */}
+			{!trashOpen && (
+				<div className="entry-list screen-scroll-region" role="list">
+					{state.entriesStatus === "idle" ||
+					state.entriesStatus === "loading" ? (
+						<div className="loading" role="status">
+							<span className="spinner" />
+							<span>Loading passwords…</span>
 						</div>
-					)}
-
-					{state.groupsStatus === "success" && state.groups.length === 0 && (
-						<div className="group-tabs group-tabs-empty">
+					) : state.entriesStatus === "error" ? (
+						<div className="resource-error" role="alert">
+							<p>Could not load passwords.</p>
+							<p className="text-muted-hint">{state.entriesError}</p>
 							<button
-								className="group-manage-btn group-manage-first"
-								onClick={handleManageGroups}
-							>
-								<FolderIcon size={14} />
-								Create group
-							</button>
-						</div>
-					)}
-
-					{state.groupsStatus === "error" && (
-						<div className="resource-error resource-error-compact" role="alert">
-							<span>Could not load groups.</span>
-							<button
-								className="btn btn-link"
-								onClick={() => void actions.loadGroups()}
+								className="btn btn-secondary"
+								onClick={() =>
+									void actions.loadEntries().catch((e) => {
+										// loadEntries already flips the resource state; the
+										// toast keeps the retry rejection from being silent
+										// for transient failures the state banner misses.
+										showToast(errorMessage(e, "Failed to load passwords"));
+									})
+								}
 							>
 								Retry
 							</button>
 						</div>
-					)}
-
-					<div className="entry-list screen-scroll-region" role="list">
-						{state.entriesStatus === "idle" ||
-						state.entriesStatus === "loading" ? (
-							<div className="loading" role="status">
-								<span className="spinner" />
-								<span>Loading passwords…</span>
-							</div>
-						) : state.entriesStatus === "error" ? (
-							<div className="resource-error" role="alert">
-								<p>Could not load passwords.</p>
-								<p className="text-muted-hint">{state.entriesError}</p>
+					) : sortedEntries.length === 0 ? (
+						<div className="empty-state" role="listitem">
+							<LockIcon size={64} />
+							<p>
+								{state.searchQuery
+									? "No matching passwords found"
+									: "No passwords saved yet"}
+							</p>
+							{!state.searchQuery && (
 								<button
-									className="btn btn-secondary"
-									onClick={() =>
-										void actions.loadEntries().catch((e) => {
-											// loadEntries already flips the resource state; the
-											// toast keeps the retry rejection from being silent
-											// for transient failures the state banner misses.
-											showToast(errorMessage(e, "Failed to load passwords"));
-										})
-									}
+									type="button"
+									className="btn btn-primary"
+									onClick={handleAddClick}
 								>
-									Retry
+									Add your first password
 								</button>
-							</div>
-						) : sortedEntries.length === 0 ? (
-							<div className="empty-state" role="listitem">
-								<LockIcon size={64} />
-								<p>
-									{state.searchQuery
-										? "No matching passwords found"
-										: "No passwords saved yet"}
-								</p>
-								{!state.searchQuery && (
-									<button
-										type="button"
-										className="btn btn-primary"
-										onClick={handleAddClick}
-									>
-										Add your first password
-									</button>
-								)}
-							</div>
-						) : (
-							// §5.6.1: virtualize the entry list so 10k entries render only the
-							// visible window. Combined with the memoized EntryRow and the
-							// deferred query, this keeps the main-thread long task under 50ms.
-							<Virtuoso
-								data={sortedEntries}
-								itemContent={(_i, entry) => (
-									<EntryRow
-										entry={entry}
-										copied={copiedId === entry.id}
-										onOpen={handleEntryClick}
-										onCopyUsername={handleCopyUsername}
-										onCopyPassword={handleCopyPassword}
-									/>
-								)}
-								style={{ height: "100%" }}
-							/>
-						)}
-					</div>
-				</>
+							)}
+						</div>
+					) : (
+						// §5.6.1: virtualize the entry list so 10k entries render only the
+						// visible window. Combined with the memoized EntryRow and the
+						// deferred query, this keeps the main-thread long task under 50ms.
+						<Virtuoso
+							data={sortedEntries}
+							itemContent={(_i, entry) => (
+								<EntryRow
+									entry={entry}
+									copied={copiedId === entry.id}
+									onOpen={handleEntryClick}
+									onCopyUsername={handleCopyUsername}
+									onCopyPassword={handleCopyPassword}
+								/>
+							)}
+							style={{ height: "100%" }}
+						/>
+					)}
+				</div>
 			)}
 		</div>
 	);

@@ -148,8 +148,41 @@
   height: 14px;
 }
 
-.group-tabs-empty {
-  justify-content: center;
+/* v1.4.1: pinned action cluster — a DOM sibling of the scroll region so the
+   Trash tab and the group manager never scroll away, however many group tabs
+   there are (v1.2.2 lesson: never let siblings starve the flex row). */
+.group-tabs-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.group-tabs-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--color-border-light);
+}
+
+.group-tab-trash {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/* TrashIcon's width/height attributes lose to the global `.icon` class (24px)
+   — same suppression precedent as .group-manage-btn svg. */
+.group-tab-trash svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* The groups-error retry row is embedded in the tabs row (v1.4.1): drop the
+   standalone centered padding — .group-tabs already pads the row. */
+.group-tabs .resource-error-compact {
+  padding: 0;
+  justify-content: flex-start;
+  text-align: left;
 }
 
 .group-manage-first {
