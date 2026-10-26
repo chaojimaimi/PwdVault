@@ -1,14 +1,14 @@
 {
-  "version": "1.4.0",
-  "pub_date": "2026-10-25T15:32:12Z",
+  "version": "1.4.1",
+  "pub_date": "2026-10-26T02:05:19Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRdDBjbjNQTkI3STVIeW1YdUNneXlXL0hLL0ZBTnlYUlRSUHhJWXpNcWVSK1U0ZGllR0g5Y1l0ejhSdFRmTytZQVdUR2xHYkg3YjFFamY2b1JNSS9VN1Q1YlhiYkU4TkFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTQxOTcxCWZpbGU6UHdkVmF1bHQuYXBwLnRhci5negprV0V4dWpQQ3hkSmhpdC9qNkZ0VCt0VXNSNG9QbHRVOG41cnBzOFQ1NzRtRXM5Q3ozcG1mODFLUVBJaHE4VFhjZ09nUzlnWkNXbWtzb2c0dTBldzdDUT09Cg==",
-      "url": "https://github.com/chaojimaimi/PwdVault/releases/download/v1.4.0/PwdVault.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRdDBjbjNQTkI3STBGbmROMEtuaUFFdmR1T1FrOWV6cy9ZbSszdFdxR0VmSzIzRVE2UHREd3J0NG8rTTNrbktORVNya0I3c3B5eWwxMG9nelppdkkySCtyTno5Y0prSEFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTc5ODA4CWZpbGU6UHdkVmF1bHQuYXBwLnRhci5negpzOXZNVGx5eFBmam1pNjlqdENhYjFFTE14M0VURkduNUVVMjdiZDA0RksyeDVYSExWY0djeGZHaU5paW9nMDRuaDRxRm10a1dDUWNGV1djVktBalJCUT09Cg==",
+      "url": "https://github.com/chaojimaimi/PwdVault/releases/download/v1.4.1/PwdVault.app.tar.gz"
     },
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRdDBjbjNQTkI3SS9xUzI0dmsvZ3pnYkRPNFljSkh6aThHekZuTHhoMFVya1piNjJFcEwwU1VMdWxCN3JmK05zWm92UE1XUzZYSjluM0lJYTQwbnVtR3JjUUd1WC9WRlE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTQyMDU1CWZpbGU6UHdkVmF1bHRfMS40LjBfeDY0LXNldHVwLmV4ZQoxTExqanI1aS91SC8yakVCMlUyZVhoN2MzZ1lXMHlzdXlJTmtXeG1odTV5UFlKLzZ6emZvV1ZPanVwc25GRVEyMEpzc3pjTkhmUEw4OU45amxZM1NCdz09Cg==",
-      "url": "https://github.com/chaojimaimi/PwdVault/releases/download/v1.4.0/PwdVault_1.4.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRdDBjbjNQTkI3SXhXWGJHbTVucUFGQk4zYVRtTVZWa29kOFh5Z0theG51RnhsMUNGbzcxc082YzNHbjRMV25xakwxMzdPcXdRdDFycUpXSHhFdnBtWFFmMHVjKzUvUUFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTgwMDM5CWZpbGU6UHdkVmF1bHRfMS40LjFfeDY0LXNldHVwLmV4ZQpOblJCVk9NVWEyN295a0VFWkl5ZFdHc0x5M3RsekxwRkx1UjJIcTFiMTZzVzVxZmlHQ3BkdGo0U3I4dDhONFdVMWE4SDZlSVpNTEJIR3RYTWRQSWZCQT09Cg==",
+      "url": "https://github.com/chaojimaimi/PwdVault/releases/download/v1.4.1/PwdVault_1.4.1_x64-setup.exe"
     }
   }
 }
