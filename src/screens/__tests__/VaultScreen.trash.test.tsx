@@ -293,9 +293,7 @@ describe("VaultScreen trash (v1.4.0)", () => {
 		expect(trashTab).toHaveAttribute("aria-current", "true");
 
 		fireEvent.click(workTab);
-		await waitFor(() =>
-			expect(actions.selectGroup).toHaveBeenCalledWith("g1"),
-		);
+		await waitFor(() => expect(actions.selectGroup).toHaveBeenCalledWith("g1"));
 
 		// Back on the main list with the mutex flipped: Work is current,
 		// Trash lost its highlight.
