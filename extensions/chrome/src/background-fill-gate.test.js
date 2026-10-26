@@ -54,8 +54,10 @@ describe('background auto-fill list gate (v1.4.0)', () => {
     // The invariant the delegation above depends on, re-asserted against the
     // live predicate: an entry without a URL never matches any sender URL.
     expect(senderAuth).toContain('!senderDomain || !rawEntryUrl) return false');
+    // Quote-agnostic via backreference: the invariant under test is semantic,
+    // not the quote style (the repo-wide formatter pass flips quotes freely).
     expect(senderAuth).toMatch(
-      /const rawEntryUrl = typeof entry\?\.url === 'string' \? entry\.url : '';/,
+      /const rawEntryUrl = typeof entry\?\.url === (['"])string\1 \? entry\.url : \1\1;/,
     );
   });
 });
