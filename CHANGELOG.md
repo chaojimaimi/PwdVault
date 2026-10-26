@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.5.1] - 2026-10-26
+
+### Fixed
+
+- **Security Dashboard layout**: the summary row collapsed its text to
+  one word per line and pushed "Re-run check" past the window edge (a
+  global button width rule leaking into the flex row). The text now fills
+  the row and the button hugs its content.
+- **Trash header**: "Empty trash" stretched across the whole header row
+  for the same reason; it now sits content-sized at the right.
+- **Settings → Security / Cloud Sync**: action buttons in the status rows
+  stretched to full panel width; they now render content-sized.
+
+### Changed
+
+- The trash view carries an explicit "Back to passwords" button again —
+  two real-device QA rounds flagged the toggle-only return as hard to
+  discover. The Trash tab's toggle keeps working.
+
 ## [1.5.0] - 2026-10-26
 
 ### Added
