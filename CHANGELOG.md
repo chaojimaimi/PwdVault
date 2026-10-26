@@ -4,6 +4,46 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.5.0] - 2026-10-26
+
+### Added
+
+- **Security Dashboard**: a new read-only report screen (shield button in
+  the vault header) listing weak (strength score ≤ 40), reused (identical
+  passwords across entries) and stale (unchanged for over a year)
+  credentials. Aggregation runs inside the desktop process — the response
+  carries ids and scores only, never plaintext — and opening a finding
+  jumps straight into the entry editor.
+- **Third-party CSV importers**: import from Bitwarden, 1Password, Chrome
+  and KeePassXC CSV exports with automatic format detection (tolerant of
+  BOM, CRLF and quoted newlines), a preview that never shows passwords,
+  duplicate hints, and a single-transaction commit that creates groups
+  from the export's folder column. File access stays in the desktop
+  process via the native dialog; the webview never sees plaintext rows.
+- **Trash auto-purge** (off by default): optionally purge deleted entries
+  permanently after 7/30/90 days, one bounded batch (≤500) per unlock,
+  with a toast whenever a sweep runs.
+- **Per-entry URL match override** (Auto / Exact / Domain) in the entry
+  editor, honored across every fill path (extension popup, content
+  overlay, context menu, keyboard). Exact pins matching to the full
+  hostname; Domain forces the registrable-domain (eTLD+1) rule. The data
+  format gains one field behind a three-generation read chain — every
+  vault written since v1.0 stays readable — and the sync container moves
+  to format version 2: existing containers remain openable, and older
+  app versions are prompted to upgrade instead of silently dropping the
+  new preference.
+- **Pairing toast shows the requesting extension's ID** (abbreviated) so
+  the pairing code can be checked against `chrome://extensions`. This is
+  an advisory hint, not an authentication — the loopback caller header
+  is forgeable by design.
+
+### Changed
+
+- The golden IPC/NM command contracts now match the real registration
+  surfaces (the hand-written NM list had silently drifted across three
+  releases because it only ever compared with itself); new commands are
+  registered in the contract lists as part of the change discipline.
+
 ## [1.4.1] - 2026-10-26
 
 ### Fixed
