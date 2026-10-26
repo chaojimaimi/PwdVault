@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.4.1] - 2026-10-26
+
+### Fixed
+
+- **Recycle bin entry point redesigned** (QA feedback): the icon-only
+  trash button in the search bar read as a delete action, not a
+  destination. The entry is now a labeled **Trash tab** (icon + text)
+  pinned at the right of the group-tabs row, and the trash renders in
+  place with the tab highlighted. Opening the trash de-highlights the
+  group tabs and selecting a group exits the trash; the tabs row is now
+  always rendered, so the trash stays reachable with zero groups, while
+  groups load, and when the group list fails (retry stays inline).
+
+### Changed
+
+- The extension test suite's source-text guard regex is now
+  quote-agnostic: the post-release formatter pass had flipped
+  sender-auth.js quotes and the pinned single-quote spelling was failing
+  the guard (main's Quality Gates are green again). Test-hygiene fixes
+  from review: per-case holder state reset and a Virtuoso mock key.
+
 ## [1.4.0] - 2026-10-25
 
 ### Added
