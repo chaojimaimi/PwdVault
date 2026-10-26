@@ -4,6 +4,78 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.6.0] - 2026-10-26
+
+### Added
+
+- **Custom fields**: entries can carry user-defined label/value pairs
+  (up to 32) with a per-field "secret" flag that masks the value in the
+  UI. Values are encrypted like notes, sync with the entry, and survive
+  backup/restore. The editor lives on the entry screen below Tags; rows
+  keep keyboard focus while typing and the confirm dialog diffs them
+  line by line (secret rows masked).
+- **Save/update prompt in the browser extension**: submitting a login or
+  registration form now offers "Save this login to PwdVault?" — or
+  "Update password for {title}?" when the site already has an entry with
+  the same username and a different password. The decision runs on the
+  desktop via a digest comparison (`verify_entry_password` answers a
+  single boolean; the stored password never leaves the vault), the new
+  password stays in the page until you click Save or dismiss, and
+  submissions where nothing changed are suppressed. Vaults that are
+  locked, plain-http pages, and formless username flows stay silent; on
+  a pre-1.6.0 desktop the prompt quietly disables itself.
+- **Sync conflict counter**: the LWW merge now reports conflicts it had
+  to resolve — an edit made after the other device deleted the entry, or
+  a same-timestamp edit settled by the fingerprint tiebreak. The count
+  shows in Settings → Cloud Sync (red when non-zero) and in the sync
+  toast. Routine deletion propagation and ordinary sequential edits are
+  never counted.
+- **Automatic sync**: Settings gains a "Sync automatically" interval
+  (off by default; 5/15/30/60 min). While the vault is unlocked and a
+  cloud container is connected, the desktop syncs on that cadence; a
+  manual "Sync now" waits for an in-flight automatic cycle rather than
+  running concurrently, and automatic runs record failures in the sync
+  status row without toasting.
+- **Backups now carry TOTP secrets, URL match mode and custom fields**:
+  `.pvault` payloads store them in plaintext inside the encrypted
+  envelope, so restore into any vault (including after a master-password
+  change) round-trips them.
+
+### Changed
+
+- **Entry storage format**: the encrypted entry blob gains the
+  custom-fields field. The reader now bridges four layout generations
+  (15 → 14 → 13 → 11 fields), so vaults written by ≤ v1.5.1 open
+  unchanged. Entries written by v1.6.0 cannot be read by older versions
+  — update all devices together.
+- **Sync container format v3**: with entry shapes changing, fingerprints
+  change with them; devices on v1.5.x opening a v3 container get the
+  existing "container version" upgrade prompt instead of silently losing
+  fields. v1 and v2 containers remain readable (now pinned by permanent
+  fixtures alongside the older entry layouts).
+
+### Fixed
+
+- **Backups silently dropped TOTP secrets and per-entry URL match mode**:
+  `.pvault` export never carried those fields (TOTP data was lost on
+  restore since v1.1.6, match mode since v1.5.0). Both now round-trip —
+  re-export your existing backups once after upgrading.
+- **Layout**: a `.btn-inline` utility replaces the per-row width
+  suppressions that accumulated against the global button width rule
+  (v1.2.2, v1.5.1); the update-notification banner row now also resists
+  the flex-basis trap.
+- **Create-entry failures** now surface the desktop's specific
+  validation message (e.g. duplicate custom-field label) instead of a
+  generic error.
+
+### Compatibility notes
+
+- Restoring a v1.6.0 backup on ≤ v1.5.1 silently drops the new fields
+  (unknown JSON keys are ignored) — upgrade both ends before migrating.
+- Editing an entry and renaming a custom field's label removes the old
+  row and adds an empty one (values don't migrate across renames); the
+  confirm dialog shows exactly that.
+
 ## [1.5.1] - 2026-10-26
 
 ### Fixed
