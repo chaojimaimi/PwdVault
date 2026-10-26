@@ -269,3 +269,64 @@
 4. Settings → Cloud Sync：Retry / Sync Now + Disconnect / Cancel + Complete
    各行按钮内容宽、布局正常（Fix D 有意统一，若有某行确实需要等分双钮请反馈）。
 5. 以上两主题（Light/Dark）各看一眼。
+
+## T45 自定义字段（v1.6.0）
+
+1. 增删改行：label/value 输入**连续打字焦点不丢**（v1.6.0 评审抓过每键重挂载
+   的回归，真实键盘验证）；secret 行值掩码、眼睛按钮显形；锁形按钮切换 secret
+   （与显形是两个独立控件）。
+2. 保存：diff 确认框逐行显示（secret 行两侧掩码）；保存重进后数据完整；
+   重复 label 被拒且桌面错误文案具体可定位。
+3. 改名 label：确认框如实显示"删旧行 + 增空行"（改名不迁移值——已知语义）。
+4. 空占位行（label+value 全空）保存被过滤；只填 value 不填 label 的行被后端拒。
+
+## T46 旧库升级（v1.6.0）
+
+1. v1.5.1 真实 vault 原地打开：全部旧条目可读（四代链实读），custom_fields
+   显示为空。
+2. 旧条目的增删改查、复制、TOTP、同步、回收站全回归一遍不受影响。
+
+## T47 备份往返（v1.6.0）
+
+1. 含 TOTP + 自定义字段（含 secret 行与空值占位行）的条目：导出 → 导入（新版
+   本）全部还原，TOTP 码可用、secret 标志保留。
+2. v1.5.1 时期的旧备份导入新版本平滑（新字段为空）；**换主密码后**同一备份
+   恢复可解（明文载荷模型验证）。
+3. 已知边界：v1.6.0 备份在 ≤v1.5.1 上导入会丢新字段（版本说明已写，升级两端）。
+
+## T48 扩展保存/更新提示（v1.6.0，真浏览器 Chrome+Firefox）
+
+1. 新站注册/登录提交 → 底部居中提示条 "Save this login to PwdVault?"；点
+   Save 落库成功 toast；点 Not now / 60s 超时 / 页面导航 → 不落库。
+2. 同站改密再登录 → "Update password for {title}?"；确认后原条目密码更新，
+   原 tags/group 等不丢（整替回显验证）。
+3. 同凭据重复登录 → 无提示（防打扰判定）。
+4. 边界：vault 锁定提交无提示；纯 http 页提交无提示；无 <form> 容器的站点
+   （按钮/Enter 路径）都能触发；iframe 内表单明确不支持（非目标）。
+5. 旧桌面（≤v1.5.1）+ 新扩展：提交无提示、无报错（静默降级），autofill 正常。
+6. 浏览器自带保存气泡与 PwdVault 提示条并存时互不遮挡（一顶一底）。
+
+## T49 定时同步（v1.6.0）
+
+1. 连接 WebDAV 后设 5 分钟档：解锁态自动触发（Cloud Sync 状态行 Last sync
+   刷新）；锁定态不触发；重启应用后首个合格 tick 收敛一次。
+2. 0=关档完全不触发（默认值，确认无意外后台同步）。
+3. 自动周期进行中点 Sync Now：手动按钮**等待自动周期完成后执行**并正常回报
+   （不是被吞掉）；自动失败只写状态行不弹 toast。
+
+## T50 同步冲突计数（v1.6.0，双设备）
+
+1. 造"删后修改"冲突（A 删条目、B 在 A 删除之后编辑同条目，再双向同步）→
+   状态行红字 "Conflicts (last sync): 1 — resolved automatically
+   (last-write-wins)" + toast 带计数。
+2. 常规删除传播（A 删、B 未改）与双端先后编辑 → 计数为 0（不制造噪音；
+   trash 批量清理后对端同步计数必须为 0）。
+3. equal-updated_at 撞车 → 计数 1。
+
+## T51 rider 布局巡检（v1.6.0）
+
+1. 逐屏过按钮宽度：条目页 tags/分组/自定义字段行、生成器弹窗、Unsaved
+   Changes 弹窗、Settings 全部 option-row 与 Security/Sync 状态行、dashboard
+   Re-run、trash Empty trash、更新通知横幅三按钮——全部内容宽、无塌缩、
+   无溢出（rider 迁移了 5 处 scoped 压制 + update-notification 新增）。
+2. Light/Dark 两主题各过一遍。
