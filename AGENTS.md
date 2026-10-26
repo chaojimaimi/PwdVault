@@ -4,8 +4,8 @@ A secure, local-first password manager built with Tauri + React.
 
 **Last Updated**: 2026-10-26
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.5.1
-**Current Version**: `v1.5.1` — 2026-10-26 UI patch (dashboard summary / trash header / security-status-row flex-base-width fixes — the v1.2.2 `.btn width:100%` trap in three flex rows — plus an explicit trash Back button restored after two QA rounds flagged the toggle-only return) on top of v1.5.0 M-tier product batch (security dashboard with in-process aggregation, 4-vendor CSV importers, trash auto-purge, per-entry URL match override on a three-generation codec + sync container v2, pair toast caller digest) + v1.4.1 trash-tab UI patch + v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.6.0
+**Current Version**: `v1.6.0` — 2026-10-26 M-tier kernel batch (per-entry custom fields on a four-generation entry codec, sync container v3 + LWW conflict counter + opt-in auto-sync behind the sync_cycle leaf lock, browser-extension save/update prompt backed by a digest-only verify command, backup fidelity fix — .pvault now carries the TOTP/match-mode/custom-fields it had been silently dropping since v1.1.6/v1.5.0) on top of v1.5.1 UI patch + v1.5.0 M-tier product batch (security dashboard with in-process aggregation, 4-vendor CSV importers, trash auto-purge, per-entry URL match override on a three-generation codec + sync container v2, pair toast caller digest) + v1.4.1 trash-tab UI patch + v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -30,6 +30,9 @@ PwdVault/
 │   ├── main.tsx                  # React entry point
 │   ├── api/
 │   │   └── vault.ts              # Unified Tauri/HTTP API client
+│   ├── components/               # Shared UI: TotpSecretField, TagsEditor, modals…
+│   │   ├── CustomFieldsEditor.tsx  # Custom fields editor (v1.6.0)
+│   │   └── EntryGeneratorModal.tsx # Entry-screen generator modal
 │   ├── context/
 │   │   ├── AppContext.tsx        # Provider composition bucket (useApp facade removed);
 │   │   │                         # state lives in the three Contexts below
@@ -44,7 +47,8 @@ PwdVault/
 │   │   ├── GeneratorScreen.tsx   # Password generator with strength display
 │   │   ├── GroupManager.tsx      # Create/rename/delete groups
 │   │   ├── SettingsScreen.tsx    # Auto-lock timeout, default generator options
-│   │   └── ImportExportScreen.tsx # Encrypted backup/restore (.pvault)
+│   │   ├── ImportExportScreen.tsx # Encrypted backup/restore (.pvault)
+│   │   └── useCustomFields.ts    # Custom-fields state + save assembly hook (v1.6.0)
 │   ├── styles/
 │   │   ├── themes.css            # Design tokens (shared + Light/Dark color overrides)
 │   │   ├── base.css              # Global reset, scrollbar, accessibility
@@ -58,6 +62,7 @@ PwdVault/
 │   └── utils/
 │       ├── passwordStrength.ts    # Password strength calculator
 │       ├── clipboard.ts          # Clipboard with 30s auto-clear
+│       ├── urlMatchMode.ts       # URL match-mode options + normalizer (v1.6.0)
 │       └── toast.ts              # Toast notification system
 │
 ├── src-tauri/                    # Rust backend (Cargo workspace)
@@ -194,14 +199,14 @@ PwdVault/
 
 | Module                    | Tests                                                                                                                          | Command                                   |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| Rust tauri-app lib        | 41                                                                                                                             | `cd src-tauri && cargo test`              |
+| Rust tauri-app lib        | 42                                                                                                                             | `cd src-tauri && cargo test`              |
 | Rust capability contract  | 1                                                                                                                              | (same run)                                |
 | Rust golden contract      | 3                                                                                                                              | (same run)                                |
-| Rust application crate    | 211                                                                                                                            | `cd src-tauri && cargo test --workspace`  |
-| Rust infrastructure crate | 128 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                 | (same run)                                |
-| Rust domain crate         | 7                                                                                                                              | (same run)                                |
+| Rust application crate    | 240                                                                                                                            | `cd src-tauri && cargo test --workspace`  |
+| Rust infrastructure crate | 133 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                 | (same run)                                |
+| Rust domain crate         | 15                                                                                                                             | (same run)                                |
 | Rust native-host          | 23                                                                                                                             | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 465 (68 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
+| Frontend (total)          | 572 (75 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -311,10 +316,81 @@ git tag vX.Y.Z && git push origin main --tags
   unattended desktops lock even with a paired extension idle (v1.2.0)
 - Sync config/state rows are encrypted at rest with read-time legacy
   migration and re-seal key rotation (v1.2.0)
+- Custom field values are inner-encrypted like notes and leave the vault
+  only through `get_entry_secret` (v1.6.0)
+- `verify_entry_password` answers a constant-time SHA-256 digest
+  comparison and never returns plaintext (v1.6.0)
+- Extension save prompt: captured credentials live only in the
+  page-side closure until the user confirms (≤60s); the background
+  worker never holds them (v1.6.0)
 
 ---
 
 ## 7. Session Log
+
+### 2026-10-26 (v1.6.0 — M-tier kernel batch: custom fields, sync v3 + conflict counter + auto-sync, extension save prompt, backup fidelity)
+
+Pipeline: 3-way Explore recon → plan R1 → plan-reviewer REVISE (1×P0: the
+backup-fidelity design assumed ExportEntry carries ciphertext — it is a
+plaintext payload (Zeroizing<String> password/notes, decrypt-on-export /
+encrypt-on-import); verbatim-ciphertext backups would be unrestorable
+across vaults and master-password changes) → R2 REVISE (1×P1 was the
+reviewer self-correcting: its own R1 suggestion "count state divergence
+XOR" would flag every routine deletion propagation as a conflict —
+remove_entry overwrites updated_at=deleted_at, so a peer's stale live
+copy always trips the XOR and trash auto-purge batches would report
+hundreds of fake conflicts; tightened to edit-after-delete, live
+updated_at > tombstone deleted_at) → R3 **PASS** → three ds-worker waves
+(WP1+WP2 / WP3+WP4 / WP5, each verifying the inherited tree first) →
+3-way review (rust APPROVE 0 P0-P2; extension APPROVE 0 P0-P2; react
+REQUEST CHANGES on a real P1 — the editor's WeakMap row identity
+remounted the row on every keystroke and lost focus each character,
+invisible to the suite because no test simulates focus) → main-agent
+fixes (P1: row identity moved into the data with strip-at-IPC-boundary +
+focus-survival regression test; P2: per-row secret lock toggle — desktops
+could not create secret fields at all; 7 cheap P3s across the three
+domains, one correctly judged redundant and skipped) → react focused
+re-review **APPROVE** → clean-worktree gates → release.
+
+Shipped: `CustomField{label,value:Vec<u8>,secret}` as PasswordEntry's
+15th field behind a four-generation decode chain (15 → LegacyEntryV4(14)
+→ V3(13) → V2(11)); the 14-field layout froze as a permanent
+NEVER-RECAPTURE fixture (cross-verified byte-identical to the pre-change
+FULL golden) alongside the 13-field and v1/v2-container fixtures;
+entry×2/sync_entry×2/settings×2 goldens recaptured same-commit.
+CustomFieldsEditor rows keyed by data-carried ids (WeakMap removed),
+whole-replace save guarded by a fetch that prevents wiping unloaded
+values, secret flag editable per row. Sync container v2→v3
+(SUPPORTED_READ_VERSIONS=[1,2,3], AAD unchanged); `pair_is_conflict` =
+edit-after-delete OR equal-timestamp fingerprint divergence, with
+stale-copy propagation/both-deleted/sequential-edit negatives pinned;
+SyncStatusResponse.conflict_count + SyncState.last_conflict_count
+(serde(default) — sealed rows are JSON inside). Auto-sync off by default
+(Settings.auto_sync_interval_min), setup thread + sync_cycle leaf lock
+(tick try-locks, manual sync/connect block) acquired before
+exclusive_window — no reverse acquisition point. Extension: three
+isTrusted-gated capture paths, crypto.subtle feature-detect (http pages
+skip), digest-only CHECK + confirm-carries-plaintext SAVE_LOGIN_CONFIRMED
+— background holds nothing, fifth closed shadow root, GUARDED_SITES 4→8,
+UI_ROOTS 4→5, "Unknown command" session-sticky degradation. verify rides
+`id_param` (NativeRequest.id is the u32 correlation field) — WP3/WP4
+contract aligned and cross-checked by the main agent. Backups: ExportEntry
++url_match_mode/totp_secret/custom_fields (plaintext payload, empty-value
+symmetric round-trip) — fixes the silent TOTP-loss-since-v1.1.6 and
+match-mode-loss-since-v1.5.0 holes. Rider: `.btn-inline` utility replaced
+the five accumulated scoped width suppressions; EntryScreen back under
+the 800 cap (useCustomFields.ts / EntryGeneratorModal.tsx /
+utils/urlMatchMode.ts extracted; sync_cycle split state_io 800→604 +
+sealed_rows.rs).
+
+Noted for a future batch: extension JS (content.js 2159, background.js
+1057) exceeds the 800-line cap but commit-gate only checks .rs files —
+either extend the gate or split via manifest multi-file content scripts
+(reviewer suggestion; both need their own session).
+
+Tests: 572 frontend CI-true (75 files; +107/+7) / Rust 434 (+1 ignored) /
+native-host 23. Plan: fix_impl_plan_v1.6.0.md (R3). Manual QA T45-T51
+appended — T48 (save prompt on real Chrome+Firefox) is the gating item.
 
 ### 2026-10-26 (v1.5.1 — flex-base-width UI fixes ×3 + trash Back button restored)
 
