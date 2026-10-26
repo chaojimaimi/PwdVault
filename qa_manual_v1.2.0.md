@@ -258,3 +258,14 @@
    后 4 位与 chrome://extensions 中实际 ID 一致。
 2. Firefox 配对：显示 `pwdvault@pwdvault.app` 原样。
 3. 文案含"核对提示，非身份认证"限定。
+
+## T44 v1.5.1 布局修补真机
+
+1. 仪表盘：summary 单行 sanely 排列——图标左、标题/说明文字正常换行占据中段、
+   Re-run check 内容宽贴右**不溢出窗口边缘**（v1.5.0 曾一词一列 + 按钮出缘）。
+2. 回收站：header 为 [←] Trash [Empty trash]——Back 钮点击返回主列表；Trash
+   tab toggle 仍可用；Empty trash 内容宽贴右、不再横贯整行。
+3. Settings → Security：status 行的 Disable/Copy 等按钮内容宽，不再满宽。
+4. Settings → Cloud Sync：Retry / Sync Now + Disconnect / Cancel + Complete
+   各行按钮内容宽、布局正常（Fix D 有意统一，若有某行确实需要等分双钮请反馈）。
+5. 以上两主题（Light/Dark）各看一眼。

@@ -4,8 +4,8 @@ A secure, local-first password manager built with Tauri + React.
 
 **Last Updated**: 2026-10-26
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.5.0
-**Current Version**: `v1.5.0` — 2026-10-26 M-tier product batch (security dashboard with in-process aggregation, 4-vendor CSV importers, trash auto-purge, per-entry URL match override on a three-generation codec + sync container v2, pair toast caller digest) on top of v1.4.1 trash-tab UI patch + v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.5.1
+**Current Version**: `v1.5.1` — 2026-10-26 UI patch (dashboard summary / trash header / security-status-row flex-base-width fixes — the v1.2.2 `.btn width:100%` trap in three flex rows — plus an explicit trash Back button restored after two QA rounds flagged the toggle-only return) on top of v1.5.0 M-tier product batch (security dashboard with in-process aggregation, 4-vendor CSV importers, trash auto-purge, per-entry URL match override on a three-generation codec + sync container v2, pair toast caller digest) + v1.4.1 trash-tab UI patch + v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -201,7 +201,7 @@ PwdVault/
 | Rust infrastructure crate | 128 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                 | (same run)                                |
 | Rust domain crate         | 7                                                                                                                              | (same run)                                |
 | Rust native-host          | 23                                                                                                                             | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 464 (68 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
+| Frontend (total)          | 465 (68 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -315,6 +315,32 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-10-26 (v1.5.1 — flex-base-width UI fixes ×3 + trash Back button restored)
+
+Compact pipeline (real-device QA feedback → mini-plan R1 → plan-reviewer
+REVISE ×2 → R3 **PASS** → main-agent implementation (small surface) →
+react-reviewer APPROVE (3×P3: indentation drift + one redundant assertion
+fixed pre-commit; BackHeader-reuse memo) → clean-worktree gates → release).
+Root cause of all three layout breaks: the global `.btn { width: 100% }`
+acting as flex base size (the v1.2.2 trap, jsdom-invisible): dashboard
+summary text collapsed to one word per line with Re-run check overflowing
+the window edge; trash Empty trash stretched across the header; the shared
+`.security-status-row` class stretched all nine Security/Cloud-Sync action
+buttons full-width (plan-reviewer sweep caught this third instance and its
+9-site blast radius; "50/50 split is intentional" had no evidence in the
+codebase — reviewer-corrected to a deliberate content-width unification).
+Fixes are three narrow scoped `width: auto` rules (`.dashboard-rerun`,
+`.trash-header .btn-danger` — deliberately not `.btn` so the restored
+`.btn-icon` keeps its 40px, `.security-status-row .btn`). Trash view
+regains an explicit Back button after two QA rounds flagged the
+toggle-only return; the Trash tab toggle keeps working. Note: scoped
+overrides rely on settings/vault.css importing after components.css
+(react-reviewer appendix: a future App.tsx import-order change would
+silently break them — fold into the eventual `.btn` global-rootening
+refactor, recorded as an independent item). Tests: 465 frontend CI-true
+(68 files; +1 Back case) / Rust & native-host unchanged. Plan:
+fix_impl_plan_v1.5.1.md (R3). Manual QA T44 appended.
 
 ### 2026-10-26 (v1.5.0 — M-tier batch: dashboard, CSV importers, trash auto-purge, URL match override, pair caller digest)
 
