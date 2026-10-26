@@ -189,6 +189,7 @@ mod tests {
                 notes: None,
                 tags: vec![],
                 group_id: Some(group_id.to_string()),
+                custom_fields: Vec::new(),
             },
         )
         .unwrap()

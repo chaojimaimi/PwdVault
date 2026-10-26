@@ -16,6 +16,10 @@ pub const MAX_INPUT_PASSWORD_BYTES: usize = 1024;
 pub const MAX_GROUP_NAME_BYTES: usize = 256;
 pub const MAX_TAGS: usize = 64;
 pub const MAX_TAG_BYTES: usize = 128;
+/// Custom-field budget per entry (v1.6.0 WP1): bounded rows keep the entry
+/// blob, the backup payload and the sync snapshot within sane sizes.
+pub const MAX_CUSTOM_FIELDS: usize = 32;
+pub const MAX_CUSTOM_LABEL_BYTES: usize = 256;
 pub const MAX_ID_BYTES: usize = 128;
 pub const MAX_BACKUP_ENTRIES: usize = 100_000;
 pub const MAX_BACKUP_GROUPS: usize = 10_000;
@@ -78,6 +82,11 @@ pub fn entry(request: &CreateEntryRequest) -> Result<(), DomainError> {
         request.notes.as_deref(),
         &request.tags,
         request.group_id.as_deref(),
+        request
+            .custom_fields
+            .iter()
+            .map(|field| (field.label.as_str(), field.value.as_str()))
+            .collect(),
     )
 }
 
@@ -89,6 +98,16 @@ pub fn entry_update(request: &UpdateEntryRequest) -> Result<(), DomainError> {
             return Err(invalid("TOTP_SECRET_TOO_LONG", "TOTP secret is too long"));
         }
     }
+    // Custom fields tri-state batch: `None` leaves the stored fields untouched
+    // (nothing new to validate), `Some(list)` replaces wholesale and validates
+    // in full.
+    let custom_fields: Vec<(&str, &str)> = request
+        .custom_fields
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .map(|field| (field.label.as_str(), field.value.as_str()))
+        .collect();
     entry_fields(
         &request.title,
         request.url.as_deref(),
@@ -101,7 +120,45 @@ pub fn entry_update(request: &UpdateEntryRequest) -> Result<(), DomainError> {
         },
         &request.tags,
         request.group_id.as_deref(),
+        custom_fields,
     )
+}
+
+/// Custom fields validated at the PLAINTEXT layer only (D2): the ciphertext
+/// size is an implementation detail of the sealing point, never a validation
+/// concern. `(label, plaintext value)` pairs keep the check shareable between
+/// the create/update inputs and the backup payload shape.
+fn validate_custom_field_pairs(pairs: &[(&str, &str)]) -> Result<(), DomainError> {
+    if pairs.len() > MAX_CUSTOM_FIELDS {
+        return Err(invalid("TOO_MANY_CUSTOM_FIELDS", "Too many custom fields"));
+    }
+    // Duplicate rejection follows the tags convention: trim + case-fold, so
+    // "API Key" and "api key " cannot coexist on one entry.
+    let mut seen = HashSet::new();
+    for (label, value) in pairs {
+        let normalized = label.trim();
+        if normalized.is_empty() || normalized.len() > MAX_CUSTOM_LABEL_BYTES {
+            return Err(invalid(
+                "INVALID_CUSTOM_FIELD_LABEL",
+                "Custom field label is empty or too long",
+            ));
+        }
+        if !seen.insert(normalized.to_lowercase()) {
+            return Err(invalid(
+                "DUPLICATE_CUSTOM_FIELD_LABEL",
+                "Duplicate custom field label",
+            ));
+        }
+        // Empty values are legal (placeholder row); anything over the shared
+        // field cap is not.
+        if value.len() > MAX_FIELD_LENGTH {
+            return Err(invalid(
+                "CUSTOM_FIELD_VALUE_TOO_LONG",
+                "Custom field value is too long",
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -113,6 +170,7 @@ fn entry_fields(
     notes: Option<&str>,
     tag_values: &[String],
     group_id: Option<&str>,
+    custom_field_pairs: Vec<(&str, &str)>,
 ) -> Result<(), DomainError> {
     if title.trim().is_empty() || title.len() > MAX_FIELD_LENGTH {
         return Err(invalid("INVALID_TITLE", "Title is empty or too long"));
@@ -136,6 +194,7 @@ fn entry_fields(
         return Err(invalid("NOTES_TOO_LONG", "Notes are too long"));
     }
     tags(tag_values)?;
+    validate_custom_field_pairs(&custom_field_pairs)?;
     if let Some(group_id) = group_id {
         id(group_id)?;
     }
@@ -323,6 +382,13 @@ pub fn backup_payload(payload: &BackupPayload) -> Result<(), DomainError> {
             entry.notes.as_deref().map(String::as_str),
             &entry.tags,
             entry.group_id.as_deref(),
+            // v1.6.0: backup entries carry their custom fields through the
+            // same plaintext-layer rules as the live CRUD paths.
+            entry
+                .custom_fields
+                .iter()
+                .map(|field| (field.label.as_str(), field.value.as_str()))
+                .collect(),
         )?;
         if entry
             .group_id
@@ -341,6 +407,9 @@ pub fn backup_payload(payload: &BackupPayload) -> Result<(), DomainError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zeroize::Zeroizing;
+
+    use crate::dto::{CustomFieldInput, ExportEntry};
 
     #[test]
     fn rejects_short_master_password() {
@@ -369,5 +438,132 @@ mod tests {
             normalize_url(Some("  https://example.com/login  ".to_string())),
             Some("https://example.com/login".to_string())
         );
+    }
+
+    // -----------------------------------------------------------------
+    // v1.6.0 WP1: custom-field validation boundaries (plaintext layer)
+    // -----------------------------------------------------------------
+
+    fn field(label: &str, value: &str) -> CustomFieldInput {
+        CustomFieldInput {
+            label: label.to_string(),
+            value: value.to_string(),
+            secret: false,
+        }
+    }
+
+    fn create_request(fields: Vec<CustomFieldInput>) -> CreateEntryRequest {
+        CreateEntryRequest {
+            title: "Title".to_string(),
+            url: None,
+            username: "user".to_string(),
+            password: Zeroizing::new("password-value".to_string()),
+            notes: None,
+            tags: vec![],
+            group_id: None,
+            url_match_mode: crate::UrlMatchMode::Auto,
+            custom_fields: fields,
+        }
+    }
+
+    #[test]
+    fn custom_fields_accept_valid_rows_including_empty_values() {
+        let request = create_request(vec![
+            field("API Key", "key-value"),
+            field("Placeholder", ""), // empty value is the legal placeholder
+        ]);
+        assert!(entry(&request).is_ok());
+    }
+
+    #[test]
+    fn custom_fields_reject_count_over_cap() {
+        let fields: Vec<CustomFieldInput> = (0..=MAX_CUSTOM_FIELDS)
+            .map(|i| field(&format!("field-{i}"), "v"))
+            .collect();
+        let error = entry(&create_request(fields)).unwrap_err();
+        assert_eq!(error.code, "TOO_MANY_CUSTOM_FIELDS");
+    }
+
+    #[test]
+    fn custom_fields_reject_empty_or_oversized_labels() {
+        let empty = entry(&create_request(vec![field("   ", "v")])).unwrap_err();
+        assert_eq!(empty.code, "INVALID_CUSTOM_FIELD_LABEL");
+
+        let oversized = entry(&create_request(vec![field(
+            &"x".repeat(MAX_CUSTOM_LABEL_BYTES + 1),
+            "v",
+        )]))
+        .unwrap_err();
+        assert_eq!(oversized.code, "INVALID_CUSTOM_FIELD_LABEL");
+    }
+
+    #[test]
+    fn custom_fields_reject_duplicate_labels_case_insensitively() {
+        let dup = create_request(vec![field("API Key", "a"), field("api key", "b")]);
+        let error = entry(&dup).unwrap_err();
+        assert_eq!(error.code, "DUPLICATE_CUSTOM_FIELD_LABEL");
+    }
+
+    #[test]
+    fn custom_fields_reject_values_over_the_field_cap() {
+        let oversized = create_request(vec![field("Notes-ish", &"x".repeat(MAX_FIELD_LENGTH + 1))]);
+        let error = entry(&oversized).unwrap_err();
+        assert_eq!(error.code, "CUSTOM_FIELD_VALUE_TOO_LONG");
+    }
+
+    #[test]
+    fn entry_update_validates_custom_fields_only_when_present() {
+        // None = leave unchanged: nothing to validate, so an otherwise valid
+        // patch must not fail on custom fields.
+        let untouched = UpdateEntryRequest {
+            title: "Patched".to_string(),
+            url: None,
+            username: "user".to_string(),
+            password: None,
+            notes: None,
+            update_notes: false,
+            tags: vec![],
+            group_id: None,
+            totp_secret: None,
+            url_match_mode: crate::UrlMatchMode::Auto,
+            custom_fields: None,
+        };
+        assert!(entry_update(&untouched).is_ok());
+
+        let replaced = UpdateEntryRequest {
+            custom_fields: Some(vec![field("dup", "a"), field("dup", "b")]),
+            ..untouched
+        };
+        let error = entry_update(&replaced).unwrap_err();
+        assert_eq!(error.code, "DUPLICATE_CUSTOM_FIELD_LABEL");
+    }
+
+    #[test]
+    fn backup_payload_validates_entry_custom_fields() {
+        let oversized = BackupPayload {
+            entries: vec![ExportEntry {
+                id: "entry-1".to_string(),
+                title: "Title".to_string(),
+                url: None,
+                username: "user".to_string(),
+                password: Zeroizing::new("pw".to_string()),
+                notes: None,
+                tags: vec![],
+                group_id: None,
+                created_at: 0,
+                updated_at: 0,
+                url_match_mode: crate::UrlMatchMode::Auto,
+                totp_secret: None,
+                custom_fields: vec![crate::ExportCustomField {
+                    label: "big".to_string(),
+                    value: Zeroizing::new("x".repeat(MAX_FIELD_LENGTH + 1)),
+                    secret: false,
+                }],
+            }],
+            groups: vec![],
+            settings: Settings::default(),
+        };
+        let error = backup_payload(&oversized).unwrap_err();
+        assert_eq!(error.code, "CUSTOM_FIELD_VALUE_TOO_LONG");
     }
 }

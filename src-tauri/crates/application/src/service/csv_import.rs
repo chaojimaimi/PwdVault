@@ -501,6 +501,10 @@ fn stage_rows(preset: CsvPreset, grid: &[Vec<String>]) -> Result<CsvStagedImport
             notes: notes.clone(),
             tags: Vec::new(),
             group_id: None,
+            // v1.6.0: CSV import does not produce custom fields — the four
+            // vendor formats have no compatible column convention (explicit
+            // non-goal; the desktop UI creates them).
+            custom_fields: Vec::new(),
         };
         if pwdvault_domain::validation::entry(&request).is_err() {
             skipped += 1;

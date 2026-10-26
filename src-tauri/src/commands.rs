@@ -156,6 +156,17 @@ pub fn get_entry_secret(
     app::get_entry_secret(state.inner(), id)
 }
 
+/// v1.6.0 (D7): boolean-only password verification for the extension's
+/// save/update prompt — all logic lives in the application layer; the
+/// command is a passthrough.
+#[tauri::command]
+pub fn verify_entry_password(
+    request: pwdvault_domain::VerifyEntryPasswordRequest,
+    state: State<'_, AppHandle>,
+) -> Result<pwdvault_domain::VerifyEntryPasswordResponse, VaultError> {
+    app::verify_entry_password(state.inner(), request)
+}
+
 #[tauri::command]
 pub fn list_all_entries(
     state: State<'_, AppHandle>,

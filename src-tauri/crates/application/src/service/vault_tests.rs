@@ -420,7 +420,8 @@ fn legacy_fixtures_full_chain_round_trip() {
     use crate::service::sync::engine::{
         sync_connect_with_backend, sync_now_with_backend, SyncBackendKind, SyncConfig,
     };
-    use crate::service::sync::state_io::{SYNC_CONFIG_BLOB_KEY, SYNC_ROW_ENC_PREFIX};
+    use crate::service::sync::sealed_rows::SYNC_ROW_ENC_PREFIX;
+    use crate::service::sync::state_io::SYNC_CONFIG_BLOB_KEY;
     use crate::{change_password, create_entry, get_entry_secret, list_all_entries};
     use pwdvault_infrastructure::keychain::{MemorySecretStore, SecretStore};
 
@@ -483,6 +484,7 @@ fn legacy_fixtures_full_chain_round_trip() {
             notes: Some("chain notes".to_string()),
             tags: vec!["chain".to_string()],
             group_id: None,
+            custom_fields: Vec::new(),
         },
     )
     .unwrap()
@@ -609,6 +611,7 @@ fn legacy_fixtures_full_chain_round_trip() {
             notes: None,
             tags: vec![],
             group_id: None,
+            custom_fields: Vec::new(),
         },
     )
     .unwrap()

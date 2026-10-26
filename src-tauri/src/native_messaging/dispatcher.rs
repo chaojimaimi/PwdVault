@@ -10,6 +10,7 @@ use tauri::Emitter;
 use pwdvault_application::service;
 use pwdvault_application::{
     AppState, CreateEntryRequest, UpdateEntryRequest, VaultBackup, VaultError,
+    VerifyEntryPasswordRequest,
 };
 use pwdvault_domain::constants;
 use pwdvault_domain::Settings;
@@ -177,6 +178,10 @@ pub(super) fn execute_command(
                 // v1.5.0 WP4: the serde default (Auto) covers pre-v1.5.0
                 // extension payloads that omit the field.
                 url_match_mode: req.url_match_mode,
+                // v1.6.0: pre-v1.6.0 extension payloads (serde default) land
+                // on "no custom fields"; values arrive as plaintext inputs
+                // and the service layer seals them.
+                custom_fields: req.custom_fields.unwrap_or_default(),
             };
             service::create_entry(&state, request)
                 .map(|summary| serde_json::to_value(summary).expect("entry serializable"))
@@ -198,6 +203,23 @@ pub(super) fn execute_command(
             let id = req.id_param.ok_or("Entry ID required".to_string())?;
             service::get_entry_secret(&state, id)
                 .map(|secret| serde_json::to_value(secret).expect("secret serializable"))
+                .map_err(vault_error_to_message)
+        }
+
+        // v1.6.0 (D7): boolean-only verification for the save/update prompt.
+        // The candidate digest rides in the body; the stored password never
+        // crosses this boundary and the response carries only `matches`.
+        "verify_entry_password" => {
+            let request = VerifyEntryPasswordRequest {
+                id: req.id_param.ok_or("Entry ID required".to_string())?,
+                password_sha256: req
+                    .password_sha256
+                    .ok_or("Password digest required".to_string())?,
+            };
+            service::verify_entry_password(&state, request)
+                .map(|response| {
+                    serde_json::to_value(response).expect("verify response serializable")
+                })
                 .map_err(vault_error_to_message)
         }
 
@@ -247,6 +269,10 @@ pub(super) fn execute_command(
                 // v1.5.0 WP4: the serde default (Auto) covers pre-v1.5.0
                 // extension payloads that omit the field.
                 url_match_mode: req.url_match_mode,
+                // v1.6.0 tri-state batch: a payload without the field leaves
+                // the stored custom fields untouched (serde default = None);
+                // Some(list) replaces wholesale.
+                custom_fields: req.custom_fields,
             };
             service::update_entry(&state, id, request)
                 .map(|summary| serde_json::to_value(summary).expect("entry serializable"))

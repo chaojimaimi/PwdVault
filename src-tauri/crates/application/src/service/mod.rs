@@ -23,6 +23,7 @@ pub use csv_import::{import_csv_commit, import_csv_open, CsvImportPreview, CsvIm
 pub use entries::{
     create_entry, empty_trash, get_entry_count, get_entry_meta, get_entry_secret, list_all_entries,
     list_deleted_entries, purge_entry, remove_entry, restore_entry, update_entry,
+    verify_entry_password,
 };
 pub use extension::revoke_extension_access;
 pub use groups::{create_group, list_all_groups, remove_group, update_group};
@@ -36,8 +37,8 @@ pub use security_report::{security_report, SecurityReport};
 pub use settings::{get_settings, update_settings};
 pub use sync::baidu_oauth::{baidu_complete_auth, baidu_start_auth, BaiduAuthStart};
 pub use sync::engine::{
-    sync_connect, sync_disconnect, sync_now, sync_status, SyncBackendKind, SyncConfig, SyncState,
-    SyncStatusResponse,
+    run_sync_cycle_if_due, sync_connect, sync_disconnect, sync_now, sync_status, SyncBackendKind,
+    SyncConfig, SyncState, SyncStatusResponse,
 };
 pub use totp::totp_code;
 // WP3 (v1.5.0): post-unlock trash auto-purge. Pure function by design — the

@@ -78,6 +78,29 @@ fn start_auto_lock_thread(state: Arc<AppState>) {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-Sync background thread (v1.6.0 WP3 / D6)
+// ---------------------------------------------------------------------------
+
+/// Timed auto-sync scheduler. Wakes at most every 30 seconds and hands the
+/// decision to the application layer's `run_sync_cycle_if_due` (unlock /
+/// interval / last-finished gating, plus the busy try_lock skip — a tick
+/// never queues behind a running manual cycle). The thread IS the background
+/// context: the cycle runs blocking right here (D6) — no extra
+/// spawn_blocking indirection.
+///
+/// SILENT BY DESIGN: successes and failures alike are recorded in
+/// `SyncState` (visible on the settings status line) but NEVER emitted as
+/// events or toasts — transient network jitter from a background timer must
+/// not interrupt the user (the deliberate opposite of the SF-P* position on
+/// user-initiated actions).
+fn start_auto_sync_thread(state: Arc<AppState>) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        pwdvault_application::service::run_sync_cycle_if_due(&state);
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Native host registration
 // ---------------------------------------------------------------------------
 
@@ -300,6 +323,9 @@ pub fn run() {
             }
 
             start_auto_lock_thread(state.clone());
+            // v1.6.0 (D6): timed auto-sync — disabled unless the user opts in
+            // via Settings.auto_sync_interval_min.
+            start_auto_sync_thread(state.clone());
 
             let tray = TrayIconBuilder::new()
                 // TrayIconBuilder::icon takes a non-optional Image; the icon
@@ -379,6 +405,9 @@ pub fn run() {
             commands::create_entry,
             commands::get_entry_meta,
             commands::get_entry_secret,
+            // v1.6.0 (D7): boolean-only password check for the extension's
+            // save/update prompt (also routed via the NM bridge).
+            commands::verify_entry_password,
             commands::list_all_entries,
             commands::update_entry,
             commands::remove_entry,

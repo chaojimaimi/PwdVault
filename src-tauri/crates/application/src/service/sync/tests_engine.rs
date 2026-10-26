@@ -94,6 +94,7 @@ pub(super) fn create_entry_titled(state: &Arc<AppState>, title: &str) -> String 
             notes: None,
             tags: vec![],
             group_id: None,
+            custom_fields: Vec::new(),
         },
     )
     .unwrap()
@@ -430,6 +431,7 @@ fn concurrent_writes_during_sync_do_not_corrupt_vault() {
                     tags: vec![],
                     group_id: None,
                     totp_secret: None,
+                    custom_fields: None,
                 };
                 match crate::update_entry(&state, id.clone(), request) {
                     Ok(_) => accepted += 1,

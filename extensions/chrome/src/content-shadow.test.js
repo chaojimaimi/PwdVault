@@ -8,16 +8,17 @@ import { describe, expect, it } from 'vitest';
 // v1.3.2 Shadow DOM isolation contract is asserted on the source text.
 //
 // Contract: every injected UI root (auto-fill bar, overlay, toast, floating
-// button) mounts inside its own closed shadow root seeded from ONE shared CSS
-// constant; no style reaches the host page's document; the palette is the
-// desktop Light theme mirror instead of the retired indigo/dark set.
+// button, v1.6.0 save/update bar) mounts inside its own closed shadow root
+// seeded from ONE shared CSS constant; no style reaches the host page's
+// document; the palette is the desktop Light theme mirror instead of the
+// retired indigo/dark set.
 const here = dirname(fileURLToPath(import.meta.url));
 const content = readFileSync(join(here, 'content.js'), 'utf8');
 
-const UI_ROOTS = 4;
+const UI_ROOTS = 5;
 
 describe('content.js shadow DOM isolation (v1.3.2)', () => {
-  it('mounts exactly one closed shadow root per UI root (4 total)', () => {
+  it('mounts exactly one closed shadow root per UI root (5 total)', () => {
     // Single choke point: mountShadowHost is the only place a shadow root is
     // created, and it is invoked exactly once per UI root.
     expect(content.split('attachShadow({ mode: "closed" })').length - 1).toBe(1);
@@ -45,8 +46,8 @@ describe('content.js shadow DOM isolation (v1.3.2)', () => {
     expect(content).toContain('--pv-accent: #0D9488');
   });
 
-  it('keeps the four keyframes inside the shared shadow CSS constant only', () => {
-    for (const name of ['slideDown', 'fadeIn', 'slideIn', 'fadeInFloat']) {
+  it('keeps the five keyframes inside the shared shadow CSS constant only', () => {
+    for (const name of ['slideDown', 'fadeIn', 'slideIn', 'fadeInFloat', 'slideUp']) {
       // Exactly one definition — inside SHADOW_CSS; no per-toast/per-bar
       // "<style>@keyframes …" injection statements remain. The trailing
       // brace keeps "fadeIn" from prefix-matching "fadeInFloat".

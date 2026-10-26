@@ -143,6 +143,26 @@ pub struct AppState {
     /// menu/verification mutexes. Window functions never enter holding a
     /// lease, and `lock_vault` never takes this guard — no deadlock.
     pub exclusive_window: Mutex<()>,
+    /// v1.6.0 (D6): leaf-level mutex serializing whole sync CYCLES (manual
+    /// `sync_now`/`sync_connect` and the auto-sync tick) across their network
+    /// phase AND merge window. Acquired strictly before any
+    /// `exclusive_window` — lock order `sync_cycle` -> `exclusive_window` ->
+    /// session internals; the password-change/recovery windows take
+    /// `exclusive_window` only, so there is no reverse-acquisition point.
+    /// Manual paths block on it (a user action must complete); the auto-sync
+    /// tick uses `try_lock` and skips when busy.
+    pub sync_cycle: Mutex<()>,
+    /// v1.6.0 (D6): in-memory marker of the last finished sync cycle (manual
+    /// or automatic, success or failure). `None` until the first cycle of
+    /// this process finishes — the auto-sync scheduler treats that as due.
+    /// Deliberately NOT persisted: a restart starts with a clean slate and
+    /// the first eligible tick converges once.
+    pub last_sync_finished: Mutex<Option<Instant>>,
+    /// v1.6.0 (D6): cached `Settings.auto_sync_interval_min` (0 = off).
+    /// Refreshed alongside [`AppState::auto_lock_secs`] on every settings
+    /// write/import/unlock path, so the background tick reads it without
+    /// touching the database.
+    pub auto_sync_interval_min: Mutex<u32>,
     /// Fix plan A §2.3: bumped on EVERY `lock_vault` before the drain. A D8
     /// window captures the value before opening and republishes its keys
     /// only if the epoch still matches — a manual/auto lock during the
@@ -250,6 +270,9 @@ impl Default for AppState {
             secret_store: platform_default(),
             sync_secret_store: platform_sync_default(),
             exclusive_window: Mutex::new(()),
+            sync_cycle: Mutex::new(()),
+            last_sync_finished: Mutex::new(None),
+            auto_sync_interval_min: Mutex::new(0),
             lock_epoch: AtomicU64::new(0),
             csv_import_staging: Mutex::new(None),
             #[cfg(test)]

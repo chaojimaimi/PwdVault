@@ -59,6 +59,7 @@ fn create_test_entry(state: &Arc<AppState>, title: &str) -> EntrySummary {
             notes: None,
             tags: vec![],
             group_id: None,
+            custom_fields: Vec::new(),
         },
     )
     .unwrap()
@@ -76,6 +77,7 @@ fn patch(totp_secret: Option<String>) -> UpdateEntryRequest {
         tags: vec![],
         group_id: None,
         totp_secret,
+        custom_fields: None,
     }
 }
 

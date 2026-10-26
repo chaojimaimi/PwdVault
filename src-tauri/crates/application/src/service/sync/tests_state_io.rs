@@ -11,9 +11,10 @@ use zeroize::Zeroizing;
 
 use super::backend::MockCloudBackend;
 use super::engine::{SyncState, SyncStatusResponse};
+use super::sealed_rows::SYNC_ROW_ENC_PREFIX;
 use super::state_io::{
     load_config, load_sync_state, save_sync_rows, validate_config, SessionKeys,
-    SYNC_CONFIG_BLOB_KEY, SYNC_ROW_ENC_PREFIX, SYNC_STATE_BLOB_KEY,
+    SYNC_CONFIG_BLOB_KEY, SYNC_STATE_BLOB_KEY,
 };
 use super::tests_engine::{
     test_config, test_state, CONTAINER_PASSWORD, NEW_PASSWORD, TEST_PASSWORD,
@@ -58,6 +59,7 @@ fn sample_sync_state() -> SyncState {
         last_snapshot_hash: Some("abc123".to_string()),
         envelope: None,
         history: vec!["h-1".to_string(), "h-2".to_string()],
+        last_conflict_count: 0,
     }
 }
 

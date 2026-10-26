@@ -27,6 +27,13 @@ pub fn update_settings(state: &Arc<AppState>, settings: Settings) -> Result<Sett
 
     // Apply auto-lock timeout immediately
     *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
+    // v1.6.0 (D6): same cache-refresh contract for the auto-sync interval —
+    // the background tick reads the mutex, never the database, so a changed
+    // interval takes effect within one tick.
+    *state
+        .auto_sync_interval_min
+        .lock()
+        .expect("auto sync interval lock poisoned") = settings.auto_sync_interval_min;
     // v1.4.0 (WP5): settings saves re-register the global shortcut so the
     // change takes effect immediately — including saves that arrive over the
     // extension bridge. Failures are logged, not surfaced: the row is already

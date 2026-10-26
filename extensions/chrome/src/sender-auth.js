@@ -1,4 +1,23 @@
-const CONTENT_SCRIPT_COMMANDS = new Set(["GET_ENTRIES_FOR_URL", "GET_ENTRY"]);
+// v1.6.0 WP4 expansion argument (whitelist grew 2 → 4): the save/update
+// prompt is the FIRST page-reachable write-adjacent surface, so each property
+// of the gate is explicit —
+//  - purpose-built narrow types, NOT the open CREATE_ENTRY/UPDATE_ENTRY
+//    popup-class commands: a content script can never submit an arbitrary
+//    entry payload (create is fixed-shape; update only re-keys the password
+//    on an entry the content script's own URL gate surfaced);
+//  - CHECK_SAVE_CREDENTIALS carries only a SHA-256 digest plus candidate
+//    ids/titles — no plaintext password ever reaches this background;
+//  - SAVE_LOGIN_CONFIRMED fires only from a trusted user click on the
+//    in-page confirm bar (the content script isTrusted-gates the button),
+//    so nothing is stored without an explicit user gesture;
+//  - a desktop too old for verify_entry_password fails the CHECK with
+//    "Unknown command" and the feature silently disables for the session.
+const CONTENT_SCRIPT_COMMANDS = new Set([
+	"GET_ENTRIES_FOR_URL",
+	"GET_ENTRY",
+	"CHECK_SAVE_CREDENTIALS",
+	"SAVE_LOGIN_CONFIRMED",
+]);
 
 // Commands that only the popup may send. They schedule clipboard destruction
 // or control its failure reporting, so a content script (i.e. page-reachable

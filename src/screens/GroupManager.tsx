@@ -144,7 +144,7 @@ export default function GroupManager() {
 							}}
 						/>
 						<button
-							className="btn btn-primary group-create-save"
+							className="btn btn-primary btn-inline group-create-save"
 							onClick={handleCreate}
 							disabled={!newGroupName.trim()}
 						>
@@ -192,13 +192,13 @@ export default function GroupManager() {
 										}}
 									/>
 									<button
-										className="btn btn-primary group-edit-save"
+										className="btn btn-primary btn-inline group-edit-save"
 										onClick={saveEdit}
 									>
 										Save
 									</button>
 									<button
-										className="btn btn-secondary group-edit-cancel"
+										className="btn btn-secondary btn-inline group-edit-cancel"
 										onClick={cancelEdit}
 									>
 										Cancel

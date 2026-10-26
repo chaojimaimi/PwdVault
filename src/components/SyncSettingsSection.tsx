@@ -214,7 +214,8 @@ export function SyncSettingsSection() {
 		if (busy) return;
 		setBusy("sync");
 		try {
-			setStatus(await syncNow());
+			const next = await syncNow();
+			setStatus(next);
 			// Refresh the vault lists so remote changes are visible without a
 			// remount. A refresh failure must not hide that the sync itself
 			// succeeded.
@@ -227,9 +228,16 @@ export function SyncSettingsSection() {
 			} catch {
 				refreshed = false;
 			}
+			// v1.6.0 (D5): surface the auto-resolved LWW conflict count when the
+			// cycle adjudicated any. `?? 0` — a pre-v1.6.0 desktop omits the key.
+			const conflicts = next.conflict_count ?? 0;
+			const conflictNote =
+				conflicts > 0
+					? ` — ${conflicts} conflict${conflicts === 1 ? "" : "s"} resolved automatically`
+					: "";
 			showToast(
 				refreshed
-					? "Sync completed"
+					? `Sync completed${conflictNote}`
 					: "Sync completed, but local list refresh failed",
 			);
 		} catch (error) {
@@ -276,7 +284,7 @@ export function SyncSettingsSection() {
 						<div className="security-status-row">
 							<button
 								type="button"
-								className="btn btn-secondary btn-sm"
+								className="btn btn-secondary btn-sm btn-inline"
 								onClick={() => void refreshStatus()}
 							>
 								Retry
@@ -304,6 +312,22 @@ export function SyncSettingsSection() {
 									{statusData!.remote_rev ?? "—"}
 								</span>
 							</div>
+							{/* v1.6.0 (D5): LWW-conflicted pairs auto-resolved by the
+							    last merge. Hidden when zero (same conditional-render
+							    pattern as the failure line below) so a clean sync adds
+							    no noise; `?? 0` keeps pre-v1.6.0 desktops (which omit
+							    the key) on the hidden branch too. */}
+							{(statusData!.conflict_count ?? 0) > 0 && (
+								<div className="option-row">
+									<span className="sync-status-label">
+										Conflicts (last sync)
+									</span>
+									<span className="sync-status-value sync-conflict-value">
+										{statusData!.conflict_count} — resolved automatically
+										(last-write-wins)
+									</span>
+								</div>
+							)}
 							{statusData!.last_result && statusData!.last_result !== "ok" && (
 								<p className="error-message" role="alert">
 									Last sync failed: {statusData!.last_result}
@@ -323,7 +347,7 @@ export function SyncSettingsSection() {
 						<div className="security-status-row">
 							<button
 								type="button"
-								className="btn btn-primary btn-sm"
+								className="btn btn-primary btn-sm btn-inline"
 								onClick={() => void handleSyncNow()}
 								disabled={busy !== null}
 							>
@@ -331,7 +355,7 @@ export function SyncSettingsSection() {
 							</button>
 							<button
 								type="button"
-								className="btn btn-danger btn-sm"
+								className="btn btn-danger btn-sm btn-inline"
 								onClick={() => setShowDisconnect(true)}
 								disabled={busy !== null}
 							>
@@ -442,7 +466,7 @@ export function SyncSettingsSection() {
 										<div className="security-status-row">
 											<button
 												type="button"
-												className="btn btn-secondary btn-sm"
+												className="btn btn-secondary btn-sm btn-inline"
 												onClick={() => {
 													setBaiduAwaiting(false);
 													setConnectError(null);
@@ -453,7 +477,7 @@ export function SyncSettingsSection() {
 											</button>
 											<button
 												type="button"
-												className="btn btn-primary btn-sm"
+												className="btn btn-primary btn-sm btn-inline"
 												onClick={() => void handleBaiduComplete()}
 												disabled={busy !== null}
 											>

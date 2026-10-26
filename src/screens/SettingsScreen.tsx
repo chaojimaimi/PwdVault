@@ -34,6 +34,19 @@ const TRASH_PURGE_OPTIONS = [
 	{ label: "After 90 days", value: 90 },
 ];
 
+// v1.6.0 (D6): timed auto-sync. 0 = off is the DEFAULT — a background network
+// cycle is strict opt-in, same semantics as trash auto-purge above. These
+// five are the curated choices; any nonzero minute value works on the Rust
+// side. Placement note: this row sits next to Trash Auto-Purge so the two
+// unlock-gated background automations form one contiguous cluster.
+const AUTO_SYNC_OPTIONS = [
+	{ label: "Off", value: 0 },
+	{ label: "Every 5 minutes", value: 5 },
+	{ label: "Every 15 minutes", value: 15 },
+	{ label: "Every 30 minutes", value: 30 },
+	{ label: "Every 1 hour", value: 60 },
+];
+
 export function SettingsScreen() {
 	const { actions: authActions } = useAuth();
 	const { state, actions } = useSettings();
@@ -270,6 +283,36 @@ export function SettingsScreen() {
 							is unlocked — an always-unlocked vault never sweeps, and a
 							changed setting applies at the next unlock. At most 500 items
 							are deleted per unlock.
+						</p>
+					</div>
+
+					<div className="settings-divider" />
+
+					<div className="settings-section">
+						<h3 className="settings-section-title">Auto-Sync</h3>
+						<div className="option-row">
+							<label htmlFor="auto-sync-interval">Sync automatically</label>
+							<select
+								id="auto-sync-interval"
+								className="settings-select"
+								value={settings.auto_sync_interval_min}
+								onChange={(e) =>
+									setSettings({
+										...settings,
+										auto_sync_interval_min: parseInt(e.target.value),
+									})
+								}
+							>
+								{AUTO_SYNC_OPTIONS.map((opt) => (
+									<option key={opt.value} value={opt.value}>
+										{opt.label}
+									</option>
+								))}
+							</select>
+						</div>
+						<p className="settings-hint">
+							Automatically syncs with the configured cloud container while
+							the vault is unlocked. Requires cloud sync to be connected.
 						</p>
 					</div>
 

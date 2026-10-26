@@ -20,16 +20,21 @@
 //! therefore goes through [`decode_entry_plain`], which walks the generation
 //! chain newest-first:
 //!
-//! 1. **current (v1.5.0+)**: 14 fields — the struct gained `url_match_mode`;
-//! 2. [`LegacyEntryV3`] (v1.1.5–v1.4.1): 13 fields — `url_match_mode`
+//! 1. **current (v1.6.0+)**: 15 fields — the struct gained `custom_fields`;
+//! 2. [`LegacyEntryV4`] (v1.5.0–v1.5.1): 14 fields — `custom_fields`
+//!    defaults to an empty vec;
+//! 3. [`LegacyEntryV3`] (v1.1.5–v1.4.1): 13 fields — `url_match_mode`
 //!    defaults to [`UrlMatchMode::Auto`];
-//! 3. [`LegacyEntryV2`] (pre-v1.1.5): 11 fields — `deleted_at` /
+//! 4. [`LegacyEntryV2`] (pre-v1.1.5): 11 fields — `deleted_at` /
 //!    `encrypted_totp_secret` / `url_match_mode` all default.
 //!
 //! Adding a field WITHOUT extending this chain makes every entry written by
 //! older versions unreadable (P0, caught in the v1.5.0 plan review); the
-//! permanent 13-field golden fixture in `bincode_golden.rs` is the tripwire
-//! that keeps generation 2 honest.
+//! permanent 13-field and 14-field golden fixtures in `bincode_golden.rs`
+//! are the tripwires that keep generations 2 and 3 honest. Downgrade
+//! consequence, recorded honestly: builds ≤v1.5.x cannot read v1.6.0 entry
+//! blobs (same class as the v1.1.5/v1.5.0 field additions; the auto-updater
+//! makes it a non-issue in practice).
 
 use serde::Deserialize;
 
@@ -80,6 +85,27 @@ struct LegacyEntryV3 {
     encrypted_totp_secret: Option<Vec<u8>>,
 }
 
+/// Entry layout written by v1.5.0–v1.5.1: the 14-field shape with the
+/// per-entry URL match mode, before custom fields existed. Deserialize-only:
+/// never written back. Generation 3 of the read chain — see the module docs.
+#[derive(Debug, Deserialize)]
+struct LegacyEntryV4 {
+    id: String,
+    title: String,
+    url: Option<String>,
+    username: String,
+    encrypted_password: Vec<u8>,
+    encrypted_notes: Option<Vec<u8>>,
+    tags: Vec<String>,
+    created_at: i64,
+    updated_at: i64,
+    last_used_at: Option<i64>,
+    group_id: Option<String>,
+    deleted_at: Option<i64>,
+    encrypted_totp_secret: Option<Vec<u8>>,
+    url_match_mode: UrlMatchMode,
+}
+
 /// Build the AAD for an entry: `table_name || record_id || record_format_version`
 fn entry_aad(entry_id: &str) -> Vec<u8> {
     let mut aad = Vec::new();
@@ -91,18 +117,37 @@ fn entry_aad(entry_id: &str) -> Vec<u8> {
 
 /// Deserialize inner plaintext bytes as a [`PasswordEntry`].
 ///
-/// Walks the layout generation chain newest-first: current 14-field layout →
-/// [`LegacyEntryV3`] (13 fields, `url_match_mode` = Auto) → [`LegacyEntryV2`]
-/// (11 fields, the v1.5.0 fields additionally defaulting). All three
-/// `open_entry` inner channels (v2 AAD / v1 / plaintext migration) read
-/// records that may use any generation, so they must all route through this
-/// helper.
+/// Walks the layout generation chain newest-first: current 15-field layout →
+/// [`LegacyEntryV4`] (14 fields, `custom_fields` = empty) → [`LegacyEntryV3`]
+/// (13 fields, `url_match_mode` = Auto) → [`LegacyEntryV2`] (11 fields, the
+/// v1.5.0/v1.6.0 fields additionally defaulting). All three `open_entry`
+/// inner channels (v2 AAD / v1 / plaintext migration) read records that may
+/// use any generation, so they must all route through this helper.
 ///
-/// `pub(crate)` so the permanent 13-field golden fixture in
+/// `pub(crate)` so the permanent 13-field and 14-field golden fixtures in
 /// `bincode_golden.rs` can drive the real read path.
 pub(crate) fn decode_entry_plain(plain: &[u8]) -> Result<PasswordEntry, DatabaseError> {
     if let Ok(entry) = bc_deserialize::<PasswordEntry>(plain) {
         return Ok(entry);
+    }
+    if let Ok(legacy) = bc_deserialize::<LegacyEntryV4>(plain) {
+        return Ok(PasswordEntry {
+            id: legacy.id,
+            title: legacy.title,
+            url: legacy.url,
+            username: legacy.username,
+            encrypted_password: legacy.encrypted_password,
+            encrypted_notes: legacy.encrypted_notes,
+            tags: legacy.tags,
+            created_at: legacy.created_at,
+            updated_at: legacy.updated_at,
+            last_used_at: legacy.last_used_at,
+            group_id: legacy.group_id,
+            deleted_at: legacy.deleted_at,
+            encrypted_totp_secret: legacy.encrypted_totp_secret,
+            url_match_mode: legacy.url_match_mode,
+            custom_fields: Vec::new(),
+        });
     }
     if let Ok(legacy) = bc_deserialize::<LegacyEntryV3>(plain) {
         return Ok(PasswordEntry {
@@ -120,6 +165,7 @@ pub(crate) fn decode_entry_plain(plain: &[u8]) -> Result<PasswordEntry, Database
             deleted_at: legacy.deleted_at,
             encrypted_totp_secret: legacy.encrypted_totp_secret,
             url_match_mode: UrlMatchMode::Auto,
+            custom_fields: Vec::new(),
         });
     }
     let legacy: LegacyEntryV2 =
@@ -139,6 +185,7 @@ pub(crate) fn decode_entry_plain(plain: &[u8]) -> Result<PasswordEntry, Database
         deleted_at: None,
         encrypted_totp_secret: None,
         url_match_mode: UrlMatchMode::Auto,
+        custom_fields: Vec::new(),
     })
 }
 
@@ -434,5 +481,118 @@ mod tests {
         assert_eq!(loaded.url_match_mode, UrlMatchMode::Exact);
         assert_eq!(loaded.deleted_at, Some(1_234_567_890));
         assert_eq!(loaded.encrypted_totp_secret, Some(vec![4, 5, 6]));
+    }
+
+    // -------------------------------------------------------------------
+    // v1.6.0 WP1: generation 3 (LegacyEntryV4, the 14-field layout written
+    // by v1.5.0–v1.5.1) + the 15-field custom_fields round trip. The
+    // permanent golden fixture for a REAL 14-field blob lives in
+    // bincode_golden.rs; these tests cover the chain behavior on freshly
+    // produced blobs.
+    // -------------------------------------------------------------------
+
+    /// Fixture with the exact 14-field layout written by v1.5.0–v1.5.1
+    /// (serialize so tests can produce real generation-3 blobs).
+    #[derive(serde::Serialize)]
+    struct LegacyEntryV4Fixture {
+        id: String,
+        title: String,
+        url: Option<String>,
+        username: String,
+        encrypted_password: Vec<u8>,
+        encrypted_notes: Option<Vec<u8>>,
+        tags: Vec<String>,
+        created_at: i64,
+        updated_at: i64,
+        last_used_at: Option<i64>,
+        group_id: Option<String>,
+        deleted_at: Option<i64>,
+        encrypted_totp_secret: Option<Vec<u8>>,
+        url_match_mode: UrlMatchMode,
+    }
+
+    fn v4_blob() -> (String, Vec<u8>) {
+        let fixture = LegacyEntryV4Fixture {
+            id: "v4-entry-1".to_string(),
+            title: "V4 Site".to_string(),
+            url: Some("https://v4.example".to_string()),
+            username: "v4-user".to_string(),
+            encrypted_password: vec![5, 5, 5],
+            encrypted_notes: Some(vec![6, 6, 6]),
+            tags: vec!["v4".to_string()],
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_400,
+            last_used_at: Some(1_700_000_500),
+            group_id: Some("group-11".to_string()),
+            deleted_at: None,
+            encrypted_totp_secret: Some(vec![7, 8, 9]),
+            url_match_mode: UrlMatchMode::Exact,
+        };
+        let id = fixture.id.clone();
+        (id, bc_serialize(&fixture).unwrap())
+    }
+
+    /// Generation 3 (14-field, v1.5.0–v1.5.1) plaintext records read with
+    /// `custom_fields` defaulted to empty and every stored field preserved.
+    #[test]
+    fn v4_layout_plaintext_reads_with_empty_custom_fields() {
+        let (id, blob) = v4_blob();
+        let entry = open_entry(&blob, &TEST_KEY, &id, true).unwrap();
+        assert_eq!(entry.id, id);
+        assert_eq!(entry.title, "V4 Site");
+        assert_eq!(entry.group_id.as_deref(), Some("group-11"));
+        assert_eq!(entry.last_used_at, Some(1_700_000_500));
+        assert_eq!(entry.encrypted_totp_secret, Some(vec![7, 8, 9]));
+        assert_eq!(entry.url_match_mode, UrlMatchMode::Exact);
+        assert!(entry.custom_fields.is_empty());
+    }
+
+    /// A bare current-struct deserialize MUST fail on a 14-field blob —
+    /// that failure is the reason the chain exists.
+    #[test]
+    fn v4_blob_fails_direct_current_deserialize() {
+        let (_, blob) = v4_blob();
+        assert!(bc_deserialize::<PasswordEntry>(&blob).is_err());
+    }
+
+    /// Generation 3 records sealed under the current record format (v2 AAD)
+    /// still read — the layout chain is orthogonal to the record channel.
+    #[test]
+    fn v4_layout_in_v2_aad_channel_reads_with_empty_custom_fields() {
+        let (id, legacy) = v4_blob();
+        let mut aad = Vec::new();
+        aad.extend_from_slice(b"entries");
+        aad.extend_from_slice(id.as_bytes());
+        aad.extend_from_slice(&ENTRY_RECORD_FORMAT_VERSION.to_le_bytes());
+        let enc = encrypt_with_aad(&TEST_KEY, &legacy, &aad).unwrap();
+        let blob = bc_serialize(&enc).unwrap();
+
+        let entry = open_entry(&blob, &TEST_KEY, &id, false).unwrap();
+        assert_eq!(entry.title, "V4 Site");
+        assert_eq!(entry.url_match_mode, UrlMatchMode::Exact);
+        assert!(entry.custom_fields.is_empty());
+    }
+
+    /// The current 15-field layout round-trips custom fields (values are
+    /// opaque ciphertext bytes at this layer; a non-empty sentinel catches a
+    /// dropped-field mapping slip).
+    #[test]
+    fn current_layout_roundtrip_preserves_custom_fields() {
+        let mut entry = PasswordEntry::new("Fields".to_string(), None, "user".to_string());
+        entry.custom_fields = vec![
+            pwdvault_domain::CustomField {
+                label: "API Key".to_string(),
+                value: vec![1, 2, 3, 4],
+                secret: true,
+            },
+            pwdvault_domain::CustomField {
+                label: "Placeholder".to_string(),
+                value: Vec::new(),
+                secret: false,
+            },
+        ];
+        let blob = seal_entry(&entry, &TEST_KEY).unwrap();
+        let loaded = open_entry(&blob, &TEST_KEY, &entry.id, false).unwrap();
+        assert_eq!(loaded.custom_fields, entry.custom_fields);
     }
 }

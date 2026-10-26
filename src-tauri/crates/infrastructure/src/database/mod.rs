@@ -185,6 +185,9 @@ fn upgrade_legacy_settings(legacy: LegacySettingsV1) -> Settings {
         // v1.5.0 (WP3): the legacy row predates the trash auto-purge — the
         // serde default (0 = off) applies, exactly like a missing JSON field.
         trash_auto_purge_days: 0,
+        // v1.6.0 (WP3): the legacy row predates the auto-sync interval — the
+        // serde default (0 = off) applies, same rule.
+        auto_sync_interval_min: 0,
     }
 }
 

@@ -168,14 +168,10 @@
 	margin-top: var(--space-sm);
 }
 
-/* Shared by Security AND Cloud Sync rows: without this the global
-   `.btn { width: 100% }` acts as the flex base size and stretches the
-   row's buttons across the panel (v1.5.1 — same trap as the trash
-   header; content-width buttons are the intended form here). */
-.security-status-row .btn {
-	width: auto;
-	flex-shrink: 0;
-}
+/* Shared by Security AND Cloud Sync rows: the row's buttons carry
+   .btn-inline (v1.6.0 rider) — without it the global `.btn { width: 100% }`
+   acts as the flex base size and stretches them across the panel (v1.5.1;
+   content-width buttons are the intended form here). */
 
 .security-enabled-badge {
 	font-size: var(--text-label);
@@ -212,6 +208,13 @@
 	color: var(--color-text);
 	font-variant-numeric: tabular-nums;
 	text-align: right;
+}
+
+/* v1.6.0 (D5): modifier for the conflict-count status value — same
+   colored-status-text pattern as .security-enabled-badge (success), with
+   the danger token. */
+.sync-conflict-value {
+	color: var(--color-danger);
 }
 
 .sync-setup-guide {
@@ -274,10 +277,8 @@
 
 .dashboard-rerun {
 	margin-left: auto;
-	flex-shrink: 0;
-	/* Scoped `.btn` width override — the global width:100% acts as the flex
-     base size here and would push this button past the right edge. */
-	width: auto;
+	/* .btn-inline (v1.6.0 rider) supplies width:auto + flex-shrink:0 — the
+     global width:100% flex base would push this button past the right edge. */
 }
 
 .dashboard-healthy {

@@ -119,6 +119,8 @@ fn test_generate_password_custom_length() {
         export_password: None,
         import_password: None,
         backup: None,
+        custom_fields: None,
+        password_sha256: None,
     };
     let result = execute_command(req, state, None, None).unwrap();
     let password = result.as_str().unwrap();
@@ -157,6 +159,8 @@ fn test_generate_password_guarantees_all_types() {
         export_password: None,
         import_password: None,
         backup: None,
+        custom_fields: None,
+        password_sha256: None,
     };
     let result = execute_command(req, state, None, None).unwrap();
     let password = result.as_str().unwrap();
@@ -208,6 +212,8 @@ fn test_generate_password_short_guarantees_all_types() {
             export_password: None,
             import_password: None,
             backup: None,
+            custom_fields: None,
+            password_sha256: None,
         };
         let result = execute_command(req, state.clone(), None, None).unwrap();
         let password = result.as_str().unwrap();

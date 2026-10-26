@@ -22,8 +22,13 @@ pub mod container;
 pub mod engine;
 pub mod merge;
 pub mod publish;
+/// v1.6.0 split of `state_io` (800-line ceiling): sealed config/state row IO.
+/// `state_io` re-exports its names, so the pre-split paths keep working.
+pub mod sealed_rows;
 pub mod state_io;
 
+#[cfg(test)]
+mod tests_auto_sync;
 #[cfg(test)]
 mod tests_baidu;
 #[cfg(test)]
@@ -31,9 +36,15 @@ mod tests_baidu_flows;
 #[cfg(test)]
 mod tests_baidu_oauth;
 #[cfg(test)]
+mod tests_conflicts;
+#[cfg(test)]
 mod tests_connect;
 #[cfg(test)]
+mod tests_container_v2_fixture;
+#[cfg(test)]
 mod tests_engine;
+#[cfg(test)]
+mod tests_merge;
 #[cfg(test)]
 mod tests_state_io;
 #[cfg(test)]
@@ -45,7 +56,7 @@ use std::collections::HashMap;
 use std::mem;
 
 use pwdvault_domain::validation::normalize_url;
-use pwdvault_domain::UrlMatchMode;
+use pwdvault_domain::{CustomField, UrlMatchMode};
 use pwdvault_infrastructure::crypto::{bc_serialize, encrypt, KEY_SIZE};
 use pwdvault_infrastructure::database::PasswordEntry;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -100,6 +111,28 @@ pub struct SyncEntry {
     /// (the reason CONTAINER_FORMAT_VERSION bumped to 2).
     #[serde(default)]
     pub url_match_mode: UrlMatchMode,
+    /// User-defined custom fields (v1.6.0 WP1), values PLAINTEXT here: the
+    /// snapshot exists only inside the encrypted container or transiently in
+    /// memory during a merge (same disclosure boundary as `password`).
+    /// `#[serde(default)]` is LOAD-BEARING for read-side v1/v2 container
+    /// compatibility, exactly like `url_match_mode` above: older containers'
+    /// serde_json snapshots lack the key and deserialize with empty fields.
+    /// The field also changes the bincode LWW fingerprint input — cross-version
+    /// sync is cut off at the container version gate (see container.rs).
+    #[serde(default)]
+    pub custom_fields: Vec<SyncCustomField>,
+}
+
+/// One custom field in sync (plaintext-domain) form (v1.6.0 WP1). The value
+/// is plaintext and zeroizes with the entry — labels/flags follow the same
+/// disclosure boundary as every other `SyncEntry` field.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Zeroize, ZeroizeOnDrop)]
+pub struct SyncCustomField {
+    pub label: String,
+    /// Plaintext value; the empty string mirrors the local placeholder row.
+    pub value: String,
+    /// UI mask hint, mirrored from the stored field.
+    pub secret: bool,
 }
 
 /// One group in sync (plaintext-domain) form (D2).
@@ -125,11 +158,17 @@ pub struct SyncSnapshot {
 /// Decrypted inner fields of one local entry, supplied by the caller (the
 /// engine owns the session key — the conversion helpers below never touch key
 /// material or the database).
+///
+/// v1.6.0: `custom_fields` carries the decrypted custom-field values (full
+/// `SyncCustomField` rows — label/secret ride along so the sync snapshot is
+/// self-contained). An id missing from the map converts with an empty vec
+/// (same fallback contract as `password`).
 #[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
 pub struct SyncSecrets {
     pub password: String,
     pub notes: Option<String>,
     pub totp_secret: Option<String>,
+    pub custom_fields: Vec<SyncCustomField>,
 }
 
 /// Convert local entries (raw rows with encrypted inner fields) to sync form.
@@ -162,6 +201,9 @@ pub fn entries_to_sync(
                 updated_at: entry.updated_at,
                 deleted_at: entry.deleted_at,
                 url_match_mode: entry.url_match_mode,
+                // Documented fallback: a missing secrets entry converts with
+                // empty fields (same contract as the empty password above).
+                custom_fields: secret.map(|s| s.custom_fields.clone()).unwrap_or_default(),
             }
         })
         .collect()
@@ -188,6 +230,7 @@ pub fn sync_to_entry(
     let totp_secret = mem::take(&mut entry.totp_secret);
     let tags = mem::take(&mut entry.tags);
     let group_id = mem::take(&mut entry.group_id);
+    let custom_fields = mem::take(&mut entry.custom_fields);
     let url_match_mode = entry.url_match_mode;
 
     let mut sealed = PasswordEntry::new(title, url, username);
@@ -212,7 +255,32 @@ pub fn sync_to_entry(
     sealed.updated_at = entry.updated_at;
     sealed.deleted_at = entry.deleted_at;
     sealed.url_match_mode = url_match_mode;
+    sealed.custom_fields = seal_sync_custom_fields(enc_key, &custom_fields)?;
     Ok(sealed)
+}
+
+/// Seal sync plaintext custom fields into their stored form: label/secret
+/// stay plaintext (the outer blob covers them), each value is inner-encrypted.
+/// An empty plaintext skips encryption and stores the empty-vec placeholder —
+/// the same symmetry the backup import path applies.
+fn seal_sync_custom_fields(
+    enc_key: &[u8; KEY_SIZE],
+    fields: &[SyncCustomField],
+) -> Result<Vec<CustomField>, VaultError> {
+    fields
+        .iter()
+        .map(|field| {
+            Ok(CustomField {
+                label: field.label.clone(),
+                value: if field.value.is_empty() {
+                    Vec::new()
+                } else {
+                    seal_inner(enc_key, &field.value)?
+                },
+                secret: field.secret,
+            })
+        })
+        .collect()
 }
 
 /// Encrypt one inner string field to its stored blob form.
@@ -248,7 +316,42 @@ mod tests {
             updated_at: 1_700_000_100,
             deleted_at: None,
             url_match_mode: UrlMatchMode::Auto,
+            custom_fields: vec![
+                SyncCustomField {
+                    label: "API Key".to_string(),
+                    value: "key-value-1".to_string(),
+                    secret: true,
+                },
+                SyncCustomField {
+                    label: "Placeholder".to_string(),
+                    value: String::new(),
+                    secret: false,
+                },
+            ],
         }
+    }
+
+    fn sync_secrets(id: &str) -> (String, SyncSecrets) {
+        (
+            id.to_string(),
+            SyncSecrets {
+                password: "s3cret".to_string(),
+                notes: Some("note".to_string()),
+                totp_secret: Some("JBSWY3DPEHPK3PXP".to_string()),
+                custom_fields: vec![
+                    SyncCustomField {
+                        label: "API Key".to_string(),
+                        value: "key-value-1".to_string(),
+                        secret: true,
+                    },
+                    SyncCustomField {
+                        label: "Placeholder".to_string(),
+                        value: String::new(),
+                        secret: false,
+                    },
+                ],
+            },
+        )
     }
 
     /// Local → sync → local roundtrip preserves every field, with the inner
@@ -269,17 +372,21 @@ mod tests {
         assert_eq!(decrypt_inner(&sealed.encrypted_password), "s3cret");
         assert!(sealed.encrypted_notes.is_some());
         assert!(sealed.encrypted_totp_secret.is_some());
+        // v1.6.0: custom-field values seal into the row (labels/flags stay
+        // plaintext); the empty placeholder stays an empty vec.
+        assert_eq!(sealed.custom_fields.len(), 2);
+        assert_eq!(sealed.custom_fields[0].label, "API Key");
+        assert!(sealed.custom_fields[0].secret);
+        assert_eq!(decrypt_inner(&sealed.custom_fields[0].value), "key-value-1");
+        assert_eq!(sealed.custom_fields[1].label, "Placeholder");
+        assert!(!sealed.custom_fields[1].secret);
+        assert!(sealed.custom_fields[1].value.is_empty());
 
-        let mut secrets = HashMap::new();
-        secrets.insert(
-            sealed.id.clone(),
-            SyncSecrets {
-                password: "s3cret".to_string(),
-                notes: Some("note".to_string()),
-                totp_secret: Some("JBSWY3DPEHPK3PXP".to_string()),
-            },
-        );
-        let back = entries_to_sync(&[sealed], &secrets);
+        let (id, secrets) = sync_secrets("e1");
+        assert_eq!(id, sealed.id);
+        let mut secrets_map = HashMap::new();
+        secrets_map.insert(id, secrets);
+        let back = entries_to_sync(&[sealed], &secrets_map);
         assert_eq!(back.len(), 1);
         assert_eq!(back[0], entry);
     }
@@ -303,12 +410,13 @@ mod tests {
         assert_eq!(decrypt_inner(&sealed.encrypted_password), "");
 
         // The documented fallback: an id without decrypted secrets converts
-        // with an empty password and no notes/TOTP.
+        // with an empty password, no notes/TOTP, and no custom fields.
         let back = entries_to_sync(&[sealed], &HashMap::new());
         assert_eq!(back[0].password.as_deref(), Some(""));
         assert_eq!(back[0].notes, None);
         assert_eq!(back[0].totp_secret, None);
         assert_eq!(back[0].deleted_at, Some(1_700_000_200));
+        assert!(back[0].custom_fields.is_empty());
     }
 
     /// URLs are normalized on both conversion directions (same rule as
@@ -348,5 +456,7 @@ mod tests {
         assert_eq!(entry.deleted_at, None);
         // The match override zeroes back to the default (Auto), not garbage.
         assert_eq!(entry.url_match_mode, UrlMatchMode::Auto);
+        // v1.6.0: the custom-field rows (plaintext values included) wipe too.
+        assert!(entry.custom_fields.is_empty());
     }
 }

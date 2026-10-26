@@ -1,11 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { detectChanges, EntryScreen } from "../EntryScreen";
 import {
-	detectChanges,
 	normalizeMatchMode,
 	URL_MATCH_MODE_OPTIONS,
-	EntryScreen,
-} from "../EntryScreen";
+} from "../../utils/urlMatchMode";
 import type { CreateEntryRequest, EntrySummary } from "../../types";
 
 // v1.5.0 WP4: the per-entry URL match override — the select in the URL
@@ -91,6 +90,8 @@ test("detectChanges: changing the match mode emits a labeled ChangeItem", () => 
 		false,
 		false,
 		false,
+		// v1.6.0: loaded custom-field values (null = secret channel never ran).
+		null,
 	);
 	expect(changes).toEqual([
 		{
@@ -112,6 +113,8 @@ test("detectChanges: absent original mode reads as auto (no phantom change)", ()
 		false,
 		false,
 		false,
+		// v1.6.0: loaded custom-field values (null = secret channel never ran).
+		null,
 	);
 	expect(changes).toEqual([]);
 });
@@ -128,8 +131,8 @@ test("detectChanges: auto→domain→auto round trip flips the item twice, not z
 		url_match_mode: mode,
 	});
 	const original = baseMeta({ url_match_mode: "auto" });
-	expect(detectChanges(original, null, form("domain"), false, false, false)).toHaveLength(1);
-	expect(detectChanges(baseMeta({ url_match_mode: "domain" }), null, form("domain"), false, false, false)).toEqual([]);
+	expect(detectChanges(original, null, form("domain"), false, false, false, null)).toHaveLength(1);
+	expect(detectChanges(baseMeta({ url_match_mode: "domain" }), null, form("domain"), false, false, false, null)).toEqual([]);
 });
 
 test("the URL group renders the three modes and updates its hint", () => {

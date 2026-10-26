@@ -68,6 +68,8 @@ pub(super) fn make_request(command: &str, id: u32) -> NativeRequest {
         export_password: None,
         import_password: None,
         backup: None,
+        custom_fields: None,
+        password_sha256: None,
     }
 }
 
@@ -259,6 +261,8 @@ fn test_create_entry() {
         export_password: None,
         import_password: None,
         backup: None,
+        custom_fields: None,
+        password_sha256: None,
     };
 
     let result = execute_command(req, state.clone(), None, None).unwrap();
@@ -296,6 +300,8 @@ fn test_create_entry_locked() {
         export_password: None,
         import_password: None,
         backup: None,
+        custom_fields: None,
+        password_sha256: None,
     };
 
     let result = execute_command(req, state, None, None);
@@ -333,6 +339,8 @@ fn test_get_entry_meta_and_secret() {
         export_password: None,
         import_password: None,
         backup: None,
+        custom_fields: None,
+        password_sha256: None,
     };
     let created = execute_command(create_req, state.clone(), None, None).unwrap();
     let entry_id = created["id"].as_str().unwrap().to_string();
@@ -420,6 +428,8 @@ fn test_list_all_entries() {
             export_password: None,
             import_password: None,
             backup: None,
+            custom_fields: None,
+            password_sha256: None,
         };
         execute_command(req, state.clone(), None, None).unwrap();
     }
@@ -460,6 +470,8 @@ fn test_update_entry() {
         export_password: None,
         import_password: None,
         backup: None,
+        custom_fields: None,
+        password_sha256: None,
     };
     let created = execute_command(create_req, state.clone(), None, None).unwrap();
     let entry_id = created["id"].as_str().unwrap().to_string();
@@ -487,6 +499,8 @@ fn test_update_entry() {
         export_password: None,
         import_password: None,
         backup: None,
+        custom_fields: None,
+        password_sha256: None,
     };
     let result = execute_command(update_req, state.clone(), None, None).unwrap();
     assert_eq!(result["title"], "New Title");
@@ -535,6 +549,8 @@ fn test_remove_entry() {
         export_password: None,
         import_password: None,
         backup: None,
+        custom_fields: None,
+        password_sha256: None,
     };
     let created = execute_command(create_req, state.clone(), None, None).unwrap();
     let entry_id = created["id"].as_str().unwrap().to_string();
@@ -562,6 +578,8 @@ fn test_remove_entry() {
         export_password: None,
         import_password: None,
         backup: None,
+        custom_fields: None,
+        password_sha256: None,
     };
     let result = execute_command(remove_req, state.clone(), None, None).unwrap();
     assert_eq!(result, serde_json::json!(true));
@@ -606,6 +624,8 @@ fn test_get_entry_count() {
         export_password: None,
         import_password: None,
         backup: None,
+        custom_fields: None,
+        password_sha256: None,
     };
     execute_command(create_req, state.clone(), None, None).unwrap();
 

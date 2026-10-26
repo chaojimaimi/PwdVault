@@ -1,10 +1,14 @@
 use std::sync::Arc;
 use zeroize::{Zeroize, Zeroizing};
 
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
+
 use crate::service::vault::get_db;
 use crate::{
-    validation, AppState, CreateEntryRequest, EntrySecretResponse, EntrySummary,
-    UpdateEntryRequest, VaultError,
+    validation, AppState, CreateEntryRequest, CustomField, CustomFieldInput, CustomFieldValue,
+    EntrySecretResponse, EntrySummary, UpdateEntryRequest, VaultError, VerifyEntryPasswordRequest,
+    VerifyEntryPasswordResponse,
 };
 use pwdvault_domain::constants::LAST_USED_BUMP_THROTTLE_SECS;
 use pwdvault_infrastructure::crypto::{
@@ -58,6 +62,9 @@ pub fn create_entry(
     entry.group_id = request.group_id;
     // v1.5.0 WP4: per-entry URL match override.
     entry.url_match_mode = request.url_match_mode;
+    // v1.6.0: custom fields arrive as plaintext inputs and seal here (the
+    // create request is complete — there is no tri-state on create).
+    entry.custom_fields = seal_custom_fields(key, &request.custom_fields)?;
 
     // Single transaction: business write + digest refresh (§5.1.2)
     let store = vault_store::VaultStore::new(&db);
@@ -137,6 +144,10 @@ pub fn get_entry_secret(
     // Zeroize intermediate password bytes
     password_bytes.zeroize();
 
+    // v1.6.0: decrypt every custom-field value through the same one-shot
+    // channel as password/notes.
+    let custom_fields = decrypt_custom_field_values(key, &entry.custom_fields)?;
+
     // v1.4.0: restored the last_used_at persistence that §5.1.2 removed,
     // behind a 60-second write throttle. §5.1.2's complaint was write
     // amplification (every fetch = entry re-seal + full digest refresh); the
@@ -171,7 +182,153 @@ pub fn get_entry_secret(
         password,
         notes,
         last_used_at: entry.last_used_at,
+        custom_fields,
     })
+}
+
+/// Seal plaintext custom-field inputs into their stored form (v1.6.0 WP1):
+/// label/secret stay plaintext under the outer entry blob, each value is
+/// inner-encrypted like `encrypted_notes`. An empty plaintext skips
+/// encryption and stores the empty-vec placeholder row.
+pub(crate) fn seal_custom_fields(
+    key: &[u8; 32],
+    fields: &[CustomFieldInput],
+) -> Result<Vec<CustomField>, VaultError> {
+    fields
+        .iter()
+        .map(|field| -> Result<CustomField, VaultError> {
+            Ok(CustomField {
+                label: field.label.clone(),
+                value: if field.value.is_empty() {
+                    Vec::new()
+                } else {
+                    let encrypted = encrypt(key, field.value.as_bytes())?;
+                    bc_serialize(&encrypted)
+                        .map_err(|e| VaultError::EncryptionFailed(e.to_string()))?
+                },
+                secret: field.secret,
+            })
+        })
+        .collect()
+}
+
+/// Decrypt every custom-field value for a secret fetch (v1.6.0 WP1). This is
+/// the ONLY disclosure channel for custom-field values — summaries carry
+/// label + secret flag exclusively. An empty ciphertext vec is the legal
+/// placeholder row and reads back as the empty plaintext. The dual-path
+/// (bincode then raw bytes) matches this function's password/notes convention.
+fn decrypt_custom_field_values(
+    key: &[u8; 32],
+    fields: &[CustomField],
+) -> Result<Vec<CustomFieldValue>, VaultError> {
+    fields
+        .iter()
+        .map(|field| -> Result<CustomFieldValue, VaultError> {
+            let value = if field.value.is_empty() {
+                Zeroizing::new(String::new())
+            } else {
+                let encrypted: EncryptedData = bc_deserialize(&field.value).or_else(|e| {
+                    EncryptedData::from_bytes(&field.value).map_err(|e2| {
+                        VaultError::DecryptionFailed(format!("bincode: {} / raw: {}", e, e2))
+                    })
+                })?;
+                let mut value_bytes = decrypt(key, &encrypted)?;
+                let result = String::from_utf8(value_bytes.clone())
+                    .map_err(|e| VaultError::DecryptionFailed(e.to_string()));
+                value_bytes.zeroize();
+                result.map(Zeroizing::new)?
+            };
+            Ok(CustomFieldValue {
+                label: field.label.clone(),
+                value,
+                secret: field.secret,
+            })
+        })
+        .collect()
+}
+
+/// Verify a candidate password against a stored entry WITHOUT disclosing it
+/// (v1.6.0 WP3 / D7 — the extension save/update prompt's desktop pivot).
+/// The caller supplies the SHA-256 of the candidate (hashed client-side, in
+/// the page context where the user typed it); this decrypts the stored
+/// password, hashes the raw bytes, and answers with a bare boolean under a
+/// constant-time comparison.
+///
+/// Disclosure posture: the stored plaintext stays inside this function
+/// (zeroized immediately after hashing), is never converted to a `String`
+/// (the raw decrypted bytes hash directly — no UTF-8 round-trip), and
+/// NOTHING but the boolean leaves. Deliberately NOT bumping `last_used_at`
+/// (same reasoning as the security report bypassing it): verification runs
+/// once per form-submit candidate, and the resulting write amplification
+/// would dwarf the value of the signal.
+pub fn verify_entry_password(
+    state: &Arc<AppState>,
+    request: VerifyEntryPasswordRequest,
+) -> Result<VerifyEntryPasswordResponse, VaultError> {
+    validation::id(&request.id)?;
+    let candidate = parse_sha256_digest(&request.password_sha256)?;
+    let lease = state.lease()?;
+    let db = get_db(state)?;
+    let key = lease.enc_key()?;
+    let entry = load_entry(&db, key, &request.id, false)?.ok_or(VaultError::EntryNotFound)?;
+    // Soft delete (P2.2): tombstoned entries answer EntryNotFound, exactly
+    // like get_entry_meta/get_entry_secret — no secret material from trash.
+    if entry.deleted_at.is_some() {
+        return Err(VaultError::EntryNotFound);
+    }
+
+    // Dual-path parse (bincode first, raw nonce||ciphertext fallback) — the
+    // same convention as get_entry_secret's password path.
+    let encrypted: EncryptedData = bc_deserialize(&entry.encrypted_password).or_else(|e| {
+        EncryptedData::from_bytes(&entry.encrypted_password)
+            .map_err(|e2| VaultError::DecryptionFailed(format!("bincode: {} / raw: {}", e, e2)))
+    })?;
+    let mut stored_bytes = decrypt(key, &encrypted)?;
+    let stored_digest = Sha256::digest(&stored_bytes);
+    // Constant-time comparison (subtle::ConstantTimeEq): the digest never
+    // branches on a byte difference, so response timing cannot be used to
+    // reconstruct a matching prefix of the candidate hash.
+    let matches = bool::from(stored_digest.as_slice().ct_eq(candidate.as_slice()));
+    stored_bytes.zeroize();
+
+    // Explicit vault op (may arrive over the extension bridge): the short
+    // remote grace applies (v1.2.0 SEC-L5 touch policy).
+    lease.touch_remote_activity();
+
+    Ok(VerifyEntryPasswordResponse { matches })
+}
+
+/// Decode a SHA-256 hex digest to its 32 bytes. Case-insensitive (both hex
+/// registers accepted — the normalization the service tests pin); wrong
+/// length or non-hex characters are rejected as invalid input.
+fn parse_sha256_digest(hex: &str) -> Result<[u8; 32], VaultError> {
+    let bytes = hex.as_bytes();
+    if bytes.len() != 64 {
+        return Err(invalid_digest());
+    }
+    let mut digest = [0u8; 32];
+    for (index, byte) in digest.iter_mut().enumerate() {
+        let high = hex_char_value(bytes[index * 2])?;
+        let low = hex_char_value(bytes[index * 2 + 1])?;
+        *byte = (high << 4) | low;
+    }
+    Ok(digest)
+}
+
+fn hex_char_value(byte: u8) -> Result<u8, VaultError> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        b'A'..=b'F' => Ok(byte - b'A' + 10),
+        _ => Err(invalid_digest()),
+    }
+}
+
+fn invalid_digest() -> VaultError {
+    VaultError::InvalidInput {
+        code: "INVALID_PASSWORD_DIGEST".into(),
+        message: "Password digest must be 64 hex characters (SHA-256)".into(),
+    }
 }
 
 pub fn list_all_entries(state: &Arc<AppState>) -> Result<Vec<EntrySummary>, VaultError> {
@@ -455,6 +612,14 @@ pub fn update_entry<R: Into<UpdateEntryRequest>>(
         };
     }
 
+    // Custom fields tri-state batch (v1.6.0): None = leave unchanged, so a
+    // metadata-only edit never needs the plaintext values it does not hold;
+    // Some(list) = seal and replace wholesale (same metadata semantics as
+    // tags).
+    if let Some(custom_fields) = &request.custom_fields {
+        entry.custom_fields = seal_custom_fields(key, custom_fields)?;
+    }
+
     // Single transaction: business write + digest refresh (§5.1.2)
     let store = vault_store::VaultStore::new(&db);
     store.write(mac_key, |txn| {
@@ -519,3 +684,9 @@ pub fn get_entry_count(state: &Arc<AppState>) -> Result<usize, VaultError> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+#[path = "entries/tests_custom_fields.rs"]
+mod tests_custom_fields;
+#[cfg(test)]
+#[path = "entries/tests_verify_password.rs"]
+mod tests_verify_password;

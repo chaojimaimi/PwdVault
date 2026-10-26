@@ -4,7 +4,10 @@ use zeroize::{Zeroize, Zeroizing};
 use base64::Engine;
 
 use crate::service::vault::get_db;
-use crate::{AppState, BackupPayload, ExportEntry, ImportResult, VaultBackup, VaultError};
+use crate::{
+    AppState, BackupPayload, ExportCustomField, ExportEntry, ImportResult, VaultBackup, VaultError,
+};
+use pwdvault_domain::CustomField;
 use pwdvault_infrastructure::crypto::{
     self, bc_deserialize, bc_serialize, decrypt, decrypt_with_aad, encrypt, encrypt_with_aad,
     EncryptedData,
@@ -43,6 +46,28 @@ fn backup_v2_aad(backup: &VaultBackup) -> Result<Vec<u8>, VaultError> {
         kdf_parallelism: backup.kdf_parallelism,
     })
     .map_err(|error| VaultError::InvalidBackup(error.to_string()))
+}
+
+/// Decrypt an inner bincode(EncryptedData) blob to a plaintext string (D8
+/// export: TOTP secrets and custom-field values). Bincode-only on purpose —
+/// unlike password/notes there is no historical raw-byte generation for
+/// fields introduced in v1.6.0, so the dual-path fallback would only widen
+/// the accepted input surface for no compatibility gain.
+fn decrypt_inner_text(key: &[u8; 32], blob: &[u8]) -> Result<Zeroizing<String>, VaultError> {
+    let encrypted: EncryptedData =
+        bc_deserialize(blob).map_err(|e| VaultError::DecryptionFailed(e.to_string()))?;
+    let mut plain_bytes = decrypt(key, &encrypted)?;
+    let result = String::from_utf8(plain_bytes.clone())
+        .map_err(|e| VaultError::DecryptionFailed(e.to_string()));
+    plain_bytes.zeroize();
+    result.map(Zeroizing::new)
+}
+
+/// Seal one plaintext inner string back into its stored blob form (D8
+/// import re-seal: TOTP secrets and custom-field values).
+fn seal_inner_text(key: &[u8; 32], plain: &str) -> Result<Vec<u8>, VaultError> {
+    let encrypted = encrypt(key, plain.as_bytes())?;
+    bc_serialize(&encrypted).map_err(|e| VaultError::EncryptionFailed(e.to_string()))
 }
 
 pub fn export_vault(
@@ -106,6 +131,33 @@ pub fn export_vault(
             None
         };
 
+        // Decrypt the TOTP secret if present. An EMPTY blob vec mirrors the
+        // notes precedent (empty bytes → None): it cannot decode as
+        // EncryptedData and no writer ever seals empty plaintext here.
+        let totp_secret = match entry.encrypted_totp_secret.as_deref() {
+            Some(blob) if !blob.is_empty() => Some(decrypt_inner_text(key, blob)?),
+            _ => None,
+        };
+
+        // Decrypt custom-field values (v1.6.0 D8). Symmetric empty rule: an
+        // empty ciphertext vec IS a legal placeholder row, exported as the
+        // empty plaintext so label + secret flag survive the round trip.
+        let custom_fields = entry
+            .custom_fields
+            .iter()
+            .map(|field| -> Result<ExportCustomField, VaultError> {
+                Ok(ExportCustomField {
+                    label: field.label.clone(),
+                    value: if field.value.is_empty() {
+                        Zeroizing::new(String::new())
+                    } else {
+                        decrypt_inner_text(key, &field.value)?
+                    },
+                    secret: field.secret,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         // Dangling group references (removed group without a cascade, P2.2)
         // normalize to "ungrouped" so backup_payload's referential check
         // stays valid.
@@ -122,6 +174,9 @@ pub fn export_vault(
             group_id,
             created_at: entry.created_at,
             updated_at: entry.updated_at,
+            url_match_mode: entry.url_match_mode,
+            totp_secret,
+            custom_fields,
         });
     }
 
@@ -392,6 +447,31 @@ fn encrypt_import_entries(
             .and_then(|gid| group_id_map.get(gid).cloned());
         entry.created_at = export_entry.created_at;
         entry.updated_at = export_entry.updated_at;
+        // v1.6.0 (D8): restore the payload's three newer fields. Old backups
+        // lacking them land on the serde defaults (Auto / None / empty).
+        entry.url_match_mode = export_entry.url_match_mode;
+        // Same tri-state as update_entry: empty plaintext = none.
+        entry.encrypted_totp_secret = match export_entry.totp_secret.as_deref() {
+            Some(secret) if !secret.is_empty() => Some(seal_inner_text(key, secret)?),
+            _ => None,
+        };
+        // Empty plaintext skips encryption and restores the empty-vec
+        // placeholder — the exact inverse of the export-side empty rule.
+        entry.custom_fields = export_entry
+            .custom_fields
+            .iter()
+            .map(|field| -> Result<CustomField, VaultError> {
+                Ok(CustomField {
+                    label: field.label.clone(),
+                    value: if field.value.is_empty() {
+                        Vec::new()
+                    } else {
+                        seal_inner_text(key, &field.value)?
+                    },
+                    secret: field.secret,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         new_entries.push(entry);
     }
@@ -508,6 +588,12 @@ pub fn import_vault(
     apply_txn()?;
 
     *state.auto_lock_secs.lock().expect("timeout lock poisoned") = payload.settings.auto_lock_secs;
+    // v1.6.0 (D6): the import's settings replace the cached auto-sync
+    // interval too (same refresh contract as auto_lock_secs).
+    *state
+        .auto_sync_interval_min
+        .lock()
+        .expect("auto sync interval lock poisoned") = payload.settings.auto_sync_interval_min;
 
     let entries_count = payload.entries.len();
     let groups_count = payload.groups.len();
@@ -522,3 +608,6 @@ pub fn import_vault(
 #[cfg(test)]
 #[path = "backup_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "backup_tests_custom_fields.rs"]
+mod tests_custom_fields;

@@ -251,6 +251,12 @@ pub fn create_backup_v1(entry_count: usize) -> (String, &'static str) {
             group_id: None,
             created_at: 1700000000 + i as i64,
             updated_at: 1700000000 + i as i64,
+            // Pre-v1.6.0 shape: the v1 backup model predates the three newer
+            // fields (their serde defaults on import are what the v1→current
+            // compatibility test pins).
+            url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
+            totp_secret: None,
+            custom_fields: Vec::new(),
         });
     }
 

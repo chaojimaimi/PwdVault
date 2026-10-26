@@ -607,6 +607,49 @@ describe("popup-only clipboard commands (v1.3.1)", () => {
 	});
 });
 
+describe("content save/update prompt commands (v1.6.0)", () => {
+	// The save/update prompt widens the page-reachable surface by exactly two
+	// purpose-built types. The open popup-class entry commands stay
+	// content-rejected; the argumented whitelist lives in sender-auth.js.
+	const content = { id: RUNTIME_ID, tab: { url: "https://example.com/login" } };
+
+	it("accepts the two prompt commands from a content sender", () => {
+		expect(
+			authorizeMessage(
+				{
+					type: "CHECK_SAVE_CREDENTIALS",
+					password_sha256: "ab".repeat(32),
+					candidates: [{ id: "e1", title: "T", username: "u" }],
+				},
+				content,
+				RUNTIME_ID,
+			).senderKind,
+		).toBe("content");
+		expect(
+			authorizeMessage(
+				{
+					type: "SAVE_LOGIN_CONFIRMED",
+					mode: "create",
+					url: "https://example.com/",
+					username: "u",
+					password: "p",
+				},
+				content,
+				RUNTIME_ID,
+			).senderKind,
+		).toBe("content");
+	});
+
+	it("keeps the open entry commands popup-class (content rejected)", () => {
+		expect(() =>
+			authorizeMessage({ type: "CREATE_ENTRY" }, content, RUNTIME_ID),
+		).toThrow();
+		expect(() =>
+			authorizeMessage({ type: "UPDATE_ENTRY" }, content, RUNTIME_ID),
+		).toThrow();
+	});
+});
+
 describe("content.js verbatim copy guard", () => {
 	// content.js is a classic script and cannot import this module; it carries
 	// a hand-maintained copy of the ENTIRE domain-match block (suffix table +

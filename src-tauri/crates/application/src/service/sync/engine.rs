@@ -27,7 +27,12 @@
 //! capture `AppState::lock_epoch` before their drain so a mid-window manual
 //! or auto lock is never silently revoked by the window's republish. Lock
 //! order: `exclusive_window` -> session internals; see also the D8 block in
-//! `service/security/mod.rs`.
+//! `service/security/mod.rs`. v1.6.0 (D6) adds a coarser leaf: whole sync
+//! cycles (manual `sync_now`/`sync_connect`, the auto-sync tick) serialize
+//! on `AppState::sync_cycle` — acquired BEFORE any `exclusive_window` (lock
+//! order `sync_cycle` -> `exclusive_window` -> session internals; the
+//! password-change/recovery windows take `exclusive_window` only and never
+//! `sync_cycle`, so there is no reverse-acquisition point and no cycle).
 
 // Pre-split import paths, preserved verbatim.
 pub(crate) use super::state_io::backend_error;
@@ -40,6 +45,7 @@ pub use super::state_io::{
 use std::mem;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Instant;
 
 use zeroize::Zeroizing;
 
@@ -121,6 +127,8 @@ fn run_merge_window(
                 entries: local.sync_entries.clone(),
                 groups: local.sync_groups.clone(),
                 changed: true,
+                // Push-only window: no remote content to arbitrate against.
+                conflicts: 0,
             },
         };
         write_merged_back(&db, keys, &local, &merged)?;
@@ -176,7 +184,24 @@ fn store_webdav_password(
 /// Bootstrap this device onto an existing (or new) cloud container (D2).
 /// Requires an unlocked session. `webdav_password` is stored in the
 /// non-interactive credential store — never persisted with the config.
+///
+/// v1.6.0 (D6): runs the WHOLE cycle under the leaf-level `sync_cycle` mutex
+/// (acquired before any `exclusive_window`), blocking — a user-initiated
+/// action must complete and report even if an auto-sync cycle is running
+/// (at most one bounded automatic cycle of wait).
 pub fn sync_connect(
+    state: &Arc<AppState>,
+    config: SyncConfig,
+    container_password: Zeroizing<String>,
+    webdav_password: Option<Zeroizing<String>>,
+) -> Result<SyncStatusResponse, VaultError> {
+    let _cycle = state.sync_cycle.lock().expect("sync cycle lock poisoned");
+    let result = sync_connect_inner(state, config, container_password, webdav_password);
+    mark_cycle_finished(state);
+    result
+}
+
+fn sync_connect_inner(
     state: &Arc<AppState>,
     config: SyncConfig,
     container_password: Zeroizing<String>,
@@ -275,6 +300,10 @@ pub fn sync_connect_with_backend(
         last_snapshot_hash: Some(content_hash(&final_entries, &final_groups)),
         envelope: Some(pull.envelope),
         history,
+        // v1.6.0 (D5): the connect merge is a genuine first convergence —
+        // timestamp collisions and delete-then-modify forks against the
+        // existing container are real and counted (documented in D5).
+        last_conflict_count: merged.conflicts,
     };
     save_sync_rows(state, &keys, &config, &sync_state, Some(&*pull.cek))?;
 
@@ -284,7 +313,20 @@ pub fn sync_connect_with_backend(
 /// One pull/push cycle (D5). Requires an unlocked session and a completed
 /// bootstrap. The network phase checks the manifest and downloads the
 /// container only when the remote rev moved (P3.3 fast path).
+///
+/// v1.6.0 (D6): runs the WHOLE cycle under the leaf-level `sync_cycle` mutex
+/// (before any `exclusive_window`), blocking — a user-initiated action must
+/// complete and report even if an auto-sync cycle is running. Both success
+/// and failure refresh the `last_sync_finished` marker the auto-sync
+/// scheduler keys off.
 pub fn sync_now(state: &Arc<AppState>) -> Result<SyncStatusResponse, VaultError> {
+    let _cycle = state.sync_cycle.lock().expect("sync cycle lock poisoned");
+    let result = sync_now_inner(state);
+    mark_cycle_finished(state);
+    result
+}
+
+fn sync_now_inner(state: &Arc<AppState>) -> Result<SyncStatusResponse, VaultError> {
     let lease = state.lease()?;
     // SEC-L2: the config row is sealed — decrypt under the lease's enc key
     // (a legacy v1.1.x plaintext row migrates to sealed on this read; the
@@ -294,6 +336,86 @@ pub fn sync_now(state: &Arc<AppState>) -> Result<SyncStatusResponse, VaultError>
     drop(lease);
     let backend = open_backend(state, &config)?;
     sync_now_with_backend(state, backend.as_ref())
+}
+
+/// v1.6.0 (D6): in-memory marker for the auto-sync scheduler — refreshed by
+/// every completed cycle (manual or automatic), success or failure.
+fn mark_cycle_finished(state: &Arc<AppState>) {
+    *state
+        .last_sync_finished
+        .lock()
+        .expect("last sync finished lock poisoned") = Some(Instant::now());
+}
+
+/// Pure due-gate of the auto-sync scheduler (D6). A tick fires a cycle iff
+/// the vault is unlocked, auto-sync is enabled (`interval_min > 0`), and the
+/// last finished cycle is at least `interval_min` old — or never happened
+/// (`None`, the process-start state: a fresh unlock converges once on the
+/// first eligible tick, then the interval governs). `pub(super)` so the
+/// sibling `tests_auto_sync` module can pin it as a state machine.
+pub(super) fn auto_sync_due(
+    interval_min: u32,
+    unlocked: bool,
+    last_finished: Option<Instant>,
+    now: Instant,
+) -> bool {
+    if !unlocked || interval_min == 0 {
+        return false;
+    }
+    match last_finished {
+        None => true,
+        Some(finished) => {
+            now.duration_since(finished)
+                >= std::time::Duration::from_secs(u64::from(interval_min) * 60)
+        }
+    }
+}
+
+/// One auto-sync scheduler tick (v1.6.0 D6). Called from the desktop
+/// background thread; returns whether a cycle ran. Design (documented
+/// trade-offs):
+///
+/// - **try_lock**: a cycle (manual OR automatic) already running means this
+///   tick is skipped silently — a background timer must never queue up
+///   behind the user's foreground action.
+/// - **silent failure**: errors are logged (tracing) and reflected in the
+///   usual places (`SyncState.last_result` keeps the engine's semantics —
+///   success writes "ok", failures leave the previous status), but NO event
+///   is emitted and no toast is shown: transient network jitter must not
+///   interrupt the user from a background timer. This is the deliberate
+///   opposite of the SF-P* position on user-initiated actions.
+pub fn run_sync_cycle_if_due(state: &Arc<AppState>) -> bool {
+    let interval_min = *state
+        .auto_sync_interval_min
+        .lock()
+        .expect("auto sync interval lock poisoned");
+    let last_finished = *state
+        .last_sync_finished
+        .lock()
+        .expect("last sync finished lock poisoned");
+    if !auto_sync_due(
+        interval_min,
+        state.is_unlocked(),
+        last_finished,
+        Instant::now(),
+    ) {
+        return false;
+    }
+
+    // Busy → a cycle is in flight (manual or automatic): skip this tick.
+    let Ok(_cycle) = state.sync_cycle.try_lock() else {
+        return false;
+    };
+
+    let result = sync_now_inner(state);
+    // Refresh on BOTH outcomes: a failed attempt still consumed this
+    // scheduler slot; retrying every 30s tick on a persistent error would
+    // hammer the cloud backend.
+    mark_cycle_finished(state);
+    if let Err(err) = result {
+        tracing::warn!("auto-sync cycle failed: {err}");
+    }
+    true
 }
 
 /// [`sync_now`] with an injected backend (test seam).
@@ -414,6 +536,10 @@ pub fn sync_now_with_backend(
     sync_state.last_result = Some("ok".to_string());
     sync_state.remote_rev = Some(final_rev);
     sync_state.last_snapshot_hash = Some(content_hash(&final_entries, &final_groups));
+    // v1.6.0 (D5): conflicts arbitrated by THIS cycle's merge (a no-remote
+    // window merges against nothing and counts 0 — the field reads off the
+    // snapshot still held in `merged`).
+    sync_state.last_conflict_count = merged.conflicts;
     save_sync_rows(state, &keys, &config, &sync_state, None)?;
 
     Ok(build_status(&Some(config), &sync_state))
@@ -482,5 +608,6 @@ fn build_status(config: &Option<SyncConfig>, sync_state: &SyncState) -> SyncStat
         last_sync_at: sync_state.last_sync_at,
         last_result: sync_state.last_result.clone(),
         remote_rev: sync_state.remote_rev,
+        conflict_count: sync_state.last_conflict_count,
     }
 }

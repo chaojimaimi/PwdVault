@@ -391,7 +391,7 @@ export function VaultScreen() {
 						</button>
 						<h2>Trash</h2>
 						<button
-							className="btn btn-danger btn-sm"
+							className="btn btn-danger btn-sm btn-inline"
 							onClick={() => setEmptyConfirm(true)}
 							disabled={trashBusy || trashList.length === 0}
 						>

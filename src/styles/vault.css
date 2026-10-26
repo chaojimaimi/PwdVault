@@ -379,12 +379,9 @@
 	font-size: var(--text-h2);
 }
 
-/* Scoped `.btn` width override — without it the global width:100% is the
-   flex base size and Empty trash stretches across the whole header row. */
-.trash-header .btn-danger {
-	width: auto;
-	flex-shrink: 0;
-}
+/* The Empty trash button carries .btn-inline (v1.6.0 rider) — without it
+   the global width:100% is the flex base size and it stretches across the
+   whole header row (v1.5.1). */
 
 .trash-list {
 	list-style: none;

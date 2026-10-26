@@ -60,8 +60,8 @@ export default function GroupSelector({ value, onChange }: Props) {
               el?.focus();
             }}
           />
-          <button className="btn" onClick={handleCreate} type="button">Add</button>
-          <button className="btn btn-secondary" onClick={() => { setIsCreating(false); setNewGroupName(''); setError(null); }} type="button">Cancel</button>
+          <button className="btn btn-inline" onClick={handleCreate} type="button">Add</button>
+          <button className="btn btn-secondary btn-inline" onClick={() => { setIsCreating(false); setNewGroupName(''); setError(null); }} type="button">Cancel</button>
         </div>
       ) : (
         <div className="group-selector-row">
@@ -71,7 +71,7 @@ export default function GroupSelector({ value, onChange }: Props) {
               <option key={g.id} value={g.id}>{g.name}</option>
             ))}
           </select>
-          <button className="btn btn-link" onClick={() => setIsCreating(true)} type="button">New</button>
+          <button className="btn btn-link btn-inline" onClick={() => setIsCreating(true)} type="button">New</button>
         </div>
       )}
       {state.groupsStatus === 'error' && (

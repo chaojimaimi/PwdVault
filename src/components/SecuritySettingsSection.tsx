@@ -328,7 +328,7 @@ export function SecuritySettingsSection() {
 								<span className="security-enabled-badge">Enabled</span>
 								<button
 									type="button"
-									className="btn btn-danger btn-sm"
+									className="btn btn-danger btn-sm btn-inline"
 									onClick={() => setShowBioDisable(true)}
 									disabled={busy !== null}
 								>
@@ -355,7 +355,7 @@ export function SecuritySettingsSection() {
 								<div className="security-status-row">
 									<button
 										type="button"
-										className="btn btn-secondary btn-sm"
+										className="btn btn-secondary btn-sm btn-inline"
 										onClick={() => {
 											setShowBioEnable(false);
 											setBioPassword("");
@@ -367,7 +367,7 @@ export function SecuritySettingsSection() {
 									</button>
 									<button
 										type="button"
-										className="btn btn-primary btn-sm"
+										className="btn btn-primary btn-sm btn-inline"
 										onClick={() => void handleBioEnable()}
 										disabled={busy !== null || !bioPassword}
 									>
@@ -407,7 +407,7 @@ export function SecuritySettingsSection() {
 							<span className="security-enabled-badge">Enabled</span>
 							<button
 								type="button"
-								className="btn btn-danger btn-sm"
+								className="btn btn-danger btn-sm btn-inline"
 								onClick={() => setShowRecoveryDisable(!showRecoveryDisable)}
 								disabled={busy !== null}
 							>
@@ -431,7 +431,7 @@ export function SecuritySettingsSection() {
 								<div className="security-status-row">
 									<button
 										type="button"
-										className="btn btn-secondary btn-sm"
+										className="btn btn-secondary btn-sm btn-inline"
 										onClick={() => {
 											setShowRecoveryDisable(false);
 											setRecoveryDisablePassword("");
@@ -443,7 +443,7 @@ export function SecuritySettingsSection() {
 									</button>
 									<button
 										type="button"
-										className="btn btn-danger btn-sm"
+										className="btn btn-danger btn-sm btn-inline"
 										onClick={() => void handleRecoveryDisable()}
 										disabled={busy !== null || !recoveryDisablePassword}
 									>
@@ -491,7 +491,7 @@ export function SecuritySettingsSection() {
 						<div className="security-status-row">
 							<button
 								type="button"
-								className="btn btn-secondary btn-sm"
+								className="btn btn-secondary btn-sm btn-inline"
 								onClick={() => {
 									setShowRecoveryEnable(false);
 									setRecoveryPassword("");
@@ -503,7 +503,7 @@ export function SecuritySettingsSection() {
 							</button>
 							<button
 								type="button"
-								className="btn btn-primary btn-sm"
+								className="btn btn-primary btn-sm btn-inline"
 								onClick={() => void handleRecoveryEnable()}
 								disabled={busy !== null || !recoveryPassword}
 							>
@@ -574,7 +574,7 @@ export function SecuritySettingsSection() {
 					<div className="security-status-row">
 						<button
 							type="button"
-							className="btn btn-secondary btn-sm"
+							className="btn btn-secondary btn-sm btn-inline"
 							data-recovery-key-copy
 							onClick={() => void handleCopyKey()}
 						>

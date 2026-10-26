@@ -430,6 +430,12 @@ fn setup_vault_at(db_path: &std::path::Path, state: &Arc<AppState>) -> Result<bo
             Ok(settings) => {
                 *state.auto_lock_secs.lock().expect("timeout lock poisoned") =
                     settings.auto_lock_secs;
+                // v1.6.0 (D6): the auto-sync interval cache follows the same
+                // boot/unlock load path as auto_lock_secs.
+                *state
+                    .auto_sync_interval_min
+                    .lock()
+                    .expect("auto sync interval lock poisoned") = settings.auto_sync_interval_min;
                 // v1.4.0 (WP5): the persisted global-shortcut config replaces
                 // the default binding registered at boot. Registration
                 // failures are logged inside apply_global_shortcut (bookkeeping

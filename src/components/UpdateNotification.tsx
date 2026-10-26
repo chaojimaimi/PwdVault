@@ -31,15 +31,15 @@ export function UpdateNotification({ version, phase, progress, onUpdate, onRelau
             : `PwdVault ${version} is available`}
         </span>
         {(phase === 'available' || phase === 'failed') && (
-          <button className="btn btn-sm btn-primary" onClick={onUpdate}>
+          <button className="btn btn-sm btn-primary btn-inline" onClick={onUpdate}>
             {phase === 'failed' ? 'Retry update' : 'Update now'}
           </button>
         )}
         {phase === 'ready' && (
-          <button className="btn btn-sm btn-primary" onClick={onRelaunch}>Relaunch</button>
+          <button className="btn btn-sm btn-primary btn-inline" onClick={onRelaunch}>Relaunch</button>
         )}
         {(phase === 'available' || phase === 'failed') && (
-          <button className="btn btn-sm btn-link" onClick={onDismiss}>Dismiss</button>
+          <button className="btn btn-sm btn-link btn-inline" onClick={onDismiss}>Dismiss</button>
         )}
       </div>
       {phase === 'downloading' && (

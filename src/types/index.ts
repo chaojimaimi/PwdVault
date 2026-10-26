@@ -8,6 +8,38 @@
  */
 export type UrlMatchMode = 'auto' | 'exact' | 'domain';
 
+/**
+ * v1.6.0 custom field, plaintext submission shape (mirrors Rust
+ * `CustomFieldInput`): sent in the clear over IPC, encrypted server-side
+ * with the rest of the entry. `secret` only controls UI masking — the
+ * backend encrypts every value regardless.
+ */
+export interface CustomFieldInput {
+  label: string;
+  value: string;
+  secret: boolean;
+}
+
+/**
+ * v1.6.0 custom field metadata as it appears on EntrySummary rows: label
+ * and masking flag only — values never leave the secret channel
+ * (get_entry_secret), mirroring Rust `CustomFieldMeta`.
+ */
+export interface CustomFieldMeta {
+  label: string;
+  secret: boolean;
+}
+
+/**
+ * v1.6.0 custom field with its decrypted value, from the secret channel
+ * (mirrors Rust `CustomFieldValue`; Zeroizing discipline lives Rust-side).
+ */
+export interface CustomFieldValue {
+  label: string;
+  value: string;
+  secret: boolean;
+}
+
 export interface CreateEntryRequest {
   title: string;
   url?: string;
@@ -18,6 +50,12 @@ export interface CreateEntryRequest {
   group_id?: string | null;
   /** Omit = auto (the Rust side carries `#[serde(default)]`). */
   url_match_mode?: UrlMatchMode;
+  /**
+   * v1.6.0: always carried by this frontend (an empty array clears nothing
+   * on create — there is nothing to clear); rows with an empty label AND
+   * an empty value are filtered out before the request.
+   */
+  custom_fields?: CustomFieldInput[];
 }
 
 export interface UpdateEntryRequest {
@@ -39,6 +77,13 @@ export interface UpdateEntryRequest {
   totp_secret?: string;
   /** Replaced wholesale on update; omit = auto (serde default). */
   url_match_mode?: UrlMatchMode;
+  /**
+   * v1.6.0 custom fields, same metadata-replacement semantics as tags:
+   * omit = leave the stored set untouched, provide = replace WHOLESALE.
+   * The frontend only sends this when the loaded original differs, so an
+   * omitted key never wipes stored values.
+   */
+  custom_fields?: CustomFieldInput[];
 }
 
 export type ResourceStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -47,6 +92,11 @@ export interface EntrySecretResponse {
   password: string;
   notes?: string;
   last_used_at?: number;
+  /**
+   * v1.6.0: decrypted custom-field values. Optional because responses from
+   * a pre-v1.6.0 desktop lack the field; treat as "no custom fields".
+   */
+  custom_fields?: CustomFieldValue[];
 }
 
 export interface EntrySummary {
@@ -67,6 +117,12 @@ export interface EntrySummary {
    * from a pre-v1.5.0 desktop lack the field; treat as "auto".
    */
   url_match_mode?: UrlMatchMode;
+  /**
+   * v1.6.0: custom-field metadata (label + secret flag, never values).
+   * Optional because responses from a pre-v1.6.0 desktop lack the field;
+   * treat as "no custom fields" (same precedent as url_match_mode).
+   */
+  custom_fields?: CustomFieldMeta[];
 }
 
 export interface Group {
@@ -160,6 +216,11 @@ export interface SyncStatusResponse {
   /** "ok" after a successful cycle; otherwise a short error code. */
   last_result?: string | null;
   remote_rev?: number | null;
+  /**
+   * v1.6.0: LWW conflicts auto-resolved during the last merge (D5). Optional
+   * because a pre-v1.6.0 desktop response omits the key — readers must `?? 0`.
+   */
+  conflict_count?: number;
 }
 
 export interface BaiduAuthStart {
@@ -207,6 +268,13 @@ export interface Settings {
    * unlock). 0 = off; the UI offers 0/7/30/90.
    */
   trash_auto_purge_days: number;
+  /**
+   * Timed auto-sync (v1.6.0): minutes between automatic sync cycles while
+   * the vault is unlocked. 0 = off (strict opt-in, same semantics as
+   * trash_auto_purge_days); the UI offers 0/5/15/30/60. Device-local
+   * preference — lives in Settings, not SyncConfig.
+   */
+  auto_sync_interval_min: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -221,6 +289,7 @@ export const DEFAULT_SETTINGS: Settings = {
   global_shortcut_enabled: true,
   global_shortcut: "CmdOrCtrl+Shift+Space",
   trash_auto_purge_days: 0,
+  auto_sync_interval_min: 0,
 };
 
 // Backup/Restore Types

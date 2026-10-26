@@ -14,7 +14,7 @@
 //! `version` field). Envelope shape:
 //!
 //! ```text
-//! { version: 2, kdf: { salt, params }, wrapped_cek: EncryptedData,
+//! { version: 3, kdf: { salt, params }, wrapped_cek: EncryptedData,
 //!   snapshot: EncryptedData }
 //! ```
 //!
@@ -41,16 +41,23 @@ use super::{SyncEntry, SyncGroup, SyncSnapshot};
 /// `SyncEntry` gained `url_match_mode`, which changes the bincode LWW
 /// fingerprint input — two devices must agree on the fingerprint bytes, so a
 /// v1.4.x peer opening a v2 container must fail cleanly at the version gate
-/// instead of silently stripping the new field on republish). Read side
-/// accepts v1 as well: see `SUPPORTED_READ_VERSIONS`.
-pub const CONTAINER_FORMAT_VERSION: u32 = 2;
+/// instead of silently stripping the new field on republish). Bumped again in
+/// v1.6.0 (WP1): `SyncEntry` gained `custom_fields`, changing the fingerprint
+/// input once more — a v1.5.x peer opening a v3 container must fail cleanly
+/// at the version gate for the same reason (the v1.5.0 precedent, extended to
+/// three generations). Read side accepts v1 and v2 as well: see
+/// `SUPPORTED_READ_VERSIONS`.
+pub const CONTAINER_FORMAT_VERSION: u32 = 3;
 
 /// Versions this build can READ. v1 = containers written by pre-v1.5.0
 /// builds (their serde_json snapshots lack `url_match_mode`; the serde
-/// default lands those entries on Auto — no legacy struct needed). v2 = the
+/// default lands those entries on Auto — no legacy struct needed). v2 =
+/// v1.5.0–v1.5.1 containers (their snapshots lack `custom_fields`; the serde
+/// default lands those entries on an empty vec — pinned by the permanent
+/// V2_CONTAINER_HEX fixture in `tests_container_v2_fixture`). v3 = the
 /// current format. The AAD constants are deliberately NOT versioned for the
-/// bump: same SNAPSHOT_AAD/WRAP_AAD_CONTAINER keeps v1 bytes decryptable.
-const SUPPORTED_READ_VERSIONS: [u32; 2] = [1, CONTAINER_FORMAT_VERSION];
+/// bumps: same SNAPSHOT_AAD/WRAP_AAD_CONTAINER keeps v1 bytes decryptable.
+const SUPPORTED_READ_VERSIONS: [u32; 3] = [1, 2, CONTAINER_FORMAT_VERSION];
 
 /// AAD binding the snapshot blob to container semantics: a snapshot can
 /// never be replayed under a different purpose. Kept at the v1 value across
@@ -349,6 +356,7 @@ mod tests {
                 updated_at: 1_700_000_050,
                 deleted_at: None,
                 url_match_mode: UrlMatchMode::Auto,
+                custom_fields: vec![],
             }],
             groups: vec![],
         }
@@ -427,9 +435,9 @@ mod tests {
     fn unknown_container_version_is_reported_before_crypto() {
         let bytes = seal_with_weak_params(&sample_snapshot());
         let mut value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        // A version NEITHER readable generation accepts (3 = newer than this
+        // A version NEITHER readable generation accepts (4 = newer than this
         // build). Version 1 readability is pinned by the permanent fixture
-        // below.
+        // below, version 2 by `tests_container_v2_fixture`.
         value["version"] = json!(CONTAINER_FORMAT_VERSION + 1);
         let future = serde_json::to_vec(&value).unwrap();
         assert!(matches!(
@@ -480,6 +488,7 @@ mod tests {
                     updated_at: 1_759_500_000,
                     deleted_at: None,
                     url_match_mode: UrlMatchMode::Auto,
+                    custom_fields: vec![],
                 }],
                 groups: vec![SyncGroup {
                     id: "capture-group-1".to_string(),
@@ -626,6 +635,17 @@ mod tests {
 /// running bincode 2 and a device still running bincode 1 must agree on them
 /// or the D3 LWW tiebreak becomes inconsistent across a sync pair.
 ///
+/// **Cross-VERSION consistency (v1.6.0 restatement)**: the fingerprint input
+/// layout follows the `SyncEntry` shape, which has now changed twice
+/// (`url_match_mode` in v1.5.0, `custom_fields` in v1.6.0). The fingerprint
+/// of the same logical entry therefore differs between container generations
+/// — that is exactly why cross-version sync is cut off at the container
+/// version gate (`SUPPORTED_READ_VERSIONS` gates reads, and old peers fail
+/// cleanly on v3 containers instead of silently stripping fields). Within
+/// ONE generation the bytes must never drift: the re-captures below pin the
+/// current 14-field layout, and the version gate keeps devices on
+/// mismatched layouts from ever comparing fingerprints.
+///
 /// **These tests are the cross-version fingerprint tripwire.** If upgrading
 /// bincode 2.x (or the `bc_serialize`/`bc_deserialize` config) makes any of
 /// them red, the legacy byte semantics have drifted and the fingerprint of
@@ -642,17 +662,22 @@ mod bincode_golden {
     ///
     /// v1.5.0 DELIBERATE UPDATE (WP4): `SyncEntry` gained `url_match_mode`
     /// (`#[serde(default)]`), which changes the fingerprint input layout —
-    /// this fixture was re-captured for the CURRENT 13-field shape (trailing
-    /// u32 enum variant index, Auto = 0).
-    const SYNC_ENTRY_MINIMAL_HEX: &str = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+    /// this fixture was re-captured for the then-current 13-field shape.
+    /// v1.6.0 DELIBERATE UPDATE (WP1): the struct gained `custom_fields`
+    /// (`#[serde(default)]`) — re-captured for the CURRENT 14-field shape
+    /// (trailing empty-`Vec` length). Cross-version sync is cut off at the
+    /// container version gate; see the CONTAINER_FORMAT_VERSION docs.
+    const SYNC_ENTRY_MINIMAL_HEX: &str = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
     /// Fully populated `SyncEntry`: UTF-8 fields, password/notes/totp/group
     /// set, tombstone, `updated_at = i64::MAX`, `url_match_mode = Exact`
-    /// (non-zero sentinel so the trailing field's bytes carry data).
+    /// (non-zero sentinel so the trailing field's bytes carry data), and one
+    /// custom field (`"API Key"` / `"key-value-1"` / `secret = true`) so the
+    /// 14th field's bytes carry data too.
     ///
-    /// v1.5.0 DELIBERATE UPDATE (WP4): re-captured for the 13-field layout
+    /// v1.6.0 DELIBERATE UPDATE (WP1): re-captured for the 14-field layout
     /// (same rule as SYNC_ENTRY_MINIMAL_HEX above).
-    const SYNC_ENTRY_FULL_UTF8_HEX: &str = "140000000000000073796e632d656e7472792d757569642df09f94901200000000000000e5908ce6ada5e69da1e79bae2d456e74727901240000000000000068747470733a2f2f73796e632e6578616d706c652e6a702fe383ade382b0e382a4e383b3150000000000000073796e632d75736572406578616d706c652e636f6d010f0000000000000070407373773072642de5af86e7a0810119000000000000006e6f74652d776974682de5a49ae5ad97e88a822d6368617273012b000000000000006f7470617574683a2f2f746f74702f746573743f7365637265743d4a425357593344504548504b335058500200000000000000040000000000000073796e630600000000000000e5908ce6ada5010c0000000000000073796e632d67726f75702d3100f1536500000000ffffffffffffff7f01101854650000000001000000";
+    const SYNC_ENTRY_FULL_UTF8_HEX: &str = "140000000000000073796e632d656e7472792d757569642df09f94901200000000000000e5908ce6ada5e69da1e79bae2d456e74727901240000000000000068747470733a2f2f73796e632e6578616d706c652e6a702fe383ade382b0e382a4e383b3150000000000000073796e632d75736572406578616d706c652e636f6d010f0000000000000070407373773072642de5af86e7a0810119000000000000006e6f74652d776974682de5a49ae5ad97e88a822d6368617273012b000000000000006f7470617574683a2f2f746f74702f746573743f7365637265743d4a425357593344504548504b335058500200000000000000040000000000000073796e630600000000000000e5908ce6ada5010c0000000000000073796e632d67726f75702d3100f1536500000000ffffffffffffff7f0110185465000000000100000001000000000000000700000000000000415049204b65790b000000000000006b65792d76616c75652d3101";
 
     /// All-empty / all-`None` `SyncGroup`.
     const SYNC_GROUP_MINIMAL_HEX: &str =
@@ -708,6 +733,7 @@ mod bincode_golden {
             updated_at: 0,
             deleted_at: None,
             url_match_mode: UrlMatchMode::Auto,
+            custom_fields: vec![],
         };
         assert_golden(SYNC_ENTRY_MINIMAL_HEX, &entry);
     }
@@ -728,6 +754,11 @@ mod bincode_golden {
             updated_at: i64::MAX,
             deleted_at: Some(1700010000),
             url_match_mode: UrlMatchMode::Exact,
+            custom_fields: vec![super::super::SyncCustomField {
+                label: "API Key".to_string(),
+                value: "key-value-1".to_string(),
+                secret: true,
+            }],
         };
         assert_golden(SYNC_ENTRY_FULL_UTF8_HEX, &entry);
     }

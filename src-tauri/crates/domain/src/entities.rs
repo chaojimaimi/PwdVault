@@ -6,7 +6,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Per-entry URL matching override for the browser extension's autofill
 /// gates (v1.5.0 WP4).
@@ -21,7 +21,7 @@ use zeroize::Zeroize;
 /// `Auto` is the serde default so JSON payloads written before the field
 /// existed (sync container v1 snapshots, NM requests, old frontends) land on
 /// the status-quo behavior. Bincode is positional and ignores serde defaults
-/// — entry blobs must go through the codec's three-generation read chain
+/// — entry blobs must go through the codec's four-generation read chain
 /// (see `entry_codec::decode_entry_plain`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -40,6 +40,29 @@ impl Zeroize for UrlMatchMode {
     fn zeroize(&mut self) {
         *self = Self::default();
     }
+}
+
+/// One user-defined custom field on an entry (v1.6.0 WP1).
+///
+/// `value` holds the INNER CIPHERTEXT raw bytes (`bc_serialize(EncryptedData)`
+/// — the same layout as `encrypted_notes`), not plaintext: values only ever
+/// leave the vault through `get_entry_secret`'s one-shot decryption, keeping
+/// the SEC-M3/B4 disclosure discipline. The `secret` flag is UI-only (mask
+/// the value on display); the storage layer encrypts unconditionally. An
+/// empty `value` vec is legal (a placeholder row carries label + secret).
+///
+/// `secret`'s `#[serde(default)]` covers JSON-faced reads (NM/backup) of
+/// payloads written before the flag existed; bincode is positional, where
+/// the field is always present.
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop, PartialEq, Eq)]
+pub struct CustomField {
+    /// Plaintext label (the outer entry blob's encryption covers it).
+    pub label: String,
+    /// Inner ciphertext raw bytes: `bc_serialize(EncryptedData)`.
+    pub value: Vec<u8>,
+    /// UI mask hint only — never a storage decision.
+    #[serde(default)]
+    pub secret: bool,
 }
 
 /// A password entry stored in the vault.
@@ -80,9 +103,16 @@ pub struct PasswordEntry {
     /// Per-entry URL match override for browser-extension autofill (v1.5.0
     /// WP4). The serde default keeps JSON payloads written before the field
     /// existed on `Auto`; bincode layouts are bridged by the entry codec's
-    /// three-generation read chain.
+    /// generation read chain.
     #[serde(default)]
     pub url_match_mode: UrlMatchMode,
+    /// User-defined custom fields (v1.6.0 WP1), values inner-encrypted (see
+    /// [`CustomField`]). The serde default keeps older JSON payloads (NM
+    /// requests, backups) importable; bincode layouts are bridged by the
+    /// entry codec's four-generation read chain — a 14-field blob (v1.5.x)
+    /// reads back with this as an empty vec.
+    #[serde(default)]
+    pub custom_fields: Vec<CustomField>,
 }
 
 impl PasswordEntry {
@@ -104,6 +134,7 @@ impl PasswordEntry {
             deleted_at: None,
             encrypted_totp_secret: None,
             url_match_mode: UrlMatchMode::default(),
+            custom_fields: Vec::new(),
         }
     }
 }
@@ -164,6 +195,14 @@ pub struct Settings {
     /// UI offers 0/7/30/90.
     #[serde(default)]
     pub trash_auto_purge_days: u32,
+    /// Timed auto-sync (v1.6.0 WP3 D6): minutes between automatic sync
+    /// cycles while the vault is unlocked. 0 = disabled (the default) —
+    /// handing a background timer the user's cloud credentials and unlock
+    /// session is strict opt-in, the UI offers 0/5/15/30/60. Device-local
+    /// preference, hence Settings rather than the sealed SyncConfig row
+    /// (same semantic tier as `trash_auto_purge_days` above).
+    #[serde(default)]
+    pub auto_sync_interval_min: u32,
 }
 
 impl Default for Settings {
@@ -180,6 +219,7 @@ impl Default for Settings {
             global_shortcut_enabled: true,
             global_shortcut: default_global_shortcut(),
             trash_auto_purge_days: 0,
+            auto_sync_interval_min: 0,
         }
     }
 }

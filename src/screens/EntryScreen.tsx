@@ -1,13 +1,24 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth, useSettings, useVault } from "../context/AppContext";
-import { generatePassword } from "../api/vault";
 import { copyWithTimeout } from "../utils/clipboard";
 import { errorMessage } from "../utils/errorMessage";
 import { showToast } from "../utils/toast";
+import {
+	normalizeMatchMode,
+	URL_MATCH_MODE_OPTIONS,
+} from "../utils/urlMatchMode";
 import { BackHeader } from "../components/BackHeader";
 import { StrengthMeter } from "../components/StrengthMeter";
-import { TagsEditor } from "../components/TagsEditor";
+import { sameTags, TagsEditor } from "../components/TagsEditor";
 import { TotpSecretField } from "../components/TotpSecretField";
+import { EntryGeneratorModal } from "../components/EntryGeneratorModal";
+import {
+	appendCustomFieldChanges,
+	CustomFieldsEditor,
+	filterEmptyRows,
+	stripCustomFieldRowIds,
+} from "../components/CustomFieldsEditor";
+import { useCustomFields } from "./useCustomFields";
 import {
 	EyeIcon,
 	EyeOffIcon,
@@ -18,60 +29,13 @@ import ConfirmationModal, { ChangeItem } from "../components/ConfirmationModal";
 import DeleteConfirmModal from "../components/DeleteConfirmModal";
 import GroupSelector from "../components/GroupSelector";
 import { UnsavedChangesModal } from "../components/UnsavedChangesModal";
-import { AccessibleDialog } from "../components/AccessibleDialog";
 import type {
 	CreateEntryRequest,
+	CustomFieldInput,
 	EntrySummary,
 	UpdateEntryRequest,
 	UrlMatchMode,
 } from "../types";
-
-/**
- * Order-insensitive tags equality that PRESERVES duplicate multiplicity:
- * sort-then-join, deliberately not a Set — ["a", "a"] and ["a"] must stay
- * unequal or clearing a duplicate tag would not dirty the form.
- */
-export function sameTags(a: string[], b: string[]): boolean {
-	if (a.length !== b.length) return false;
-	const canonical = (tags: string[]) => [...tags].sort().join("\u0000");
-	return canonical(a) === canonical(b);
-}
-
-/**
- * v1.5.0 WP4: the URL match override as a normalizable accessor — a summary
- * from a pre-v1.5.0 desktop (or any absent value) reads as "auto", matching
- * the Rust serde default and the extension's fallback. Unknown strings (the
- * TS type is an IPC trust boundary, not a runtime guarantee) degrade to
- * "auto" too, same as the extension's `|| "auto"`.
- */
-export function normalizeMatchMode(
-	mode: UrlMatchMode | undefined,
-): UrlMatchMode {
-	return mode === "exact" || mode === "domain" ? mode : "auto";
-}
-
-/** Select options + confirmation-modal display values (single source). */
-export const URL_MATCH_MODE_OPTIONS: {
-	value: UrlMatchMode;
-	label: string;
-	hint: string;
-}[] = [
-	{
-		value: "auto",
-		label: "Auto (recommended)",
-		hint: "Fills on the site's registrable domain — subdomains of the stored URL's site are allowed.",
-	},
-	{
-		value: "exact",
-		label: "Exact host",
-		hint: "Fills only on exactly this host (subdomains and www variants do not match).",
-	},
-	{
-		value: "domain",
-		label: "Registrable domain",
-		hint: "Always matches by registrable domain (eTLD+1), pinned even if Auto matching evolves.",
-	},
-];
 
 /**
  * Pure diff between the saved entry and the current form, for the save
@@ -87,6 +51,10 @@ export function detectChanges(
 	passwordChanged: boolean,
 	notesChanged: boolean,
 	totpChanged: boolean,
+	// v1.6.0: the effective custom-field baseline — loaded values when the
+	// secret channel ran, meta-derived rows otherwise. null reads as "no
+	// stored fields" (pure-function convenience for the test matrix).
+	originalCustomFields: CustomFieldInput[] | null,
 ): ChangeItem[] {
 	const changes: ChangeItem[] = [];
 	if (originalMeta.title !== current.title) {
@@ -176,7 +144,13 @@ export function detectChanges(
 			valueType: "password",
 		});
 	}
-	return changes;
+	// v1.6.0: the custom-field diff logic (whole-replacement, label pairing,
+	// secret masking) lives beside its helpers in CustomFieldsEditor.
+	return appendCustomFieldChanges(
+		changes,
+		originalCustomFields,
+		current.custom_fields || [],
+	);
 }
 
 export function EntryScreen() {
@@ -214,11 +188,30 @@ export function EntryScreen() {
 	// the value by default.
 	const [showTotpSecret, setShowTotpSecret] = useState(false);
 	const [secretLoading, setSecretLoading] = useState(false);
+	// v1.6.0: custom-field rows + secret-channel loading + the save-time
+	// guarded fetch live in useCustomFields (contract documented there).
+	const {
+		customFields,
+		setCustomFields,
+		mergeLoadedCustomFields,
+		hasContentRows,
+		dirtyFromStored,
+		resolveForSave,
+		patchFragment,
+	} = useCustomFields({
+		selectedEntry: state.selectedEntry,
+		fetchSecret: async (id) => {
+			const secret = await actions.getEntrySecret(id);
+			if (!secret) throw new Error("Empty secret response");
+			return secret;
+		},
+		onFetchFailed: () => setError("Failed to load custom fields"),
+		setSecretLoading,
+	});
 	const [showPassword, setShowPassword] = useState(false);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [showGenerator, setShowGenerator] = useState(false);
-	const [generatedPassword, setGeneratedPassword] = useState("");
 	const [showConfirmation, setShowConfirmation] = useState(false);
 	const [pendingChanges, setPendingChanges] =
 		useState<UpdateEntryRequest | null>(null);
@@ -281,7 +274,10 @@ export function EntryScreen() {
 					formData.tags.length ||
 					formData.group_id ||
 					// A non-default match override is unsaved content on a new entry.
-					normalizeMatchMode(formData.url_match_mode) !== "auto",
+					normalizeMatchMode(formData.url_match_mode) !== "auto" ||
+					// v1.6.0: any row with content is unsaved content (blank rows
+					// are dropped before the request); see useCustomFields.
+					hasContentRows,
 			);
 		}
 		return (
@@ -291,9 +287,13 @@ export function EntryScreen() {
 				normalizeMatchMode(formData.url_match_mode) ||
 			state.selectedEntry.username !== formData.username ||
 			!sameTags(state.selectedEntry.tags || [], formData.tags) ||
-			(state.selectedEntry.group_id || null) !== (formData.group_id || null)
+			(state.selectedEntry.group_id || null) !== (formData.group_id || null) ||
+			// v1.6.0: the hook compares against the loaded values once the
+			// secret channel has run, meta rows before — untouched rows stay
+			// clean either way.
+			dirtyFromStored
 		);
-	}, [formData, state.selectedEntry]);
+	}, [formData, hasContentRows, dirtyFromStored, state.selectedEntry]);
 	const isDirty =
 		metadataDirty || passwordChanged || notesChanged || totpChanged;
 
@@ -338,10 +338,17 @@ export function EntryScreen() {
 		if (isNew) {
 			setIsLoading(true);
 			try {
-				await actions.createEntry(formData);
+				// Create always carries the rows; blank rows dropped, and the
+				// UI-internal row id stripped at this IPC boundary.
+				await actions.createEntry({
+					...formData,
+					custom_fields: stripCustomFieldRowIds(
+						filterEmptyRows(customFields),
+					),
+				});
 				leaveEntry();
-			} catch {
-				setError("Failed to create entry");
+			} catch (e: unknown) {
+				setError(errorMessage(e, "Failed to create entry"));
 			} finally {
 				setIsLoading(false);
 			}
@@ -350,13 +357,32 @@ export function EntryScreen() {
 
 		if (!state.selectedEntry) return;
 
+		// Rows + diff baseline resolution incl. the one guarded secret fetch
+		// (empty-box wipe protection; contract in the hook). The no-fetch
+		// path resolves synchronously (the modal opens same-tick); the fetch
+		// path holds the create path's re-entry lock (guard + button state
+		// ride isLoading).
+		const resolution = resolveForSave();
+		let resolved = resolution;
+		if (resolved instanceof Promise) {
+			setIsLoading(true);
+			resolved = await resolved.finally(() => setIsLoading(false));
+		}
+		if (!resolved) return; // fetch failed; the hook reported the error
+		const { rows: currentRows, baseline: customBaseline } = resolved;
+
+		const currentForm: CreateEntryRequest = {
+			...formData,
+			custom_fields: currentRows,
+		};
 		const changes = detectChanges(
 			state.selectedEntry,
 			originalSecret,
-			formData,
+			currentForm,
 			passwordChanged,
 			notesChanged,
 			totpChanged,
+			customBaseline,
 		);
 		if (changes.length === 0) {
 			leaveEntry();
@@ -376,6 +402,7 @@ export function EntryScreen() {
 			url_match_mode: normalizeMatchMode(formData.url_match_mode),
 			// TOTP tri-state: omit when untouched, "" clears, value sets.
 			...(totpChanged ? { totp_secret: totpSecret.trim() } : {}),
+			...patchFragment(customBaseline, currentRows),
 		});
 		setChangesList(changes);
 		setShowConfirmation(true);
@@ -414,26 +441,12 @@ export function EntryScreen() {
 		}
 	};
 
-	const handleGeneratePassword = async () => {
-		try {
-			const pwd = await generatePassword({
-				length: settingsState.settings.default_length,
-				includeUppercase: settingsState.settings.default_include_uppercase,
-				includeLowercase: settingsState.settings.default_include_lowercase,
-				includeNumbers: settingsState.settings.default_include_numbers,
-				includeSymbols: settingsState.settings.default_include_symbols,
-			});
-			setGeneratedPassword(pwd);
-		} catch {
-			setError("Failed to generate password");
-		}
-	};
-
-	const handleUseGenerated = () => {
-		setFormData({ ...formData, password: generatedPassword });
+	// The generation call itself lives in EntryGeneratorModal (WP5 split);
+	// this closes the loop: insert into the form and dismiss.
+	const handleUseGenerated = (password: string) => {
+		setFormData({ ...formData, password });
 		setPasswordChanged(true);
 		setShowGenerator(false);
-		setGeneratedPassword("");
 	};
 
 	const handleCopyPassword = async () => {
@@ -474,6 +487,7 @@ export function EntryScreen() {
 					password: secret.password,
 					notes: originalSecret?.notes || "",
 				});
+				mergeLoadedCustomFields(secret);
 			} catch {
 				setError("Failed to reveal password");
 				return;
@@ -493,6 +507,7 @@ export function EntryScreen() {
 			const notes = secret.notes || "";
 			setFormData((prev) => ({ ...prev, notes }));
 			setOriginalSecret({ password: originalSecret?.password || "", notes });
+			mergeLoadedCustomFields(secret);
 			setNotesLoaded(true);
 		} catch {
 			setError("Failed to load notes");
@@ -702,6 +717,10 @@ export function EntryScreen() {
 						value={formData.tags}
 						onChange={(tags) => setFormData({ ...formData, tags })}
 					/>
+					<CustomFieldsEditor
+						value={customFields}
+						onChange={setCustomFields}
+					/>
 				</div>
 			</form>
 
@@ -752,54 +771,21 @@ export function EntryScreen() {
 				onCancel={() => setShowDeleteConfirm(false)}
 				isDeleting={isLoading}
 			/>
-			<AccessibleDialog
+			{/* Quick generator (A5): honours the saved defaults; owns its
+			    generated-value state — see EntryGeneratorModal. */}
+			<EntryGeneratorModal
 				isOpen={showGenerator}
 				onClose={() => setShowGenerator(false)}
-				labelledBy="entry-generator-title"
-				describedBy="entry-generator-description"
-				initialFocusSelector="[data-generate-password]"
-			>
-				<div className="modal-header">
-					<h3 id="entry-generator-title">Generate Password</h3>
-					<button
-						className="btn btn-icon"
-						onClick={() => setShowGenerator(false)}
-						aria-label="Close generator"
-					>
-						×
-					</button>
-				</div>
-				<div className="modal-body">
-					<p id="entry-generator-description" className="visually-hidden">
-						Generate a password and insert it into this entry.
-					</p>
-					<div className="password-preview">
-						{generatedPassword || "Click generate to create a password"}
-					</div>
-					<button
-						className="btn btn-secondary"
-						data-generate-password
-						onClick={handleGeneratePassword}
-					>
-						Generate New
-					</button>
-				</div>
-				<div className="modal-footer">
-					<button
-						className="btn btn-secondary"
-						onClick={() => setShowGenerator(false)}
-					>
-						Cancel
-					</button>
-					<button
-						className="btn btn-primary"
-						onClick={handleUseGenerated}
-						disabled={!generatedPassword}
-					>
-						Use Password
-					</button>
-				</div>
-			</AccessibleDialog>
+				onUse={handleUseGenerated}
+				onError={setError}
+				options={{
+					length: settingsState.settings.default_length,
+					includeUppercase: settingsState.settings.default_include_uppercase,
+					includeLowercase: settingsState.settings.default_include_lowercase,
+					includeNumbers: settingsState.settings.default_include_numbers,
+					includeSymbols: settingsState.settings.default_include_symbols,
+				}}
+			/>
 			<UnsavedChangesModal
 				isOpen={showUnsaved}
 				onStay={() => setShowUnsaved(false)}

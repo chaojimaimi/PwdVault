@@ -12,6 +12,7 @@ use zeroize::Zeroizing;
 
 use pwdvault_application::AppState;
 use pwdvault_domain::constants;
+use pwdvault_domain::CustomFieldInput;
 use pwdvault_domain::PasswordEntry;
 use pwdvault_domain::UrlMatchMode;
 use pwdvault_infrastructure::auth;
@@ -72,6 +73,18 @@ pub struct NativeRequest {
     /// mode): a missing field lands on the status-quo Auto behavior.
     #[serde(default)]
     pub url_match_mode: UrlMatchMode,
+    /// v1.6.0 WP1: custom-field inputs (plaintext values — the service layer
+    /// encrypts) carried with entry create/update requests. `#[serde(default)]`
+    /// keeps pre-v1.6.0 extension payloads on "no custom fields" (create) /
+    /// "leave unchanged" (update), the same wire contract rule as tags.
+    #[serde(default)]
+    pub custom_fields: Option<Vec<CustomFieldInput>>,
+    /// v1.6.0 WP3 (D7): SHA-256 of the candidate password for
+    /// `verify_entry_password` (64 hex chars, case-insensitive). A one-way
+    /// digest, not a plaintext — the stored password never crosses this
+    /// boundary and the response carries only a boolean.
+    #[serde(default)]
+    pub password_sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -376,6 +389,8 @@ mod tests {
             export_password: None,
             import_password: None,
             backup: None,
+            custom_fields: None,
+            password_sha256: None,
             url_match_mode: UrlMatchMode::Auto,
         }
     }

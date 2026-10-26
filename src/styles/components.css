@@ -115,6 +115,20 @@
   font-size: var(--text-micro);
 }
 
+/* v1.6.0 (D9) inline-button utility. Trap mechanism: the global
+   `.btn { width: 100% }` becomes the flex BASE SIZE of any button inside a
+   flex row, so the row overflows, the button never shrinks below ~half the
+   container, and a `flex: 1` sibling input (basis 0, nothing left to grow
+   into) starves to its min-content width — the v1.2.2 tags row and the
+   v1.5.1 status-row/dashboard/trash regressions all share this root cause.
+   REQUIRED whenever a .btn shares a flex row with a flex:1 sibling (input,
+   text, spacer). Do NOT apply to .btn-icon (it owns its 40px square) or to
+   block-context / .btn-full buttons where full width is the design intent. */
+.btn-inline {
+  width: auto;
+  flex-shrink: 0;
+}
+
 /* --- Form inputs --- */
 
 .form-group {
@@ -156,14 +170,8 @@
   align-items: center;
 }
 
-/* Flex rows pairing an input with buttons: .btn's global width:100% (line ~36)
-   acts as the flex base size and starves the flex:1 input (basis 0, nothing
-   to grow into). Undo it inside these rows — the input owns the space. */
-.tag-input-row .btn,
-.group-selector-row .btn {
-  width: auto;
-  flex-shrink: 0;
-}
+/* The row's buttons carry .btn-inline (v1.6.0 rider): .btn's global
+   width:100% would starve the flex:1 input below. */
 
 .group-selector-row .form-input {
   flex: 1;

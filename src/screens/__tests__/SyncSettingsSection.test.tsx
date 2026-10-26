@@ -365,3 +365,72 @@ describe("SyncSettingsSection connected state", () => {
 		).toBeInTheDocument();
 	});
 });
+
+// v1.6.0 (D5): LWW conflicts auto-resolved by the last merge — status row
+// (only when nonzero, red value) + counted success toast.
+describe("SyncSettingsSection conflict reporting", () => {
+	const CONNECTED = {
+		enabled: true,
+		backend: "webdav",
+		last_sync_at: 1700000000,
+		last_result: "ok",
+		remote_rev: 7,
+	};
+
+	beforeEach(() => {
+		// The file-level default is the bootstrap form; the conflict row only
+		// exists in the connected view.
+		syncStatus.mockResolvedValue(CONNECTED);
+	});
+
+	it("hides the conflict row when the count is zero or absent", async () => {
+		// Absent key = pre-v1.6.0 desktop response; must read as zero.
+		const { unmount } = await renderSection();
+		await screen.findByText("Remote revision");
+		expect(screen.queryByText("Conflicts (last sync)")).not.toBeInTheDocument();
+		unmount();
+
+		syncStatus.mockResolvedValue({ ...CONNECTED, conflict_count: 0 });
+		await renderSection();
+		await screen.findByText("Remote revision");
+		expect(screen.queryByText("Conflicts (last sync)")).not.toBeInTheDocument();
+	});
+
+	it("renders the conflict row in red with the resolved note when positive", async () => {
+		syncStatus.mockResolvedValue({ ...CONNECTED, conflict_count: 3 });
+		await renderSection();
+
+		expect(await screen.findByText("Conflicts (last sync)")).toBeInTheDocument();
+		const value = screen.getByText(
+			"3 — resolved automatically (last-write-wins)",
+		);
+		// Red styling rides the sync-conflict-value modifier (danger token).
+		expect(value).toHaveClass("sync-conflict-value");
+	});
+
+	it("counts conflicts in the success toast", async () => {
+		syncNow.mockResolvedValue({ ...CONNECTED, conflict_count: 1 });
+		await renderSection();
+
+		fireEvent.click(await screen.findByRole("button", { name: "Sync Now" }));
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith(
+				"Sync completed — 1 conflict resolved automatically",
+			),
+		);
+	});
+
+	it("keeps the plain toast when the desktop omits the conflict count", async () => {
+		// Old-desktop response shape: no conflict_count key at all.
+		syncNow.mockResolvedValue({ ...CONNECTED });
+		await renderSection();
+
+		fireEvent.click(await screen.findByRole("button", { name: "Sync Now" }));
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith("Sync completed"),
+		);
+		expect(showToast).not.toHaveBeenCalledWith(
+			expect.stringContaining("conflict"),
+		);
+	});
+});

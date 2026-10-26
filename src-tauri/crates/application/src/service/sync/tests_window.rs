@@ -312,6 +312,7 @@ fn assert_write_rejected_during_window(state: &Arc<AppState>) {
             notes: None,
             tags: vec![],
             group_id: None,
+            custom_fields: Vec::new(),
         },
     );
     assert!(matches!(write, Err(VaultError::VaultLocked)), "{write:?}");

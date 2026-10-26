@@ -1,5 +1,18 @@
 import { useState } from "react";
 
+/**
+ * Order-insensitive tags equality that PRESERVES duplicate multiplicity:
+ * sort-then-join, deliberately not a Set — ["a", "a"] and ["a"] must stay
+ * unequal or clearing a duplicate tag would not dirty the form.
+ * (WP5 line-count reduction: moved verbatim out of EntryScreen, beside the
+ * tags UI it belongs to.)
+ */
+export function sameTags(a: string[], b: string[]): boolean {
+	if (a.length !== b.length) return false;
+	const canonical = (tags: string[]) => [...tags].sort().join("\u0000");
+	return canonical(a) === canonical(b);
+}
+
 interface TagsEditorProps {
 	/** Current tag list; the parent owns it (it feeds the save patch). */
 	value: string[];
@@ -64,7 +77,7 @@ export function TagsEditor({ value, onChange }: TagsEditorProps) {
 					placeholder="Add tag..."
 				/>
 				<button
-					className="btn btn-secondary"
+					className="btn btn-secondary btn-inline"
 					onClick={addTag}
 					type="button"
 				>

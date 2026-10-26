@@ -40,13 +40,40 @@ const GUARDED_SITES = [
     'Auto-fill Prompt Logic',
     'showOverlay(',
   ],
+  // v1.6.0 save/update prompt: three submit-capture paths converge on
+  // handlePossibleSubmit (which reads the field .value plaintexts) and the
+  // confirm click builds the SAVE_LOGIN_CONFIRMED payload.
+  [
+    'form submit capture (save prompt)',
+    '// Path 1 - the form submit event',
+    '// Path 2 - a click on a plausible',
+    'handlePossibleSubmit(',
+  ],
+  [
+    'submit-button click capture (save prompt)',
+    '// Path 2 - a click on a plausible',
+    '// Path 3 - Enter pressed in a password box',
+    'handlePossibleSubmit(',
+  ],
+  [
+    'password Enter capture (save prompt)',
+    '// Path 3 - Enter pressed in a password box',
+    '// Message Handling',
+    'handlePossibleSubmit(',
+  ],
+  [
+    'save/update confirm click (SAVE_LOGIN_CONFIRMED)',
+    'The only path where the captured plaintext',
+    'const dismissHandler = () => {',
+    'buildSavePayload(',
+  ],
 ];
 
 describe('content.js isTrusted source guard', () => {
-  it('carries exactly the four credential-triggering guards', () => {
-    // Exact count: a fifth secret-touching handler must add its guard AND
+  it('carries exactly the eight credential-triggering guards', () => {
+    // Exact count: a new secret-touching handler must add its guard AND
     // register it here — silent additions fail this assertion.
-    expect(content.split(GUARD).length - 1).toBe(4);
+    expect(content.split(GUARD).length - 1).toBe(8);
   });
 
   for (const [label, startAnchor, endAnchor, secretCall] of GUARDED_SITES) {

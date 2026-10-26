@@ -41,6 +41,9 @@ fn native_messaging_commands() -> HashSet<&'static str> {
         "list_all_entries",
         "get_entry_meta",
         "get_entry_secret",
+        // v1.6.0 (D7): boolean-only password check for the save/update
+        // prompt — routed identically on both adapters.
+        "verify_entry_password",
         "generate_password",
         "update_entry",
         "remove_entry",
@@ -76,6 +79,9 @@ fn tauri_ipc_commands() -> HashSet<&'static str> {
         "create_entry",
         "get_entry_meta",
         "get_entry_secret",
+        // v1.6.0 (D7): boolean-only password check for the save/update
+        // prompt — routed identically on both adapters.
+        "verify_entry_password",
         "list_all_entries",
         "update_entry",
         "remove_entry",

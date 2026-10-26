@@ -139,7 +139,7 @@ export function DashboardScreen() {
 									)}
 								</div>
 								<button
-									className="btn btn-secondary btn-sm dashboard-rerun"
+									className="btn btn-secondary btn-sm btn-inline dashboard-rerun"
 									onClick={() => void loadReport()}
 									disabled={pending}
 								>

@@ -508,6 +508,129 @@ async function getEntriesForUrl(url) {
 	return entries.filter((entry) => entryMatchesSenderUrl(entry, url));
 }
 
+// ============================================================================
+// Save/Update Prompt (v1.6.0 WP4)
+// ============================================================================
+
+// Old desktop without verify_entry_password: the dispatcher answers
+// "Unknown command" — the save-prompt feature silently disables for this
+// service-worker session (no error toast, no retry storm). New-extension +
+// old-desktop stays a working combination: auto-fill is unaffected.
+let verifyUnsupported = false;
+
+function isUnknownCommandError(error) {
+	return (
+		typeof error?.message === "string" &&
+		error.message.trim().toLowerCase() === "unknown command"
+	);
+}
+
+// Desktop-side verdict only: the stored password never leaves the vault and
+// this worker never sees it — verify answers a single boolean. (The entry id
+// rides in `id_param`, the protocol's established channel — `id` on the wire
+// is the u32 request-correlation field.)
+async function verifyEntryPassword(id, passwordSha256) {
+	const result = await sendToApp("verify_entry_password", {
+		id_param: id,
+		password_sha256: passwordSha256,
+	});
+	return Boolean(result && result.matches);
+}
+
+// Judge the save/update decision for one submitted digest. Candidates arrive
+// in the content script's username-match order; the FIRST candidate whose
+// stored password does NOT match decides "update" (its title names the
+// prompt). No plaintext crosses this boundary — digest + ids/titles only.
+async function checkSaveCredentials(message) {
+	if (verifyUnsupported) return { action: "none" };
+	const candidates = Array.isArray(message.candidates)
+		? message.candidates
+		: [];
+	if (candidates.length === 0) return { action: "save" };
+	if (typeof message.password_sha256 !== "string") {
+		throw new Error("CHECK_SAVE_CREDENTIALS requires password_sha256");
+	}
+	try {
+		// Serial on purpose: short-circuit on the first non-match keeps the
+		// common "one candidate" and "all match" cases at ≤ candidate-count
+		// verify round-trips.
+		for (const candidate of candidates) {
+			if (!candidate || typeof candidate.id !== "string") continue;
+			const matches = await verifyEntryPassword(
+				candidate.id,
+				message.password_sha256,
+			);
+			if (!matches) {
+				return {
+					action: "update",
+					entry_id: candidate.id,
+					entry_title:
+						typeof candidate.title === "string"
+							? candidate.title
+							: "the existing entry",
+				};
+			}
+		}
+		return { action: "none" };
+	} catch (error) {
+		if (isUnknownCommandError(error)) {
+			verifyUnsupported = true;
+			return { action: "none" };
+		}
+		throw error;
+	}
+}
+
+// Whole-replace update from the page prompt. The desktop replaces
+// title/url/username/tags/group_id/url_match_mode WHOLESALE, so each is
+// echoed from the candidate summary captured at submit time; only the
+// password is new. notes/custom_fields are omitted (tri-state = unchanged)
+// and TOTP is desktop-only for the extension (the dispatcher pins None).
+async function updateEntryFromPrompt(message) {
+	// Fail closed on a malformed payload (v1.6.0 review follow-up): this
+	// command whole-replaces the entry metadata, so an absent metadata
+	// object (undefined title/username on the wire) would blank the stored
+	// fields, and an absent entry_id has no update address at all. The
+	// error propagates through the listener's {error} catch to the in-page
+	// bar (SF-P1 pattern). The echoed-field fallbacks below only run once
+	// the shape is proven.
+	if (
+		!message.entry ||
+		typeof message.entry !== "object" ||
+		Array.isArray(message.entry)
+	) {
+		throw new Error("SAVE_LOGIN_CONFIRMED update is missing entry metadata");
+	}
+	if (typeof message.entry_id !== "string" || !message.entry_id) {
+		throw new Error("SAVE_LOGIN_CONFIRMED update is missing entry_id");
+	}
+	const meta = message.entry;
+	const matchMode = meta.url_match_mode;
+	return sendToApp("update_entry", {
+		id_param: message.entry_id,
+		title: meta.title,
+		username: meta.username,
+		url: typeof meta.url === "string" ? meta.url : null,
+		tags: Array.isArray(meta.tags) ? meta.tags : [],
+		group_id: typeof meta.group_id === "string" ? meta.group_id : null,
+		url_match_mode:
+			matchMode === "exact" || matchMode === "domain" ? matchMode : undefined,
+		password: message.password,
+	});
+}
+
+// Create-mode title: the submitted URL's hostname (the content message
+// intentionally carries no title — the page the credential was typed on is
+// the honest label).
+function titleForUrl(rawUrl) {
+	if (typeof rawUrl !== "string" || !rawUrl) return "Saved login";
+	try {
+		return new URL(rawUrl).hostname || rawUrl;
+	} catch {
+		return rawUrl;
+	}
+}
+
 async function generatePassword(options = {}) {
 	// v1.4.0: the same command now dispatches on `mode` (password default —
 	// old callers that never send a mode keep the historical behavior).
@@ -725,6 +848,33 @@ async function handleMessage(message, sender) {
 			return authorization.senderKind === "content"
 				? getEntryForSender(message.id, authorization.senderUrl)
 				: getEntry(message.id);
+
+		case "CHECK_SAVE_CREDENTIALS":
+			// v1.6.0 save prompt: digest-only desktop verification. The
+			// whitelist (sender-auth.js) gates content senders; this case
+			// never sees plaintext.
+			return checkSaveCredentials(message);
+
+		case "SAVE_LOGIN_CONFIRMED": {
+			// v1.6.0 save prompt: the user clicked Save/Update on the in-page
+			// bar. mode=create stores a fresh entry; mode=update whole-replaces
+			// with the entry's own metadata echoed. Errors surface through the
+			// listener's {error: message} catch (SF-P1 pattern).
+			if (message.mode === "update") {
+				await updateEntryFromPrompt(message);
+				return { ok: true };
+			}
+			await createEntry({
+				title: titleForUrl(message.url),
+				url: message.url,
+				username: message.username,
+				password: message.password,
+				notes: null,
+				tags: [],
+				group_id: null,
+			});
+			return { ok: true };
+		}
 
 		case "GENERATE_PASSWORD":
 			return generatePassword(message.options);

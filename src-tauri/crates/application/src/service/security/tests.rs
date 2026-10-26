@@ -397,6 +397,7 @@ fn concurrent_writes_during_change_password_do_not_corrupt_vault() {
                     tags: vec![],
                     group_id: None,
                     totp_secret: None,
+                    custom_fields: None,
                 };
                 match crate::update_entry(&state, id.clone(), request) {
                     Ok(_) => accepted += 1,

@@ -287,6 +287,7 @@ fn open_then_commit_imports_entries_and_dedups_groups() {
             notes: None,
             tags: vec![],
             group_id: Some(web.id.clone()),
+            custom_fields: Vec::new(),
         },
     )
     .unwrap();
@@ -384,6 +385,7 @@ fn duplicate_candidates_count_staged_rows_matching_the_vault() {
             notes: None,
             tags: vec![],
             group_id: None,
+            custom_fields: Vec::new(),
         },
     )
     .unwrap();

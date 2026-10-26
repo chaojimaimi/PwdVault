@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { sameTags } from "../EntryScreen";
+import { sameTags } from "../../components/TagsEditor";
 
 describe("sameTags", () => {
 	test("same set in a different order is equal (not dirty)", () => {

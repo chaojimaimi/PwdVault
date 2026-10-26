@@ -251,6 +251,12 @@ pub fn complete_unlock_if(
     // Step 9: side effects — only on the publish-success branch.
     reset_rate_limit(state);
     *state.auto_lock_secs.lock().expect("timeout lock poisoned") = settings.auto_lock_secs;
+    // v1.6.0 (D6): the re-sealed settings row's auto-sync interval refreshes
+    // the cache alongside auto_lock_secs (same load contract).
+    *state
+        .auto_sync_interval_min
+        .lock()
+        .expect("auto sync interval lock poisoned") = settings.auto_sync_interval_min;
     // local touch: in-person desktop path (v1.2.0 SEC-L5 remote-grace policy)
     // — a successful unlock proves the user is present, so the full window
     // applies instead of the short remote grace.

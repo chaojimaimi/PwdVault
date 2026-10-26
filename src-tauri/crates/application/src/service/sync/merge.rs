@@ -17,6 +17,43 @@
 //!
 //! Tombstones are kept forever in v1 (no GC — D3; a future 90-day GC is
 //! noted as an option in the roadmap).
+//!
+//! # Conflict counting (v1.6.0 D5)
+//!
+//! One merged pair counts as a conflict — LWW resolved a genuine ambiguity
+//! by discarding one side's data — if and only if:
+//!
+//! 1. **Delete-then-modify**: one side is a tombstone, the other is live,
+//!    AND the live side's `updated_at` is strictly greater than the
+//!    tombstone's `deleted_at` (the edit happened after the deletion — LWW
+//!    discarded a real edit or revived a real deletion).
+//! 2. **Timestamp collision with diverged content** (both sides live):
+//!    equal `updated_at` and different fingerprints (the tiebreak was forced
+//!    to arbitrate a genuine ambiguity).
+//!
+//! Deliberately NOT counted: two live sides with different timestamps
+//! (sequential edits are LWW design behavior); identical fingerprints
+//! (idempotent re-adds); both sides deleted (convergence); and **stale-copy
+//! deletion propagation** — a live side whose `updated_at` is ≤ the
+//! tombstone's `deleted_at`. That last case is the reason the comparison is
+//! STRICT: `remove_entry` stamps the tombstone with
+//! `updated_at = deleted_at`, so a peer's outdated live copy (last written
+//! no later than the deletion moment) travels through the `>=` branch as
+//! ordinary deletion propagation; a non-strict comparison would report
+//! hundreds of phantom conflicts per bulk trash cleanup. The `==` boundary
+//! (same-second tombstone-vs-live) is propagation by this definition — the
+//! two cases are indistinguishable without a three-way baseline, which is a
+//! declared non-goal.
+//!
+//! **Known blind spot** (recorded honestly): "modify-before-delete" — an
+//! edit that predates a later deletion and is discarded when the deletion
+//! propagates — is indistinguishable from stale-copy propagation in a 2-way
+//! merge without a snapshot baseline, and is NOT counted either.
+//!
+//! The D5 criteria matrix and the symmetry/idempotence property tests live
+//! in [`super::tests_merge`] (moved there in v1.6.0 when this file hit the
+//! 800-line ceiling); the engine-level propagation pins live in
+//! [`super::tests_conflicts`].
 
 use std::collections::BTreeMap;
 
@@ -43,19 +80,27 @@ pub struct MergedSnapshot {
     pub entries: Vec<SyncEntry>,
     pub groups: Vec<SyncGroup>,
     pub changed: bool,
+    /// v1.6.0 (D5): pairs where LWW resolved a genuine ambiguity (see the
+    /// module-level "Conflict counting" section for the exact criteria).
+    /// `u32` zeroizes like the rest of the struct; the engine persists the
+    /// per-cycle count into `SyncState.last_conflict_count`.
+    pub conflicts: u32,
 }
 
 /// Merge entry sets by UUID union (D3). Output is id-sorted so both merge
-/// directions produce identical orderings.
-pub fn merge_entries(local: &[SyncEntry], remote: &[SyncEntry]) -> Vec<SyncEntry> {
+/// directions produce identical orderings. Returns the merged rows plus the
+/// D5 conflict count (entries arbitrated by a genuine LWW ambiguity).
+pub fn merge_entries(local: &[SyncEntry], remote: &[SyncEntry]) -> (Vec<SyncEntry>, u32) {
     let mut by_id: BTreeMap<&str, SyncEntry> = BTreeMap::new();
     for entry in local {
         by_id.insert(entry.id.as_str(), entry.clone());
     }
+    let mut conflicts = 0u32;
     for entry in remote {
         match by_id.get_mut(entry.id.as_str()) {
             Some(local_entry) => {
-                let merged = merge_entry_pair(local_entry, entry);
+                let (merged, conflict) = merge_entry_pair(local_entry, entry);
+                conflicts += u32::from(conflict);
                 *local_entry = merged;
             }
             None => {
@@ -63,19 +108,22 @@ pub fn merge_entries(local: &[SyncEntry], remote: &[SyncEntry]) -> Vec<SyncEntry
             }
         }
     }
-    by_id.into_values().collect()
+    (by_id.into_values().collect(), conflicts)
 }
 
 /// Merge group sets by UUID union (D3, same arbitration shape as entries).
-pub fn merge_groups(local: &[SyncGroup], remote: &[SyncGroup]) -> Vec<SyncGroup> {
+/// Returns the merged rows plus the D5 conflict count.
+pub fn merge_groups(local: &[SyncGroup], remote: &[SyncGroup]) -> (Vec<SyncGroup>, u32) {
     let mut by_id: BTreeMap<&str, SyncGroup> = BTreeMap::new();
     for group in local {
         by_id.insert(group.id.as_str(), group.clone());
     }
+    let mut conflicts = 0u32;
     for group in remote {
         match by_id.get_mut(group.id.as_str()) {
             Some(local_group) => {
-                let merged = merge_group_pair(local_group, group);
+                let (merged, conflict) = merge_group_pair(local_group, group);
+                conflicts += u32::from(conflict);
                 *local_group = merged;
             }
             None => {
@@ -83,20 +131,21 @@ pub fn merge_groups(local: &[SyncGroup], remote: &[SyncGroup]) -> Vec<SyncGroup>
             }
         }
     }
-    by_id.into_values().collect()
+    (by_id.into_values().collect(), conflicts)
 }
 
 /// Merge two full snapshots. See [`MergedSnapshot`] for the `changed`
-/// (anti-echo) semantics.
+/// (anti-echo) and `conflicts` (D5) semantics.
 pub fn merge_snapshots(local: &SyncSnapshot, remote: &SyncSnapshot) -> MergedSnapshot {
-    let entries = merge_entries(&local.entries, &remote.entries);
-    let groups = merge_groups(&local.groups, &remote.groups);
+    let (entries, entry_conflicts) = merge_entries(&local.entries, &remote.entries);
+    let (groups, group_conflicts) = merge_groups(&local.groups, &remote.groups);
     let changed = !(entries_equivalent(&entries, &remote.entries)
         && groups_equivalent(&groups, &remote.groups));
     MergedSnapshot {
         entries,
         groups,
         changed,
+        conflicts: entry_conflicts.saturating_add(group_conflicts),
     }
 }
 
@@ -108,10 +157,49 @@ pub fn snapshots_equivalent(a: &SyncSnapshot, b: &SyncSnapshot) -> bool {
     entries_equivalent(&a.entries, &b.entries) && groups_equivalent(&a.groups, &b.groups)
 }
 
-/// D3 arbitration for one entry present on both sides.
-fn merge_entry_pair(local: &SyncEntry, remote: &SyncEntry) -> SyncEntry {
+/// D5 conflict verdict for one pair present on both sides. A pure function of
+/// the UNORDERED pair — it never inspects which side won the LWW — so the
+/// count is identical under argument swap (pinned by the property tests).
+///
+/// `same_content` is the precomputed fingerprint equality (fingerprints are
+/// typed per row kind, so the callers pass the comparison instead of this
+/// core reaching into both fingerprint functions).
+fn pair_is_conflict(
+    a_updated_at: i64,
+    a_deleted_at: Option<i64>,
+    b_updated_at: i64,
+    b_deleted_at: Option<i64>,
+    same_content: bool,
+) -> bool {
+    match (a_deleted_at, b_deleted_at) {
+        // Both tombstones: two copies of the same deletion converge — never
+        // a conflict.
+        (Some(_), Some(_)) => false,
+        // Both live: only the forced tiebreak (equal timestamps, divergent
+        // content) counts. Sequential edits and identical re-adds are LWW
+        // design behavior, not data loss.
+        (None, None) => a_updated_at == b_updated_at && !same_content,
+        // One tombstone, one live: conflict iff the live side was modified
+        // STRICTLY after the deletion moment. `<=` is stale-copy deletion
+        // propagation (see the module docs — remove_entry stamps
+        // updated_at = deleted_at), which must stay silent.
+        (Some(tombstone_deleted_at), None) => b_updated_at > tombstone_deleted_at,
+        (None, Some(tombstone_deleted_at)) => a_updated_at > tombstone_deleted_at,
+    }
+}
+
+/// D3 arbitration for one entry present on both sides. Returns the merged
+/// row plus the D5 conflict flag.
+fn merge_entry_pair(local: &SyncEntry, remote: &SyncEntry) -> (SyncEntry, bool) {
+    let conflict = pair_is_conflict(
+        local.updated_at,
+        local.deleted_at,
+        remote.updated_at,
+        remote.deleted_at,
+        entry_fingerprint(local) == entry_fingerprint(remote),
+    );
     let (winner, loser) = lww(local, remote, |entry| entry.updated_at, entry_fingerprint);
-    match winner.deleted_at {
+    let merged = match winner.deleted_at {
         // The winner's deletion is at least as recent as the loser's last
         // modification → the deletion stands.
         Some(deleted_at) if deleted_at >= loser.updated_at => winner.clone(),
@@ -124,14 +212,23 @@ fn merge_entry_pair(local: &SyncEntry, remote: &SyncEntry) -> SyncEntry {
         }
         // Live modification wins as-is.
         None => winner.clone(),
-    }
+    };
+    (merged, conflict)
 }
 
 /// D3 arbitration for one group present on both sides (same rule shape as
-/// [`merge_entry_pair`]; groups carry tombstones but no secrets).
-fn merge_group_pair(local: &SyncGroup, remote: &SyncGroup) -> SyncGroup {
+/// [`merge_entry_pair`]; groups carry tombstones but no secrets). Returns
+/// the merged row plus the D5 conflict flag.
+fn merge_group_pair(local: &SyncGroup, remote: &SyncGroup) -> (SyncGroup, bool) {
+    let conflict = pair_is_conflict(
+        local.updated_at,
+        local.deleted_at,
+        remote.updated_at,
+        remote.deleted_at,
+        group_fingerprint(local) == group_fingerprint(remote),
+    );
     let (winner, loser) = lww(local, remote, |group| group.updated_at, group_fingerprint);
-    match winner.deleted_at {
+    let merged = match winner.deleted_at {
         Some(deleted_at) if deleted_at >= loser.updated_at => winner.clone(),
         Some(_) => {
             let mut revived = loser.clone();
@@ -139,7 +236,8 @@ fn merge_group_pair(local: &SyncGroup, remote: &SyncGroup) -> SyncGroup {
             revived
         }
         None => winner.clone(),
-    }
+    };
+    (merged, conflict)
 }
 
 /// Last-writer-wins with the symmetric fingerprint tiebreak; returns
@@ -190,416 +288,4 @@ fn groups_equivalent(a: &[SyncGroup], b: &[SyncGroup]) -> bool {
         a.iter().map(|group| (group.id.as_str(), group)),
         b.iter().map(|group| (group.id.as_str(), group)),
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rand::rngs::StdRng;
-    use rand::{Rng, SeedableRng};
-
-    fn sync_entry(id: &str) -> SyncEntry {
-        SyncEntry {
-            url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
-            id: id.to_string(),
-            title: format!("Title {id}"),
-            url: None,
-            username: format!("user-{id}"),
-            password: Some("pw".to_string()),
-            notes: None,
-            totp_secret: None,
-            tags: vec![],
-            group_id: None,
-            created_at: 1_700_000_000,
-            updated_at: 1_700_000_000,
-            deleted_at: None,
-        }
-    }
-
-    fn sync_group(id: &str) -> SyncGroup {
-        SyncGroup {
-            id: id.to_string(),
-            name: format!("Group {id}"),
-            created_at: 1_700_000_000,
-            updated_at: 1_700_000_000,
-            deleted_at: None,
-        }
-    }
-
-    fn sorted(mut entries: Vec<SyncEntry>) -> Vec<SyncEntry> {
-        entries.sort_by(|a, b| a.id.cmp(&b.id));
-        entries
-    }
-
-    // ------------------------------------------------------------------
-    // Designated conflict cases (P3.6 item 2)
-    // ------------------------------------------------------------------
-
-    /// Both devices concurrently modify DIFFERENT entries: both changes
-    /// survive the union.
-    #[test]
-    fn concurrent_edits_to_different_entries_both_survive() {
-        let mut a = sync_entry("e1");
-        a.updated_at = 100;
-        a.title = "A-edit".to_string();
-        let mut b = sync_entry("e2");
-        b.updated_at = 200;
-        b.title = "B-edit".to_string();
-
-        let merged = merge_entries(&[a.clone()], &[b.clone()]);
-        assert_eq!(merged, merge_entries(&[b], &[a]));
-        assert_eq!(merged.len(), 2);
-        assert_eq!(merged[0].title, "A-edit");
-        assert_eq!(merged[1].title, "B-edit");
-    }
-
-    /// Same entry modified at two points in time (LWW): the later edit wins,
-    /// in both argument orders.
-    #[test]
-    fn sequential_edits_to_same_entry_take_the_newer_one() {
-        let mut older = sync_entry("e1");
-        older.updated_at = 100;
-        older.username = "old".to_string();
-        let mut newer = sync_entry("e1");
-        newer.updated_at = 200;
-        newer.username = "new".to_string();
-
-        let merged = merge_entries(&[older.clone()], &[newer.clone()]);
-        assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].username, "new");
-        assert_eq!(merged[0].updated_at, 200);
-        assert_eq!(merged, merge_entries(&[newer], &[older]));
-    }
-
-    /// One side deletes, the other modifies — decided in BOTH directions:
-    /// a deletion at least as recent as the modification stands; an older
-    /// deletion loses and the modification revives the entry.
-    #[test]
-    fn delete_and_modify_arbitrate_symmetrically_both_ways() {
-        // Tombstone (300) vs modification (200): deletion wins.
-        let mut edited = sync_entry("e1");
-        edited.updated_at = 200;
-        edited.username = "edited".to_string();
-        let mut deleted = sync_entry("e1");
-        deleted.updated_at = 300;
-        deleted.deleted_at = Some(300);
-
-        let delete_first = merge_entries(&[deleted.clone()], &[edited.clone()]);
-        assert_eq!(delete_first, merge_entries(&[edited], &[deleted]));
-        assert_eq!(delete_first.len(), 1);
-        assert_eq!(delete_first[0].deleted_at, Some(300));
-
-        // Tombstone (300) vs modification (400): modification wins, live.
-        let mut edited = sync_entry("e1");
-        edited.updated_at = 400;
-        edited.username = "edited".to_string();
-        let mut deleted = sync_entry("e1");
-        deleted.updated_at = 300;
-        deleted.deleted_at = Some(300);
-
-        let merged = merge_entries(&[deleted], &[edited]);
-        assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].deleted_at, None);
-        assert_eq!(merged[0].username, "edited");
-    }
-
-    /// Equal `updated_at` resolves via the content fingerprint, and the
-    /// verdict is identical under argument swap (review P1: the tiebreak
-    /// must not depend on parameter position).
-    #[test]
-    fn equal_updated_at_uses_fingerprint_tiebreak_symmetrically() {
-        let mut a = sync_entry("e1");
-        a.title = "aaa".to_string();
-        let mut b = sync_entry("e1");
-        b.title = "bbb".to_string();
-        let fingerprint_a = entry_fingerprint(&a);
-        let fingerprint_b = entry_fingerprint(&b);
-        assert_ne!(fingerprint_a, fingerprint_b);
-
-        let merged = merge_entries(&[a.clone()], &[b.clone()]);
-        assert_eq!(merged, merge_entries(&[b], &[a]));
-        let expected = if fingerprint_a > fingerprint_b {
-            "aaa"
-        } else {
-            "bbb"
-        };
-        assert_eq!(merged[0].title, expected);
-    }
-
-    /// Group removal does not cascade: the tombstoned group travels in the
-    /// merge result while entries keep their (hanging) group_id — the UI
-    /// renders those as ungrouped. Group renames arbitrate by the same LWW.
-    #[test]
-    fn group_tombstone_does_not_cascade_and_lww_applies() {
-        let mut renamed = sync_group("g1");
-        renamed.updated_at = 1_700_000_200;
-        renamed.name = "Renamed".to_string();
-        let mut deleted = sync_group("g1");
-        deleted.updated_at = 1_700_000_300;
-        deleted.deleted_at = Some(1_700_000_300);
-
-        let merged = merge_groups(&[renamed], &[deleted.clone()]);
-        assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].deleted_at, Some(1_700_000_300));
-
-        let mut entry = sync_entry("e1");
-        entry.group_id = Some("g1".to_string());
-        let groups = merge_groups(&[sync_group("g1")], &[deleted]);
-        let entries = merge_entries(&[entry.clone()], &[entry]);
-        assert!(groups.iter().all(|group| group.deleted_at.is_some()));
-        assert_eq!(entries[0].group_id.as_deref(), Some("g1"));
-    }
-
-    /// Anti-echo: `changed` compares the merged content against the REMOTE
-    /// snapshot only. Identical content in a different envelope (rev /
-    /// device_id / generated_at) must NOT trigger an upload.
-    #[test]
-    fn snapshot_merge_changed_flag_suppresses_echo() {
-        let mut local = sample_snapshot();
-        let mut remote = sample_snapshot();
-        remote.rev += 6;
-        remote.device_id = "device-b".to_string();
-        remote.generated_at += 60;
-
-        let merged = merge_snapshots(&local, &remote);
-        assert!(!merged.changed);
-        assert!(snapshots_equivalent(
-            &SyncSnapshot {
-                rev: 0,
-                device_id: String::new(),
-                generated_at: 0,
-                entries: merged.entries.clone(),
-                groups: merged.groups.clone(),
-            },
-            &remote
-        ));
-
-        // A local-only change makes an upload necessary.
-        let mut extra = sync_entry("e-extra");
-        extra.updated_at = 1_700_000_999;
-        local.entries.push(extra);
-        let merged = merge_snapshots(&local, &remote);
-        assert!(merged.changed);
-        assert_eq!(merged.entries.len(), 3);
-    }
-
-    /// The normalized equivalence ignores envelope metadata but detects any
-    /// content difference.
-    #[test]
-    fn snapshots_equivalent_ignores_envelope_and_detects_content_changes() {
-        let mut a = sample_snapshot();
-        let mut b = sample_snapshot();
-        b.rev += 1;
-        b.device_id = "other".to_string();
-        b.generated_at += 5;
-        assert!(snapshots_equivalent(&a, &b));
-
-        a.entries[0].username = "changed".to_string();
-        assert!(!snapshots_equivalent(&a, &b));
-        a.entries[0].username = b.entries[0].username.clone();
-        a.groups.push(sync_group("g-new"));
-        assert!(!snapshots_equivalent(&a, &b));
-    }
-
-    // ------------------------------------------------------------------
-    // Property tests (P3.6 item 2): commutativity / idempotence / lossless
-    // union over 100 pseudo-random scenarios from FIXED seeds — no true
-    // randomness, failures reproduce exactly.
-    // ------------------------------------------------------------------
-
-    fn gen_entry(rng: &mut StdRng, id: &str) -> SyncEntry {
-        let updated_at = 1_700_000_000i64 + rng.gen_range(0..86_400);
-        let tags = (0..rng.gen_range(0..3usize))
-            .map(|i| format!("tag-{}-{i}", rng.gen_range(0..20)))
-            .collect();
-        SyncEntry {
-            url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
-            id: id.to_string(),
-            title: format!("title-{}", rng.gen_range(0..500)),
-            url: rng
-                .gen_bool(0.7)
-                .then(|| format!("https://{}.example", rng.gen_range(0..500))),
-            username: format!("user-{}", rng.gen_range(0..500)),
-            password: rng
-                .gen_bool(0.9)
-                .then(|| format!("pw-{}", rng.gen_range(0..10_000))),
-            notes: rng
-                .gen_bool(0.3)
-                .then(|| format!("notes-{}", rng.gen_range(0..1_000))),
-            totp_secret: rng
-                .gen_bool(0.2)
-                .then(|| format!("JBSW{}", rng.gen_range(0..1_000))),
-            tags,
-            group_id: rng
-                .gen_bool(0.5)
-                .then(|| format!("group-{}", rng.gen_range(0..5))),
-            created_at: updated_at - rng.gen_range(0..10_000),
-            updated_at,
-            deleted_at: None,
-        }
-    }
-
-    /// Randomly diverge one device's copy: each entry may be edited (bumping
-    /// updated_at), tombstoned (deleted_at == updated_at — the remove_entry
-    /// invariant), or dropped (the device never saw it).
-    fn diverge_entries(rng: &mut StdRng, entries: Vec<SyncEntry>) -> Vec<SyncEntry> {
-        let mut diverged = Vec::new();
-        for mut entry in entries {
-            if !rng.gen_bool(0.9) {
-                continue;
-            }
-            match rng.gen_range(0..4u8) {
-                0 => {
-                    entry.updated_at += rng.gen_range(1..3_600);
-                    entry.title = format!("edited-{}", rng.gen_range(0..500));
-                }
-                1 => {
-                    let deleted_at = entry.updated_at + rng.gen_range(1..3_600);
-                    entry.updated_at = deleted_at;
-                    entry.deleted_at = Some(deleted_at);
-                }
-                _ => {}
-            }
-            diverged.push(entry);
-        }
-        diverged
-    }
-
-    #[test]
-    fn entry_merge_properties_hold_over_100_seeded_scenarios() {
-        let mut rng = StdRng::seed_from_u64(0x50CF_5EED_0001);
-        for scenario in 0..100 {
-            let universe: Vec<SyncEntry> = (0..rng.gen_range(4..20usize))
-                .map(|i| gen_entry(&mut rng, &format!("e-{scenario}-{i}")))
-                .collect();
-            let local = diverge_entries(&mut rng, universe.clone());
-            let remote = diverge_entries(&mut rng, universe);
-
-            // Commutativity — including the fingerprint tiebreak path.
-            let ab = merge_entries(&local, &remote);
-            let ba = merge_entries(&remote, &local);
-            assert_eq!(ab, ba, "scenario {scenario}: merge(a,b) != merge(b,a)");
-
-            // Idempotence, and self-merge identity (inputs are sets).
-            assert_eq!(
-                merge_entries(&ab, &ab),
-                ab,
-                "scenario {scenario}: not idempotent"
-            );
-            assert_eq!(
-                merge_entries(&local, &local),
-                sorted(local.clone()),
-                "scenario {scenario}: merge(x,x) != x"
-            );
-
-            // Union preservation: every live input entry survives — live with
-            // a monotone updated_at, or as the tombstone that outlived it —
-            // and no phantom ids appear.
-            for entry in local
-                .iter()
-                .chain(&remote)
-                .filter(|e| e.deleted_at.is_none())
-            {
-                let merged = ab
-                    .iter()
-                    .find(|m| m.id == entry.id)
-                    .unwrap_or_else(|| panic!("scenario {scenario}: live entry {} lost", entry.id));
-                if merged.deleted_at.is_none() {
-                    assert!(
-                        merged.updated_at >= entry.updated_at,
-                        "scenario {scenario}: {} regressed updated_at",
-                        entry.id
-                    );
-                }
-            }
-            for merged in &ab {
-                assert!(
-                    local.iter().chain(&remote).any(|e| e.id == merged.id),
-                    "scenario {scenario}: phantom entry {}",
-                    merged.id
-                );
-            }
-        }
-    }
-
-    fn gen_group(rng: &mut StdRng, id: &str) -> SyncGroup {
-        let updated_at = 1_700_000_000i64 + rng.gen_range(0..86_400);
-        SyncGroup {
-            id: id.to_string(),
-            name: format!("group-name-{}", rng.gen_range(0..200)),
-            created_at: updated_at - rng.gen_range(0..10_000),
-            updated_at,
-            deleted_at: None,
-        }
-    }
-
-    fn diverge_groups(rng: &mut StdRng, groups: Vec<SyncGroup>) -> Vec<SyncGroup> {
-        let mut diverged = Vec::new();
-        for mut group in groups {
-            if !rng.gen_bool(0.9) {
-                continue;
-            }
-            match rng.gen_range(0..4u8) {
-                0 => {
-                    group.updated_at += rng.gen_range(1..3_600);
-                    group.name = format!("renamed-{}", rng.gen_range(0..200));
-                }
-                1 => {
-                    let deleted_at = group.updated_at + rng.gen_range(1..3_600);
-                    group.updated_at = deleted_at;
-                    group.deleted_at = Some(deleted_at);
-                }
-                _ => {}
-            }
-            diverged.push(group);
-        }
-        diverged
-    }
-
-    #[test]
-    fn group_merge_properties_hold_over_100_seeded_scenarios() {
-        let mut rng = StdRng::seed_from_u64(0x50CF_5EED_0002);
-        for scenario in 0..100 {
-            let universe: Vec<SyncGroup> = (0..rng.gen_range(2..8usize))
-                .map(|i| gen_group(&mut rng, &format!("g-{scenario}-{i}")))
-                .collect();
-            let local = diverge_groups(&mut rng, universe.clone());
-            let remote = diverge_groups(&mut rng, universe);
-
-            let ab = merge_groups(&local, &remote);
-            assert_eq!(
-                ab,
-                merge_groups(&remote, &local),
-                "scenario {scenario}: merge(a,b) != merge(b,a)"
-            );
-            assert_eq!(
-                merge_groups(&ab, &ab),
-                ab,
-                "scenario {scenario}: not idempotent"
-            );
-            for group in local
-                .iter()
-                .chain(&remote)
-                .filter(|g| g.deleted_at.is_none())
-            {
-                assert!(
-                    ab.iter().any(|m| m.id == group.id),
-                    "scenario {scenario}: live group {} lost",
-                    group.id
-                );
-            }
-        }
-    }
-
-    fn sample_snapshot() -> SyncSnapshot {
-        let mut e2 = sync_entry("e2");
-        e2.updated_at = 1_700_000_200;
-        SyncSnapshot {
-            rev: 1,
-            device_id: "device-a".to_string(),
-            generated_at: 1_700_000_000,
-            entries: vec![sync_entry("e1"), e2],
-            groups: vec![sync_group("g1")],
-        }
-    }
 }
