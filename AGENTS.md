@@ -4,8 +4,8 @@ A secure, local-first password manager built with Tauri + React.
 
 **Last Updated**: 2026-10-26
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.4.1
-**Current Version**: `v1.4.1` — 2026-10-26 UI patch (recycle bin entry relocated from an icon-only search-bar button to a labeled Trash tab pinned in the group-tabs row, trash renders in place, navigation-exclusive with group tabs) on top of v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.5.0
+**Current Version**: `v1.5.0` — 2026-10-26 M-tier product batch (security dashboard with in-process aggregation, 4-vendor CSV importers, trash auto-purge, per-entry URL match override on a three-generation codec + sync container v2, pair toast caller digest) on top of v1.4.1 trash-tab UI patch + v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -190,18 +190,18 @@ PwdVault/
 
 - Initial release: Tauri v2 + React 5 screens, AES-256-GCM + Argon2id, redb, HTTP API, Chrome extension, CI/CD
 
-**Test Suite Summary** (counts from actual test output, 2026-10-05):
+**Test Suite Summary** (counts from actual test output, 2026-10-26):
 
 | Module                    | Tests                                                                                                                          | Command                                   |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| Rust tauri-app lib        | 33                                                                                                                             | `cd src-tauri && cargo test`              |
+| Rust tauri-app lib        | 41                                                                                                                             | `cd src-tauri && cargo test`              |
 | Rust capability contract  | 1                                                                                                                              | (same run)                                |
 | Rust golden contract      | 3                                                                                                                              | (same run)                                |
-| Rust application crate    | 166                                                                                                                            | `cd src-tauri && cargo test --workspace`  |
-| Rust infrastructure crate | 121 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                 | (same run)                                |
-| Rust domain crate         | 4                                                                                                                              | (same run)                                |
+| Rust application crate    | 211                                                                                                                            | `cd src-tauri && cargo test --workspace`  |
+| Rust infrastructure crate | 128 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                 | (same run)                                |
+| Rust domain crate         | 7                                                                                                                              | (same run)                                |
 | Rust native-host          | 23                                                                                                                             | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 391 (61 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
+| Frontend (total)          | 464 (68 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -315,6 +315,52 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-10-26 (v1.5.0 — M-tier batch: dashboard, CSV importers, trash auto-purge, URL match override, pair caller digest)
+
+Pipeline: 3-way Explore recon → plan R1 (plan-reviewer REVISE, 1×P0: adding
+a 14th PasswordEntry field on the two-generation codec would have made
+every vault written since v1.1.5 unreadable — and recapturing the golden
+fixtures would have laundered the regression) → R2 (REVISE again: the sync
+container snapshot is serde_json, not bincode — plan and R1 reviewer both
+had the mechanism wrong; the real hazards are silent field-stripping on
+old devices plus cross-version fingerprint divergence) → R3 **PASS** →
+three ds-worker waves (WP1+WP2 / WP3+WP5+WP6 / WP4, each verifying the
+inherited tree first) → 3-way review (rust APPROVE with 2×P2 doc/
+test-strength fixes; extension APPROVE with zero findings; react REQUEST
+CHANGES on a real P2 — a failed CSV commit left a dead preview that can
+never be committed, retrying would mislead) → main-agent fixes (P2s +
+cheap P3s: sweep comment honesty, single-txn fuse comment,
+normalizeMatchMode allowlist, preview 100-row render cap, dashboard
+silent-catch toast, fallback busy-guard restructure) → both reviewers
+ACCEPT → clean-worktree gates → release. commit-gate caught two staged
+files over the 800 cap at commit time (entries.rs 1018,
+native_messaging/tests.rs 911); both split test-module-only
+(entries/tests.rs verbatim move; native_messaging generator cluster →
+tests_generator.rs with pub(super) helpers), zero behavior change.
+
+Shipped: `security_report` (in-process aggregation — Zeroizing plaintext,
+SHA-256 buckets, ids/scores only; deliberately bypasses get_entry_secret's
+last_used_at bump; strength ported to domain::strength, 18 shared vectors
+pinned both sides); CSV importers (Bitwarden/1Password/Chrome/KeePassXC
+header-signature detection, BOM/CRLF/RFC4180 tolerant; staged in AppState
+with Zeroize + lock-discard; preview without passwords; single-txn commit
+with the O(n²) per-row trap documented as a fuse on the only store.write);
+`trash_auto_purge_days` (default OFF, ≤500 per unlock after keys publish,
+Tauri+NM adapters emit trash-auto-purged); `UrlMatchMode` (three-gen codec
+chain + LegacyEntryV3, permanent NEVER-RECAPTURE fixtures for the 13-field
+blob and the v1 container; container format v2 with v1 read via serde
+default — AAD unchanged; all four AUTOFILL constructors carry match_mode,
+content falls back to auto, verbatim blocks byte-identical); pair toast
+caller digest (advisory only — loopback-forgeable header documented);
+golden_contract NM list de-drifted (it had been self-comparing for three
+releases). Incidental: the formatter hook again reformatted touched test
+files post-commit; quote-sensitive assertions survived via
+minimal-escaping (v1.4.1 lesson held).
+
+Tests: 464 frontend CI-true (68 files; +73/+7) / Rust 391 (+1 ignored) /
+native-host 23. Plan: fix_impl_plan_v1.5.0.md (R3). Manual QA T39-T43
+appended.
 
 ### 2026-10-26 (v1.4.1 — trash entry relocated to group-tabs Trash tab + main-red guard fix)
 
