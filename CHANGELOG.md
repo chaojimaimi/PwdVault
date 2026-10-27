@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.6.1] - 2026-10-27
+
+### Fixed
+
+- **Save rejections were invisible**: when the desktop rejected a save
+  (duplicate or empty custom-field label), the error was rendered behind
+  the open confirmation dialog's overlay — the save silently did
+  nothing. The dialog now shows the rejection in place; after Cancel
+  the message falls back to the form banner.
+- **Validation errors showed their raw transport form**
+  ("DUPLICATE_CUSTOM_FIELD_LABEL: Duplicate custom field label"). Error
+  messages now strip the all-caps code prefix and show the plain text.
+- **Custom-field values looked "not saved"**: values are secret-channel
+  data and edit mode left the value boxes empty until a password/notes
+  fetch happened. Now the first interaction with the Custom Fields
+  section (or a row's reveal eye) loads the stored values through the
+  same on-demand channel — one shared request, no extra round trips,
+  and rows typed while the load is in flight are never lost from the
+  diff or the saved entry.
+- **Input hygiene**: custom-field inputs no longer trigger the
+  browser's spell-check underline, and the Custom Fields section got
+  its own spacing block to match the rest of the form.
+
 ## [1.6.0] - 2026-10-26
 
 ### Added
