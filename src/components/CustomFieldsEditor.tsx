@@ -37,6 +37,17 @@ interface CustomFieldsEditorProps {
 	/** Current row list; the parent owns it (it feeds the save patch). */
 	value: CustomFieldRow[];
 	onChange: (fields: CustomFieldRow[]) => void;
+	/**
+	 * v1.6.1 F4: invoked before a row's reveal-eye unmasks, so the parent can
+	 * lazy-load stored values (loadValues("explicit")). FAILURE SEMANTICS
+	 * (accepted): if that load fails, the row is left unmasked-and-empty and
+	 * the error surfaces in the parent's error area (no overlay in the way);
+	 * a value the user then types is committed by the save guard's
+	 * whole-replacement semantics (fillMissingValues never overwrites typed
+	 * rows). No loading placeholder — the fetch is LAN-local latency and a
+	 * placeholder would add a state machine for no real wait.
+	 */
+	onRevealRequest?: () => void;
 }
 
 /** Labels are compared/committed trimmed; values are compared verbatim. */
@@ -237,6 +248,7 @@ export function appendCustomFieldChanges(
 export function CustomFieldsEditor({
 	value,
 	onChange,
+	onRevealRequest,
 }: CustomFieldsEditorProps) {
 	const [revealed, setRevealed] = useState<Set<number>>(new Set());
 
@@ -290,6 +302,9 @@ export function CustomFieldsEditor({
 							onKeyDown={swallowEnter}
 							placeholder="Name"
 							aria-label={`Field ${index + 1} label`}
+							// v1.6.1 F5: labels are identifiers, not prose — no
+							// spellcheck squiggle. Values carry tokens/keys.
+							spellCheck={false}
 						/>
 						<input
 							type={isRevealed ? "text" : "password"}
@@ -302,6 +317,8 @@ export function CustomFieldsEditor({
 							placeholder={isRevealed ? "Value" : "Value (hidden)"}
 							autoComplete="off"
 							aria-label={`Field ${index + 1} value`}
+							// v1.6.1 F5: values are tokens/keys — never prose.
+							spellCheck={false}
 						/>
 						<button
 							className="btn btn-secondary btn-inline"
@@ -320,7 +337,16 @@ export function CustomFieldsEditor({
 							<button
 								className="btn btn-secondary btn-inline"
 								type="button"
-								onClick={() => toggleRevealed(row.id)}
+								onClick={() => {
+									// v1.6.1 F4: load-then-unmask. On an unloaded entry the
+									// box unmasks immediately (local toggle) and the value
+									// fills when the fetch lands (fillMissingValues); on a
+									// loaded entry this is a no-op and the toggle behaves
+									// exactly as before. Failure semantics: see the
+									// onRevealRequest prop doc.
+									onRevealRequest?.();
+									toggleRevealed(row.id);
+								}}
 								aria-label={
 									isRevealed
 										? `Hide field ${index + 1} value`

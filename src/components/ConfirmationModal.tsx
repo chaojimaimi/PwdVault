@@ -17,6 +17,15 @@ interface Props {
   onConfirm: () => Promise<void> | void;
   onCancel: () => void;
   isSaving?: boolean;
+  /**
+   * v1.6.1 F1: error channel for a failed onConfirm. The modal stays open
+   * on failure, so the owner must be able to surface the rejection HERE —
+   * its own form-level error banner sits behind this overlay. Rendered
+   * between the changes list and the footer with role="alert"; null/absent
+   * renders nothing. Only the EntryScreen consumes this component (the
+   * Settings/Sync dialogs are hand-rolled AccessibleDialogs).
+   */
+  error?: string | null;
 }
 
 export function ConfirmationModal({
@@ -26,6 +35,7 @@ export function ConfirmationModal({
   onConfirm,
   onCancel,
   isSaving = false,
+  error = null,
 }: Props) {
   const [checked, setChecked] = React.useState(false);
 
@@ -74,6 +84,12 @@ export function ConfirmationModal({
             </div>
           ))}
         </div>
+
+        {error && (
+          <div className="error-message confirm-modal-error" role="alert">
+            {error}
+          </div>
+        )}
 
         <div className="confirm-modal-footer">
           <label className="confirm-checkbox">

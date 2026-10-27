@@ -40,6 +40,50 @@ describe("errorMessage", () => {
 	it("falls back for unknown rejection shapes", () => {
 		expect(errorMessage({ code: 42 }, "Export failed")).toBe("Export failed");
 	});
+
+	// v1.6.1 F2: VaultError's single wire shape puts validation failures on
+	// the wire as "CODE: human message" (public_message). The strip is the
+	// frontend's half of CQ-P2a — the user reads the sentence, not the code.
+	describe("code-prefix strip (v1.6.1 F2)", () => {
+		it("strips an ALL_CAPS code prefix with a non-empty remainder", () => {
+			expect(
+				errorMessage(
+					"DUPLICATE_CUSTOM_FIELD_LABEL: Duplicate custom field label",
+					"fallback",
+				),
+			).toBe("Duplicate custom field label");
+			// Digits belong to the code alphabet alongside underscores.
+			expect(errorMessage("CODE_2: bad thing", "fallback")).toBe("bad thing");
+		});
+
+		it("keeps the whole string when nothing follows the separator", () => {
+			expect(errorMessage("SOME_CODE: ", "fallback")).toBe("SOME_CODE: ");
+			expect(errorMessage("SOME_CODE:", "fallback")).toBe("SOME_CODE:");
+		});
+
+		it("never strips sentence-style or lowercase prefixes", () => {
+			// "Note" is not ALL_CAPS (lowercase after the first letter).
+			expect(errorMessage("Note: this is fine", "fallback")).toBe(
+				"Note: this is fine",
+			);
+			expect(errorMessage("dup label: x", "fallback")).toBe("dup label: x");
+			// A mid-message colon does not make the head a code.
+			expect(
+				errorMessage(
+					"Deserialization error: settings record is corrupt",
+					"fallback",
+				),
+			).toBe("Deserialization error: settings record is corrupt");
+		});
+
+		it("strips the prefix from Error.message rejections too", () => {
+			// Same wire string can arrive wrapped by an adapter — the strip
+			// applies to the final message regardless of envelope.
+			expect(
+				errorMessage(new Error("WEAK_KDF: params below the floor"), "fallback"),
+			).toBe("params below the floor");
+		});
+	});
 });
 
 describe("isVaultError (M10)", () => {

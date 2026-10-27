@@ -1,6 +1,15 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
-import { detectChanges, EntryScreen } from "../EntryScreen";
+import { EntryScreen } from "../EntryScreen";
+// v1.6.1 F6: detectChanges moved verbatim to its own module — assertions
+// unchanged, only the import split.
+import { detectChanges } from "../entryChanges";
 import { sameCustomFields } from "../../components/CustomFieldsEditor";
 import type {
 	CreateEntryRequest,
@@ -523,5 +532,252 @@ describe("editor wiring", () => {
 		expect(
 			await screen.findByText("duplicate label rejected"),
 		).toBeInTheDocument();
+	});
+});
+
+// v1.6.1 F1: the confirmation modal has its own error channel. The modal
+// stays open on a failed save, so the error MUST render inside it — the
+// main-form banner sits behind the overlay and was invisible on real
+// hardware ("cannot save, no message").
+describe("confirmation modal error channel (v1.6.1 F1/F2)", () => {
+	test("a rejected save shows the stripped error inside the modal; banner suppressed until Cancel", async () => {
+		vaultState.selectedEntry = baseMeta();
+		updateEntry.mockRejectedValue(
+			// F2: the REAL transport shape — since v1.3.2 VaultError's handwritten
+			// Serialize emits every variant as its public_message() string, so
+			// invoke rejects with "CODE: message". The UI must show the stripped
+			// sentence, not the code.
+			"DUPLICATE_CUSTOM_FIELD_LABEL: Duplicate custom field label",
+		);
+		render(<EntryScreen />);
+
+		fireEvent.change(screen.getByLabelText("Title *"), {
+			target: { value: "After" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		fireEvent.click(await screen.findByText("I've reviewed these changes"));
+		fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+		// The human message renders inside the dialog, stripped of the code.
+		const alert = await screen.findByRole("alert");
+		expect(alert).toHaveTextContent("Duplicate custom field label");
+		// Exactly ONE alert exists: the main-form banner (id=entry-error) is
+		// suppressed while the modal is open — no double display, no dangling
+		// aria-describedby target.
+		expect(screen.getAllByRole("alert")).toHaveLength(1);
+		expect(document.getElementById("entry-error")).toBeNull();
+		// Failure path: the modal stays open and the review checkbox survives.
+		expect(
+			screen.getByRole("button", { name: "Save Changes" }),
+		).toBeInTheDocument();
+		expect(screen.getByRole("checkbox")).toBeChecked();
+
+		// Cancel closes the modal; the same error falls back to the banner.
+		const dialog = screen.getByRole("dialog");
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "Cancel" }),
+		);
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+		const banner = document.getElementById("entry-error");
+		expect(banner).not.toBeNull();
+		expect(banner).toHaveTextContent("Duplicate custom field label");
+	});
+});
+
+// v1.6.1 F3/F4/F5: the Custom Fields area lazy-loads stored values on first
+// interaction, the row eye loads-then-unmasks, and the inputs opt out of
+// spellcheck.
+describe("lazy value loading (v1.6.1 F3/F4)", () => {
+	const loadedSecret = {
+		password: "stored-pw",
+		notes: "",
+		custom_fields: [{ label: "api_key", value: "s3cret", secret: true }],
+	};
+
+	test("focus lazy-loads stored values BEFORE save and shares the fetch with the save guard", async () => {
+		vaultState.selectedEntry = baseMeta({
+			custom_fields: [{ label: "api_key", secret: true }],
+		});
+		// Holder object, not a bare `let` (test-tsconfig narrowing — see the
+		// busy-lock test above).
+		const fetchGate: { release: (() => void) | null } = { release: null };
+		getEntrySecret.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					fetchGate.release = () => resolve(loadedSecret);
+				}),
+		);
+		render(<EntryScreen />);
+
+		// Stage a change first so the save path reaches the guarded branch.
+		fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+		fireEvent.change(screen.getByLabelText("Field 2 label"), {
+			target: { value: "token" },
+		});
+
+		// jsdom's change/click never dispatch focus — the explicit focus event
+		// IS the trigger under test (first fireEvent.focus in this suite).
+		fireEvent.focus(screen.getByLabelText("Field 1 label"));
+		// Timing pin: the fetch ran BEFORE any Save click, proving the focus
+		// trigger fired it rather than the save-guard fallback.
+		await waitFor(() => expect(getEntrySecret).toHaveBeenCalledOnce());
+
+		// Save while the focus fetch is still in flight: the guard returns the
+		// SAME in-flight promise — still exactly one fetch.
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		expect(getEntrySecret).toHaveBeenCalledOnce();
+
+		fetchGate.release?.();
+		fireEvent.click(await screen.findByText("I've reviewed these changes"));
+		fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+		await waitFor(() => expect(updateEntry).toHaveBeenCalledOnce());
+		// Exactly one round trip end-to-end, and the replacement carries the
+		// freshly loaded stored value beside the staged row.
+		expect(getEntrySecret).toHaveBeenCalledOnce();
+		expect(updateEntry.mock.calls[0][1].custom_fields).toEqual([
+			row("api_key", "s3cret", true),
+			row("token", ""),
+		]);
+	});
+
+	test("rows typed while a lazy load is in flight reach the diff and the patch (P1)", async () => {
+		vaultState.selectedEntry = baseMeta({
+			custom_fields: [{ label: "api_key", secret: true }],
+		});
+		const fetchGate: { release: (() => void) | null } = { release: null };
+		getEntrySecret.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					fetchGate.release = () => resolve(loadedSecret);
+				}),
+		);
+		render(<EntryScreen />);
+
+		// The focus-triggered load holds the shared in-flight promise open.
+		fireEvent.focus(screen.getByLabelText("Field 1 label"));
+		await waitFor(() => expect(getEntrySecret).toHaveBeenCalledOnce());
+
+		// Edit DURING the flight: a row the start-of-fetch snapshot never saw.
+		fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+		fireEvent.change(screen.getByLabelText("Field 2 label"), {
+			target: { value: "token" },
+		});
+
+		// Save rides the same in-flight promise — still exactly one fetch.
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		expect(getEntrySecret).toHaveBeenCalledOnce();
+
+		fetchGate.release?.();
+
+		// The confirmation modal must open AND carry the mid-flight edit — a
+		// stale row snapshot would compute "zero changes", close silently, and
+		// drop the typed row (the P1 regression this test pins shut).
+		const dialog = await screen.findByRole("dialog");
+		expect(within(dialog).getByText("token")).toBeInTheDocument();
+		fireEvent.click(screen.getByText("I've reviewed these changes"));
+		fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+		await waitFor(() => expect(updateEntry).toHaveBeenCalledOnce());
+		expect(updateEntry.mock.calls[0][1].custom_fields).toEqual([
+			row("api_key", "s3cret", true),
+			row("token", ""),
+		]);
+		expect(getEntrySecret).toHaveBeenCalledOnce();
+	});
+
+	test("focus on the create form never fetches", () => {
+		render(<EntryScreen />);
+		fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+		fireEvent.focus(screen.getByLabelText("Field 1 label"));
+		expect(getEntrySecret).not.toHaveBeenCalled();
+	});
+
+	test("focus on an entry without stored fields never fetches", () => {
+		vaultState.selectedEntry = baseMeta();
+		render(<EntryScreen />);
+		// No stored rows render, so stage a fresh row and focus it — still no
+		// fetch: there are no STORED values to protect.
+		fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+		fireEvent.focus(screen.getByLabelText("Field 1 label"));
+		expect(getEntrySecret).not.toHaveBeenCalled();
+	});
+
+	test("a second focus after the values loaded does not refetch", async () => {
+		vaultState.selectedEntry = baseMeta({
+			custom_fields: [{ label: "api_key", secret: true }],
+		});
+		getEntrySecret.mockResolvedValue(loadedSecret);
+		render(<EntryScreen />);
+
+		fireEvent.focus(screen.getByLabelText("Field 1 label"));
+		await waitFor(() =>
+			expect(screen.getByLabelText("Field 1 value")).toHaveValue("s3cret"),
+		);
+		fireEvent.focus(screen.getByLabelText("Field 1 label"));
+		expect(getEntrySecret).toHaveBeenCalledOnce();
+	});
+
+	test("a failed focus load backs off; the explicit eye still fetches", async () => {
+		vaultState.selectedEntry = baseMeta({
+			custom_fields: [{ label: "api_key", secret: true }],
+		});
+		getEntrySecret.mockRejectedValueOnce(new Error("boom"));
+		render(<EntryScreen />);
+
+		fireEvent.focus(screen.getByLabelText("Field 1 label"));
+		expect(
+			await screen.findByText("Failed to load custom fields"),
+		).toBeInTheDocument();
+		expect(getEntrySecret).toHaveBeenCalledOnce();
+
+		// Backoff: further FOCUS triggers stay silent after the failure.
+		fireEvent.focus(screen.getByLabelText("Field 1 label"));
+		expect(getEntrySecret).toHaveBeenCalledOnce();
+
+		// Trigger-form negative: "explicit" is not gated by the focus backoff —
+		// the reveal eye runs its own load and the value fills.
+		getEntrySecret.mockResolvedValue(loadedSecret);
+		fireEvent.click(screen.getByRole("button", { name: "Show field 1 value" }));
+		await waitFor(() => expect(getEntrySecret).toHaveBeenCalledTimes(2));
+		await waitFor(() =>
+			expect(screen.getByLabelText("Field 1 value")).toHaveValue("s3cret"),
+		);
+	});
+
+	test("the row eye fetches-then-unmasks an unloaded value (F4)", async () => {
+		vaultState.selectedEntry = baseMeta({
+			custom_fields: [{ label: "api_key", secret: true }],
+		});
+		getEntrySecret.mockResolvedValue(loadedSecret);
+		render(<EntryScreen />);
+
+		const valueBox = screen.getByLabelText("Field 1 value");
+		expect(valueBox).toHaveAttribute("type", "password");
+		expect(valueBox).toHaveValue("");
+
+		fireEvent.click(screen.getByRole("button", { name: "Show field 1 value" }));
+		// The mask lifts immediately (local toggle), before the fetch lands.
+		expect(screen.getByLabelText("Field 1 value")).toHaveAttribute(
+			"type",
+			"text",
+		);
+		// The value fills once the fetch resolves.
+		await waitFor(() =>
+			expect(screen.getByLabelText("Field 1 value")).toHaveValue("s3cret"),
+		);
+		expect(getEntrySecret).toHaveBeenCalledOnce();
+	});
+});
+
+describe("input hygiene (v1.6.1 F5)", () => {
+	test("field label/value inputs opt out of spellcheck", () => {
+		render(<EntryScreen />);
+		fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+		// jsdom does not implement the spellcheck IDL property reflection
+		// (input.spellcheck is undefined there) — assert the DOM attribute the
+		// React prop reflects to instead.
+		const labelBox = screen.getByLabelText("Field 1 label");
+		const valueBox = screen.getByLabelText("Field 1 value");
+		expect(labelBox).toHaveAttribute("spellcheck", "false");
+		expect(valueBox).toHaveAttribute("spellcheck", "false");
 	});
 });

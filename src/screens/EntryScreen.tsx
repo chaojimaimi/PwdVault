@@ -13,12 +13,14 @@ import { sameTags, TagsEditor } from "../components/TagsEditor";
 import { TotpSecretField } from "../components/TotpSecretField";
 import { EntryGeneratorModal } from "../components/EntryGeneratorModal";
 import {
-	appendCustomFieldChanges,
 	CustomFieldsEditor,
 	filterEmptyRows,
 	stripCustomFieldRowIds,
 } from "../components/CustomFieldsEditor";
 import { useCustomFields } from "./useCustomFields";
+// v1.6.1 F6: the save-confirmation diff lives in its own module (verbatim
+// extraction for the line-count budget) — consumers import from there.
+import { detectChanges } from "./entryChanges";
 import {
 	EyeIcon,
 	EyeOffIcon,
@@ -31,127 +33,9 @@ import GroupSelector from "../components/GroupSelector";
 import { UnsavedChangesModal } from "../components/UnsavedChangesModal";
 import type {
 	CreateEntryRequest,
-	CustomFieldInput,
-	EntrySummary,
 	UpdateEntryRequest,
 	UrlMatchMode,
 } from "../types";
-
-/**
- * Pure diff between the saved entry and the current form, for the save
- * confirmation modal. Every "changed" flag is passed in explicitly (secrets
- * are fetched on demand, so password/notes/TOTP edits are tracked outside
- * `current`); `totpChanged` implements the TOTP tri-state (untouched / cleared / set).
- * Exported for the pure-function test matrix (sameTags precedent).
- */
-export function detectChanges(
-	originalMeta: EntrySummary,
-	originalSecret: { password: string; notes: string } | null,
-	current: CreateEntryRequest,
-	passwordChanged: boolean,
-	notesChanged: boolean,
-	totpChanged: boolean,
-	// v1.6.0: the effective custom-field baseline — loaded values when the
-	// secret channel ran, meta-derived rows otherwise. null reads as "no
-	// stored fields" (pure-function convenience for the test matrix).
-	originalCustomFields: CustomFieldInput[] | null,
-): ChangeItem[] {
-	const changes: ChangeItem[] = [];
-	if (originalMeta.title !== current.title) {
-		changes.push({
-			fieldId: "title",
-			label: "Title",
-			oldValue: originalMeta.title,
-			newValue: current.title,
-			valueType: "text",
-		});
-	}
-	if ((originalMeta.url || "") !== (current.url || "")) {
-		changes.push({
-			fieldId: "url",
-			label: "URL",
-			oldValue: originalMeta.url || "",
-			newValue: current.url || "",
-			valueType: "text",
-		});
-	}
-	if (
-		normalizeMatchMode(originalMeta.url_match_mode) !==
-		normalizeMatchMode(current.url_match_mode)
-	) {
-		const labelOf = (mode: UrlMatchMode | undefined) =>
-			URL_MATCH_MODE_OPTIONS.find((o) => o.value === normalizeMatchMode(mode))
-				?.label ?? "";
-		changes.push({
-			fieldId: "url_match_mode",
-			label: "URL Match",
-			oldValue: labelOf(originalMeta.url_match_mode),
-			newValue: labelOf(current.url_match_mode),
-			valueType: "text",
-		});
-	}
-	if (originalMeta.username !== current.username) {
-		changes.push({
-			fieldId: "username",
-			label: "Username",
-			oldValue: originalMeta.username,
-			newValue: current.username,
-			valueType: "text",
-		});
-	}
-	if (passwordChanged) {
-		changes.push({
-			fieldId: "password",
-			label: "Password",
-			valueType: "password",
-		});
-	}
-	if (notesChanged) {
-		const originalNotes = originalSecret?.notes ?? "";
-		changes.push({
-			fieldId: "notes",
-			label: "Notes",
-			oldValue: originalNotes.slice(0, 200),
-			newValue: (current.notes || "").slice(0, 200),
-			valueType: "notes",
-		});
-	}
-	const origTags = originalMeta.tags || [];
-	const added = current.tags.filter((t) => !origTags.includes(t));
-	const removed = origTags.filter((t) => !current.tags.includes(t));
-	if (added.length || removed.length) {
-		changes.push({
-			fieldId: "tags",
-			label: "Tags",
-			oldValue: removed.join(", "),
-			newValue: added.join(", "),
-			valueType: "tags",
-		});
-	}
-	if ((originalMeta.group_id || null) !== (current.group_id || null)) {
-		changes.push({
-			fieldId: "group_id",
-			label: "Group",
-			oldValue: originalMeta.group_id || "",
-			newValue: current.group_id || "",
-			valueType: "text",
-		});
-	}
-	if (totpChanged) {
-		changes.push({
-			fieldId: "totp_secret",
-			label: "TOTP Secret",
-			valueType: "password",
-		});
-	}
-	// v1.6.0: the custom-field diff logic (whole-replacement, label pairing,
-	// secret masking) lives beside its helpers in CustomFieldsEditor.
-	return appendCustomFieldChanges(
-		changes,
-		originalCustomFields,
-		current.custom_fields || [],
-	);
-}
 
 export function EntryScreen() {
 	const { actions: authActions } = useAuth();
@@ -196,6 +80,7 @@ export function EntryScreen() {
 		mergeLoadedCustomFields,
 		hasContentRows,
 		dirtyFromStored,
+		loadValues,
 		resolveForSave,
 		patchFragment,
 	} = useCustomFields({
@@ -537,7 +422,10 @@ export function EntryScreen() {
 					void handleSave();
 				}}
 			>
-				{error && (
+				{/* v1.6.1 F1: while the confirmation modal is open the error is
+				    shown INSIDE the modal (its own error channel); after Cancel it
+				    falls back to this banner. Never both at once. */}
+				{error && !showConfirmation && (
 					<div className="error-message" id="entry-error" role="alert">
 						{error}
 					</div>
@@ -556,7 +444,12 @@ export function EntryScreen() {
 						placeholder="e.g., Google, GitHub"
 						aria-required="true"
 						aria-invalid={!!error && !formData.title}
-						aria-describedby={error ? "entry-error" : undefined}
+						/* v1.6.1 F1: the banner is suppressed while the modal is
+						   open — never reference a node that is not rendered
+						   (same condition on the two other secret inputs below). */
+						aria-describedby={
+							error && !showConfirmation ? "entry-error" : undefined
+						}
 					/>
 				</div>
 
@@ -615,7 +508,9 @@ export function EntryScreen() {
 						placeholder="email@example.com"
 						aria-required="true"
 						aria-invalid={!!error && !formData.username}
-						aria-describedby={error ? "entry-error" : undefined}
+						aria-describedby={
+							error && !showConfirmation ? "entry-error" : undefined
+						}
 					/>
 				</div>
 
@@ -633,7 +528,9 @@ export function EntryScreen() {
 							placeholder={isEditing && !passwordChanged ? "Unchanged" : ""}
 							aria-required={isNew}
 							aria-invalid={!!error && isNew && !formData.password}
-							aria-describedby={error ? "entry-error" : undefined}
+							aria-describedby={
+								error && !showConfirmation ? "entry-error" : undefined
+							}
 						/>
 						<button
 							onClick={() => void handleTogglePassword()}
@@ -717,9 +614,27 @@ export function EntryScreen() {
 						value={formData.tags}
 						onChange={(tags) => setFormData({ ...formData, tags })}
 					/>
+				</div>
+
+				{/* v1.6.1 F5: Custom Fields get their own form-group — the shared
+				    one squeezed the section against Tags and broke the vertical
+				    rhythm of the other sections. */}
+				{/* v1.6.1 F3: first interaction with the area lazy-loads the
+				    stored values (focus capture — click or Tab into any input
+				    fires it; jsdom's change/click never dispatch focus, only an
+				    explicit focus event does). ACCEPTED POSTURE: keyboard Tab
+				    pass-through decrypts stored values and bumps last_used_at —
+				    asymmetric with the explicit notes button, but the user is
+				    already inside the unlocked entry editor, so the on-demand
+				    decrypt ratio is the same as the reveal path. */}
+				<div
+					className="form-group"
+					onFocusCapture={() => loadValues("focus")}
+				>
 					<CustomFieldsEditor
 						value={customFields}
 						onChange={setCustomFields}
+						onRevealRequest={() => loadValues("explicit")}
 					/>
 				</div>
 			</form>
@@ -762,6 +677,10 @@ export function EntryScreen() {
 				onCancel={() => setShowConfirmation(false)}
 				onConfirm={onConfirmSave}
 				isSaving={isSavingConfirmed}
+				/* v1.6.1 F1: a rejected save surfaces inside the modal — the
+				   modal stays open on failure, so the main-form banner (gated
+				   above) would hide the message behind the overlay. */
+				error={showConfirmation ? error : null}
 			/>
 
 			<DeleteConfirmModal

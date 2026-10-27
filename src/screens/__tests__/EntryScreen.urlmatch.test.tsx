@@ -1,6 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { detectChanges, EntryScreen } from "../EntryScreen";
+import { EntryScreen } from "../EntryScreen";
+// v1.6.1 F6: detectChanges moved verbatim to its own module — assertions
+// unchanged, only the import split.
+import { detectChanges } from "../entryChanges";
 import {
 	normalizeMatchMode,
 	URL_MATCH_MODE_OPTIONS,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
 	customFieldsFromMeta,
 	fillMissingValues,
@@ -80,6 +80,16 @@ export interface CustomFieldsController {
 		baseline: CustomFieldInput[],
 		rows: CustomFieldRow[],
 	) => CustomFieldsPatchFragment;
+	/**
+	 * v1.6.1 F3: lazy-load the stored values on the user's first interaction
+	 * with the Custom Fields area. `trigger` is "focus" (the container's
+	 * onFocusCapture — Tab/click into any input) or "explicit" (a row's
+	 * reveal-eye click). No-ops when there is nothing to load (create form,
+	 * no stored fields, values already loaded). Runs the SAME guarded fetch
+	 * as resolveForSave — one in-flight promise is shared, so focus-then-Save
+	 * spends exactly one get_entry_secret round trip.
+	 */
+	loadValues: (trigger: "focus" | "explicit") => void;
 }
 
 /**
@@ -105,6 +115,20 @@ export function useCustomFields({
 	const [originalCustomFields, setOriginalCustomFields] = useState<
 		CustomFieldInput[] | null
 	>(null);
+	// v1.6.1 F3: the single in-flight lazy-load/guard fetch, shared between
+	// loadValues and resolveForSave so the round trip happens at most once.
+	const inFlight = useRef<Promise<ResolvedCustomFields | null> | null>(null);
+	// v1.6.1 F3: after a failed load, further FOCUS triggers back off until
+	// the entry is re-entered — the explicit (eye) trigger and the save guard
+	// are never suppressed.
+	const suppressAutoLoad = useRef(false);
+	// v1.6.1 P1: latest-rows mirror. The shared in-flight fetch outlives the
+	// render that started it, so fetchAndResolve assembles its resolved rows
+	// from here at RESOLUTION time — a snapshot captured at start would drop
+	// rows typed/added during the flight from both the modal diff and the
+	// committed patch (silent data loss).
+	const rowsRef = useRef(customFields);
+	rowsRef.current = customFields;
 
 	// Values start empty (edit) and fill when the secret channel runs; the
 	// create form starts fully empty. Mirrors the parent's formData reset.
@@ -113,6 +137,11 @@ export function useCustomFields({
 			selectedEntry ? customFieldsFromMeta(selectedEntry.custom_fields) : [],
 		);
 		setOriginalCustomFields(null);
+		// Re-entering an entry clears the focus backoff and drops the share
+		// reference to any in-flight fetch (the request itself is not
+		// cancellable — same posture as the pre-existing secret fetches).
+		suppressAutoLoad.current = false;
+		inFlight.current = null;
 	}, [selectedEntry]);
 
 	// Every secret-channel response also carries the custom-field values, so
@@ -147,18 +176,23 @@ export function useCustomFields({
 
 	// The guarded-fetch branch of resolveForSave, isolated so the no-fetch
 	// path can stay synchronous. Failure reports through onFetchFailed and
-	// resolves null — the caller aborts the save.
+	// resolves null — the caller aborts the save. Takes no rows argument: the
+	// resolved rows are assembled from rowsRef at RESOLUTION time (P1 — the
+	// flight can outlive the render that started it).
 	const fetchAndResolve = async (
 		entry: EntrySummary,
-		rows: CustomFieldRow[],
 	): Promise<ResolvedCustomFields | null> => {
 		try {
 			setSecretLoading(true);
 			const secret = await fetchSecret(entry.id);
 			const loaded = secret.custom_fields ?? [];
-			const filled = fillMissingValues(rows, loaded);
+			// Latest rows win: fill values into what the form holds NOW, then
+			// drop blanks — rows typed/added mid-flight are part of the result.
+			const filled = filterEmptyRows(fillMissingValues(rowsRef.current, loaded));
 			setOriginalCustomFields(loaded);
-			setCustomFields(filled);
+			// The form fills functionally (fillMissingValues never overwrites
+			// typed values — same update as mergeLoadedCustomFields).
+			setCustomFields((prev) => fillMissingValues(prev, loaded));
 			return { rows: filled, baseline: loaded };
 		} catch {
 			onFetchFailed();
@@ -166,6 +200,29 @@ export function useCustomFields({
 		} finally {
 			setSecretLoading(false);
 		}
+	};
+
+	/**
+	 * v1.6.1 F3: the lazy-load trigger. ANY failure sets the backoff flag
+	 * (fetchAndResolve maps failures to null, never rejects); only the focus
+	 * trigger CONSUMES it — explicit triggers and the save guard stay live.
+	 */
+	const loadValues = (trigger: "focus" | "explicit") => {
+		if (!selectedEntry) return;
+		if (originalCustomFields !== null) return;
+		if (customFieldsFromMeta(selectedEntry.custom_fields).length === 0) return;
+		if (trigger === "focus" && suppressAutoLoad.current) return;
+		if (inFlight.current) return;
+		inFlight.current = fetchAndResolve(selectedEntry)
+			.then((resolved) => {
+				if (resolved === null) {
+					suppressAutoLoad.current = true;
+				}
+				return resolved;
+			})
+			.finally(() => {
+				inFlight.current = null;
+			});
 	};
 
 	const resolveForSave = ():
@@ -188,7 +245,17 @@ export function useCustomFields({
 		if (originalCustomFields === null) {
 			const metaRows = customFieldsFromMeta(selectedEntry.custom_fields);
 			if (metaRows.length > 0 && !sameCustomFields(metaRows, rows)) {
-				return fetchAndResolve(selectedEntry, rows);
+				// v1.6.1 F3: a lazy load already in flight IS the guarded fetch —
+				// return the same promise so focus-then-Save spends exactly one
+				// get_entry_secret round trip (the busy-lock semantics of the
+				// v1.6.0 tests are untouched: awaiting the shared promise still
+				// holds the caller's re-entry lock).
+				if (inFlight.current) return inFlight.current;
+				const pending = fetchAndResolve(selectedEntry).finally(() => {
+					inFlight.current = null;
+				});
+				inFlight.current = pending;
+				return pending;
 			}
 		}
 		// Diff/comparison baseline: the loaded values when the secret channel
@@ -219,6 +286,7 @@ export function useCustomFields({
 		mergeLoadedCustomFields,
 		hasContentRows,
 		dirtyFromStored,
+		loadValues,
 		resolveForSave,
 		patchFragment,
 	};

@@ -46,6 +46,28 @@ const VAULT_ERROR_PAYLOAD_VARIANTS: ReadonlySet<string> = new Set([
 	"RateLimited",
 ]);
 
+/**
+ * v1.6.1 F2: VaultError's hand-written Serialize sends EVERY variant through
+ * public_message() (single wire shape since v1.3.2), so validation failures
+ * arrive as `"CODE: human message"` — e.g.
+ * `"DUPLICATE_CUSTOM_FIELD_LABEL: Duplicate custom field label"`. Strip an
+ * ALL_CAPS code prefix when a non-blank remainder follows, so users read the
+ * sentence, not the enum name (the closing touch on CQ-P2a "no enum-name
+ * errors"). Boundaries: the prefix must be uppercase/digits/underscores
+ * only; a colon with nothing (or whitespace) after it keeps the whole
+ * string; sentence-style prefixes ("Note: this", "Deserialization error: …")
+ * do not match. The backend's Display/log shape is unaffected.
+ */
+function stripErrorCodePrefix(message: string): string {
+	const separator = message.indexOf(": ");
+	if (separator <= 0) return message;
+	const prefix = message.slice(0, separator);
+	const remainder = message.slice(separator + 2);
+	if (!/^[A-Z][A-Z0-9_]+$/.test(prefix)) return message;
+	if (!remainder.trim()) return message;
+	return remainder;
+}
+
 export function errorMessage(error: unknown, fallback: string): string {
 	// RateLimited carries its payload in a numeric field that nestedMessage
 	// cannot render; surface the retry window directly (M10). Every other
@@ -62,7 +84,7 @@ export function errorMessage(error: unknown, fallback: string): string {
 			.RateLimited.retry_after_secs;
 		return `Too many attempts — retry in ${secs}s`;
 	}
-	return nestedMessage(error, 0) ?? fallback;
+	return stripErrorCodePrefix(nestedMessage(error, 0) ?? fallback);
 }
 
 function nestedMessage(value: unknown, depth: number): string | undefined {

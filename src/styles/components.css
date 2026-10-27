@@ -448,6 +448,14 @@
   white-space: nowrap;
 }
 
+/* v1.6.1 F1: in-modal error strip. Reuses the global .error-message look;
+   this class only aligns it with the modal's horizontal padding (the list
+   and footer use --space-lg side padding, the strip has none of its own). */
+.confirm-modal-error {
+  margin-left: var(--space-lg);
+  margin-right: var(--space-lg);
+}
+
 .confirm-modal-footer {
   padding: var(--space-md) var(--space-lg) var(--space-lg);
 }
