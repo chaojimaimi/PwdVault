@@ -29,7 +29,7 @@
 
 1. **恢复路径给所有行铸造新 id**。`backup.rs:400-412 remap_import_groups` 用
    `Group::new`（新 UUID + created_at/updated_at 全部重置为 now）；`backup.rs:416-479
-   encrypt_import_entries` 用 `PasswordEntry::new`（新 UUID），只回填 created_at/updated_at。
+encrypt_import_entries` 用 `PasswordEntry::new`（新 UUID），只回填 created_at/updated_at。
    注释自称 "new IDs avoid conflicts with the live vault"（:398-399）。
 2. **import_vault 是替换语义，id 冲突根本不可能发生**。backup.rs:551-578：先收集
    existing ids 全部 remove（**包括本地墓碑**），再插入新行，单事务。re-id 的防御理由
@@ -44,13 +44,13 @@
 
 **保留原始 id 后的正确收敛**（merge.rs 既有规则自动成立，无需改 merge）：
 
-| 云上状态 vs 恢复行（同 id） | pair_is_conflict 判定 | 结果 |
-| --- | --- | --- |
-| 云更新（edited_at > 备份时刻） | 双 live、时间戳不等 → 非冲突 | LWW 云内容胜，单份 |
-| 云墓碑（deleted_at > 备份时刻） | live.updated_at(备份时刻) ≤ deleted_at → 非冲突（`<=` 陈旧副本规则 :183-186） | 删除维持，不复活 |
-| 云墓碑（deleted_at < 备份时刻，即备份出自删除后仍编辑过该条目的设备） | live.updated_at > deleted_at → **冲突**（R1 评审 P2 补） | 计冲突 +1，备份内容 live（merge.rs:214 live-wins，winner 为恢复行） |
-| 内容一致（时间戳也相同） | 指纹相等 → 非冲突 | 静默去重，单份 |
-| 备份比云新 | 双 live → 非冲突 | LWW 本地胜并回推，符合恢复语义 |
+| 云上状态 vs 恢复行（同 id）                                           | pair_is_conflict 判定                                                         | 结果                                                                |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| 云更新（edited_at > 备份时刻）                                        | 双 live、时间戳不等 → 非冲突                                                  | LWW 云内容胜，单份                                                  |
+| 云墓碑（deleted_at > 备份时刻）                                       | live.updated_at(备份时刻) ≤ deleted_at → 非冲突（`<=` 陈旧副本规则 :183-186） | 删除维持，不复活                                                    |
+| 云墓碑（deleted_at < 备份时刻，即备份出自删除后仍编辑过该条目的设备） | live.updated_at > deleted_at → **冲突**（R1 评审 P2 补）                      | 计冲突 +1，备份内容 live（merge.rs:214 live-wins，winner 为恢复行） |
+| 内容一致（时间戳也相同）                                              | 指纹相等 → 非冲突                                                             | 静默去重，单份                                                      |
+| 备份比云新                                                            | 双 live → 非冲突                                                              | LWW 本地胜并回推，符合恢复语义                                      |
 
 ## 1. 目标
 
@@ -63,7 +63,7 @@
 **文件: `src-tauri/crates/application/src/service/backup.rs`**
 
 1. `remap_import_groups`（:400-412）→ 改名 `import_groups(payload: &BackupPayload) ->
-   Vec<Group>`：直接返回 `payload.groups.clone()`。payload.groups 本来就是完整 domain
+Vec<Group>`：直接返回 `payload.groups.clone()`。payload.groups 本来就是完整 domain
    `Group`（导出于 :184-197），id/name/created_at/updated_at 全量在备份里——顺带修复
    现在恢复会丢分组时间戳的隐性缺陷。删除 group_id_map。
 2. `encrypt_import_entries`（:416-479）：去掉 group_id_map 参数；`PasswordEntry::new`

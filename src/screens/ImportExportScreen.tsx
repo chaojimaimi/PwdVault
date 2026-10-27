@@ -508,10 +508,9 @@ export function ImportExportScreen() {
 						// a screen reader that started announcing on open never
 						// hears it. Advisory content, warning-tinted — not an error.
 						<p className="restore-sync-warning" role="status">
-							Cloud sync is active — after restoring, the next sync merges
-							both sides by timestamp (newer wins). Entries deleted after
-							this backup was taken stay deleted once their deletion has
-							synced.
+							Cloud sync is active — after restoring, the next sync merges both
+							sides by timestamp (newer wins). Entries deleted after this backup
+							was taken stay deleted once their deletion has synced.
 						</p>
 					)}
 					<label htmlFor="restore-confirmation">Type RESTORE to continue</label>

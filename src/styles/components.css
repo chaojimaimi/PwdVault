@@ -6,128 +6,131 @@
 /* --- Card --- */
 
 .card {
-  background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  padding: var(--space-xl);
-  width: 100%;
-  max-width: 420px;
-  box-shadow: var(--shadow-card);
+	background: var(--color-surface);
+	border-radius: var(--radius-lg);
+	padding: var(--space-xl);
+	width: 100%;
+	max-width: 420px;
+	box-shadow: var(--shadow-card);
 }
 
 .card-header {
-  text-align: center;
-  margin-bottom: var(--space-xl);
+	text-align: center;
+	margin-bottom: var(--space-xl);
 }
 
 .card-header h1 {
-  font-size: var(--text-h1);
-  font-weight: 600;
-  margin-bottom: var(--space-sm);
-  color: var(--color-text);
+	font-size: var(--text-h1);
+	font-weight: 600;
+	margin-bottom: var(--space-sm);
+	color: var(--color-text);
 }
 
 .card-header p {
-  color: var(--color-text-secondary);
-  font-size: var(--text-body);
+	color: var(--color-text-secondary);
+	font-size: var(--text-body);
 }
 
 /* --- Buttons --- */
 
 .btn {
-  width: 100%;
-  min-height: 40px;
-  padding: 0.75rem var(--space-lg);
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: var(--text-body);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--duration-fast) ease, color var(--duration-fast) ease, opacity var(--duration-fast) ease;
+	width: 100%;
+	min-height: 40px;
+	padding: 0.75rem var(--space-lg);
+	border: none;
+	border-radius: var(--radius-md);
+	font-size: var(--text-body);
+	font-weight: 500;
+	cursor: pointer;
+	transition:
+		background var(--duration-fast) ease,
+		color var(--duration-fast) ease,
+		opacity var(--duration-fast) ease;
 }
 
 .btn:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
+	outline: 2px solid var(--color-primary);
+	outline-offset: 2px;
 }
 
 .btn-primary {
-  background: var(--color-primary);
-  color: var(--color-on-primary);
+	background: var(--color-primary);
+	color: var(--color-on-primary);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--color-primary-hover);
+	background: var(--color-primary-hover);
 }
 
 .btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+	opacity: 0.5;
+	cursor: not-allowed;
 }
 
 .btn-secondary {
-  background: var(--color-border);
-  color: var(--color-text);
+	background: var(--color-border);
+	color: var(--color-text);
 }
 
 /* :not(:disabled) keeps the disabled affordance stable on hover (v1.3.2). */
 .btn-secondary:hover:not(:disabled) {
-  background: var(--color-border-light);
+	background: var(--color-border-light);
 }
 
 /* v1.6.2 (F3): per-variant disabled affordance. Deliberately NOT a global
    .btn:disabled rule — global .btn changes have a large blast radius (the
    v1.5.1 width lesson), so each variant mirrors .btn-primary:disabled. */
 .btn-secondary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+	opacity: 0.5;
+	cursor: not-allowed;
 }
 
 .btn-danger {
-  background: var(--color-danger);
-  color: var(--color-on-danger);
+	background: var(--color-danger);
+	color: var(--color-on-danger);
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: var(--color-danger-hover);
+	background: var(--color-danger-hover);
 }
 
 /* v1.6.2 (F3): see .btn-secondary:disabled — a disabled danger button used
    to look identical to an enabled one (restore-dialog QA finding). */
 .btn-danger:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+	opacity: 0.5;
+	cursor: not-allowed;
 }
 
 .btn-icon {
-  width: 40px;
-  min-width: 40px;
-  min-height: 40px;
-  padding: var(--space-sm);
-  background: transparent;
-  color: var(--color-text-secondary);
+	width: 40px;
+	min-width: 40px;
+	min-height: 40px;
+	padding: var(--space-sm);
+	background: transparent;
+	color: var(--color-text-secondary);
 }
 
 .btn-icon:hover:not(:disabled) {
-  color: var(--color-text);
-  background: var(--color-border);
+	color: var(--color-text);
+	background: var(--color-border);
 }
 
 .btn-link {
-  background: none;
-  border: none;
-  color: var(--color-primary);
-  cursor: pointer;
-  font-size: var(--text-micro);
-  padding: var(--space-xs) var(--space-sm);
+	background: none;
+	border: none;
+	color: var(--color-primary);
+	cursor: pointer;
+	font-size: var(--text-micro);
+	padding: var(--space-xs) var(--space-sm);
 }
 
 .btn-link:hover {
-  text-decoration: underline;
+	text-decoration: underline;
 }
 
 .btn-sm {
-  padding: 2px 8px;
-  font-size: var(--text-micro);
+	padding: 2px 8px;
+	font-size: var(--text-micro);
 }
 
 /* v1.6.0 (D9) inline-button utility. Trap mechanism: the global
@@ -140,451 +143,451 @@
    text, spacer). Do NOT apply to .btn-icon (it owns its 40px square) or to
    block-context / .btn-full buttons where full width is the design intent. */
 .btn-inline {
-  width: auto;
-  flex-shrink: 0;
+	width: auto;
+	flex-shrink: 0;
 }
 
 /* --- Form inputs --- */
 
 .form-group {
-  margin-bottom: var(--space-md);
+	margin-bottom: var(--space-md);
 }
 
 .form-group label,
 .form-label {
-  display: block;
-  margin-bottom: var(--space-sm);
-  font-size: var(--text-label);
-  color: var(--color-text-secondary);
+	display: block;
+	margin-bottom: var(--space-sm);
+	font-size: var(--text-label);
+	color: var(--color-text-secondary);
 }
 
 .form-input {
-  width: 100%;
-  padding: 0.75rem var(--space-md);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-input);
-  color: var(--color-text);
-  font-size: var(--text-body);
-  transition: border-color var(--duration-fast);
+	width: 100%;
+	padding: 0.75rem var(--space-md);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	background: var(--color-input);
+	color: var(--color-text);
+	font-size: var(--text-body);
+	transition: border-color var(--duration-fast);
 }
 
 .form-input:focus {
-  border-color: var(--color-primary);
+	border-color: var(--color-primary);
 }
 
 .form-input::placeholder {
-  color: var(--color-text-muted);
+	color: var(--color-text-muted);
 }
 
 /* --- Group selector --- */
 
 .group-selector-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
 }
 
 /* The row's buttons carry .btn-inline (v1.6.0 rider): .btn's global
    width:100% would starve the flex:1 input below. */
 
 .group-selector-row .form-input {
-  flex: 1;
-  min-width: 0;
+	flex: 1;
+	min-width: 0;
 }
 
 .group-selector-error {
-  margin-top: 0.25rem;
+	margin-top: 0.25rem;
 }
 
 .input-field {
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-input);
-  color: var(--color-text);
-  font-size: var(--text-body);
-  font-family: inherit;
+	width: 100%;
+	padding: 0.5rem 0.75rem;
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	background: var(--color-input);
+	color: var(--color-text);
+	font-size: var(--text-body);
+	font-family: inherit;
 }
 
 .input-field::placeholder {
-  color: var(--color-text-muted);
+	color: var(--color-text-muted);
 }
 
 .input-field:focus {
-  border-color: var(--color-primary);
+	border-color: var(--color-primary);
 }
 
 /* --- Password field --- */
 
 .password-field {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
 }
 
 .password-field input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  color: var(--color-text);
-  font-size: var(--text-mono);
-  font-family: var(--font-mono);
+	flex: 1;
+	background: transparent;
+	border: none;
+	color: var(--color-text);
+	font-size: var(--text-mono);
+	font-family: var(--font-mono);
 }
 
 .password-field button {
-  padding: var(--space-sm);
-  background: transparent;
-  border: none;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  min-width: 40px;
-  min-height: 40px;
+	padding: var(--space-sm);
+	background: transparent;
+	border: none;
+	color: var(--color-text-secondary);
+	cursor: pointer;
+	min-width: 40px;
+	min-height: 40px;
 }
 
 .password-field button:hover {
-  color: var(--color-text);
+	color: var(--color-text);
 }
 
 /* --- Error message --- */
 
 .error-message {
-  background: var(--color-danger-dim);
-  border: 1px solid var(--color-danger);
-  color: var(--color-danger);
-  padding: 0.75rem var(--space-md);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--space-md);
-  font-size: var(--text-body);
+	background: var(--color-danger-dim);
+	border: 1px solid var(--color-danger);
+	color: var(--color-danger);
+	padding: 0.75rem var(--space-md);
+	border-radius: var(--radius-md);
+	margin-bottom: var(--space-md);
+	font-size: var(--text-body);
 }
 
 /* v1.6.2: advisory (not error) notice — warning-tinted box with the same
    shape as .error-message. No --color-warning-dim token exists, so the
    background is intentionally omitted rather than inventing a token. */
 .restore-sync-warning {
-  border: 1px solid var(--color-warning);
-  color: var(--color-warning-text);
-  padding: 0.75rem var(--space-md);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--space-md);
-  font-size: var(--text-body);
+	border: 1px solid var(--color-warning);
+	color: var(--color-warning-text);
+	padding: 0.75rem var(--space-md);
+	border-radius: var(--radius-md);
+	margin-bottom: var(--space-md);
+	font-size: var(--text-body);
 }
 
 /* --- Icons --- */
 
 .icon {
-  width: 24px;
-  height: 24px;
+	width: 24px;
+	height: 24px;
 }
 
 .icon-small {
-  width: 18px;
-  height: 18px;
+	width: 18px;
+	height: 18px;
 }
 
 /* --- Tag --- */
 
 .tag {
-  padding: var(--space-xs) 0.75rem;
-  background: var(--color-border);
-  border-radius: var(--radius-tag);
-  font-size: var(--text-label);
-  color: var(--color-text-secondary);
-  border: 1px solid transparent;
-  cursor: pointer;
-  font-family: inherit;
+	padding: var(--space-xs) 0.75rem;
+	background: var(--color-border);
+	border-radius: var(--radius-tag);
+	font-size: var(--text-label);
+	color: var(--color-text-secondary);
+	border: 1px solid transparent;
+	cursor: pointer;
+	font-family: inherit;
 }
 
 .tag:hover {
-  border-color: var(--color-border-light);
-  color: var(--color-text);
+	border-color: var(--color-border-light);
+	color: var(--color-text);
 }
 
 /* --- Checkbox --- */
 
 .checkbox {
-  width: 20px;
-  height: 20px;
-  accent-color: var(--color-primary);
+	width: 20px;
+	height: 20px;
+	accent-color: var(--color-primary);
 }
 
 /* --- Modal --- */
 
 .modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--shadow-overlay, rgba(0, 0, 0, 0.3));
-  backdrop-filter: blur(2px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-md);
-  z-index: 1000;
+	position: fixed;
+	inset: 0;
+	background: var(--shadow-overlay, rgba(0, 0, 0, 0.3));
+	backdrop-filter: blur(2px);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: var(--space-md);
+	z-index: 1000;
 }
 
 .modal {
-  background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  width: 100%;
-  max-width: 420px;
-  max-height: 90vh;
-  overflow-y: auto;
-  box-shadow: var(--shadow-card);
+	background: var(--color-surface);
+	border-radius: var(--radius-lg);
+	width: 100%;
+	max-width: 420px;
+	max-height: 90vh;
+	overflow-y: auto;
+	box-shadow: var(--shadow-card);
 }
 
 .modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-md) var(--space-lg);
-  border-bottom: 1px solid var(--color-border);
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: var(--space-md) var(--space-lg);
+	border-bottom: 1px solid var(--color-border);
 }
 
 .modal-header h3 {
-  font-size: var(--text-h2);
+	font-size: var(--text-h2);
 }
 
 .modal-body {
-  padding: var(--space-lg);
+	padding: var(--space-lg);
 }
 
 .modal-footer {
-  padding: var(--space-md) var(--space-lg);
-  border-top: 1px solid var(--color-border);
-  display: flex;
-  gap: var(--space-sm);
+	padding: var(--space-md) var(--space-lg);
+	border-top: 1px solid var(--color-border);
+	display: flex;
+	gap: var(--space-sm);
 }
 
 /* --- Confirm modal --- */
 
 .confirm-modal {
-  background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  width: 100%;
-  max-width: 420px;
-  max-height: 90vh;
-  overflow-y: auto;
-  border: 1px solid var(--color-border);
-  box-shadow: var(--shadow-card);
+	background: var(--color-surface);
+	border-radius: var(--radius-lg);
+	width: 100%;
+	max-width: 420px;
+	max-height: 90vh;
+	overflow-y: auto;
+	border: 1px solid var(--color-border);
+	box-shadow: var(--shadow-card);
 }
 
 .confirm-modal-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-lg);
-  border-bottom: 1px solid var(--color-border);
+	display: flex;
+	align-items: center;
+	gap: var(--space-md);
+	padding: var(--space-lg);
+	border-bottom: 1px solid var(--color-border);
 }
 
 .confirm-modal-icon {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-md);
-  background: var(--color-primary-dim);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+	flex-shrink: 0;
+	width: 36px;
+	height: 36px;
+	border-radius: var(--radius-md);
+	background: var(--color-primary-dim);
+	display: flex;
+	align-items: center;
+	justify-content: center;
 }
 
 .confirm-modal-icon svg {
-  width: 18px;
-  height: 18px;
-  color: var(--color-primary);
+	width: 18px;
+	height: 18px;
+	color: var(--color-primary);
 }
 
 .confirm-modal-icon-danger {
-  background: var(--color-danger-dim);
+	background: var(--color-danger-dim);
 }
 
 .confirm-modal-icon-danger svg {
-  color: var(--color-danger);
+	color: var(--color-danger);
 }
 
 .confirm-modal-title {
-  font-size: var(--text-h2);
-  font-weight: 600;
-  color: var(--color-text);
+	font-size: var(--text-h2);
+	font-weight: 600;
+	color: var(--color-text);
 }
 
 .confirm-modal-subtitle {
-  font-size: var(--text-label);
-  color: var(--color-text-muted);
-  margin-top: 2px;
+	font-size: var(--text-label);
+	color: var(--color-text-muted);
+	margin-top: 2px;
 }
 
 .confirm-modal-body {
-  padding: var(--space-lg);
+	padding: var(--space-lg);
 }
 
 .confirm-changes-list {
-  padding: var(--space-sm) var(--space-lg);
+	padding: var(--space-sm) var(--space-lg);
 }
 
 .confirm-change-item {
-  padding: var(--space-md) 0;
-  border-bottom: 1px solid var(--color-border);
+	padding: var(--space-md) 0;
+	border-bottom: 1px solid var(--color-border);
 }
 
 .confirm-change-item:last-child {
-  border-bottom: none;
+	border-bottom: none;
 }
 
 .confirm-change-label {
-  display: block;
-  font-size: var(--text-label);
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: var(--space-xs);
+	display: block;
+	font-size: var(--text-label);
+	font-weight: 600;
+	color: var(--color-text-secondary);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	margin-bottom: var(--space-xs);
 }
 
 .confirm-change-diff {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  font-size: var(--text-body);
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
+	font-size: var(--text-body);
 }
 
 .confirm-change-old {
-  color: var(--color-text-muted);
-  text-decoration: line-through;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+	color: var(--color-text-muted);
+	text-decoration: line-through;
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .confirm-change-arrow {
-  flex-shrink: 0;
-  width: 14px;
-  height: 14px;
-  color: var(--color-primary);
+	flex-shrink: 0;
+	width: 14px;
+	height: 14px;
+	color: var(--color-primary);
 }
 
 .confirm-change-new {
-  color: var(--color-primary);
-  font-weight: 500;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+	color: var(--color-primary);
+	font-weight: 500;
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /* v1.6.1 F1: in-modal error strip. Reuses the global .error-message look;
    this class only aligns it with the modal's horizontal padding (the list
    and footer use --space-lg side padding, the strip has none of its own). */
 .confirm-modal-error {
-  margin-left: var(--space-lg);
-  margin-right: var(--space-lg);
+	margin-left: var(--space-lg);
+	margin-right: var(--space-lg);
 }
 
 .confirm-modal-footer {
-  padding: var(--space-md) var(--space-lg) var(--space-lg);
+	padding: var(--space-md) var(--space-lg) var(--space-lg);
 }
 
 .confirm-checkbox {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-md);
-  font-size: var(--text-label);
-  color: var(--color-text-secondary);
-  cursor: pointer;
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
+	margin-bottom: var(--space-md);
+	font-size: var(--text-label);
+	color: var(--color-text-secondary);
+	cursor: pointer;
 }
 
 .confirm-checkbox input[type="checkbox"] {
-  accent-color: var(--color-primary);
-  width: 16px;
-  height: 16px;
+	accent-color: var(--color-primary);
+	width: 16px;
+	height: 16px;
 }
 
 .confirm-modal-actions {
-  display: flex;
-  gap: var(--space-sm);
+	display: flex;
+	gap: var(--space-sm);
 }
 
 .confirm-modal-actions .btn {
-  flex: 1;
+	flex: 1;
 }
 
 .confirm-save-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+	opacity: 0.4;
+	cursor: not-allowed;
 }
 
 .confirm-delete-message {
-  font-size: var(--text-body);
-  color: var(--color-text-secondary);
-  line-height: 1.5;
+	font-size: var(--text-body);
+	color: var(--color-text-secondary);
+	line-height: 1.5;
 }
 
 /* --- Toast --- */
 
 #toast-container {
-  position: fixed;
-  bottom: 5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 9999;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-  pointer-events: none;
+	position: fixed;
+	bottom: 5rem;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 9999;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-sm);
+	pointer-events: none;
 }
 
 .toast {
-  background: var(--color-text);
-  color: var(--color-surface);
-  padding: 0.75rem var(--space-lg);
-  border-radius: var(--radius-md);
-  font-size: var(--text-body);
-  box-shadow: var(--shadow-toast);
-  animation: fadeIn 0.2s ease-out;
+	background: var(--color-text);
+	color: var(--color-surface);
+	padding: 0.75rem var(--space-lg);
+	border-radius: var(--radius-md);
+	font-size: var(--text-body);
+	box-shadow: var(--shadow-toast);
+	animation: fadeIn 0.2s ease-out;
 }
 
 .toast-success {
-  background: var(--color-success) !important;
-  color: var(--color-on-success);
+	background: var(--color-success) !important;
+	color: var(--color-on-success);
 }
 
 .toast-error {
-  background: var(--color-danger) !important;
-  color: var(--color-on-danger);
+	background: var(--color-danger) !important;
+	color: var(--color-on-danger);
 }
 
 .toast-info {
-  background: var(--color-primary) !important;
-  color: var(--color-on-primary);
+	background: var(--color-primary) !important;
+	color: var(--color-on-primary);
 }
 
 /* Toasts animate inside the already-centered #toast-container, so only the
    Y axis moves — the old translateX(-50%) here shifted each toast half its
    own width to the left during the animation (v1.3.2 fix). */
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(1rem);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+	from {
+		opacity: 0;
+		transform: translateY(1rem);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
 }
 
 @keyframes fadeOut {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(1rem);
-  }
+	from {
+		opacity: 1;
+		transform: translateY(0);
+	}
+	to {
+		opacity: 0;
+		transform: translateY(1rem);
+	}
 }
 
 /* --- Pairing Toast (V4 双主题霓虹风 · 浏览器扩展配对码) ---
@@ -593,118 +596,120 @@
    浅色用柔和发光（避免过曝），深色用强发光（霓虹感）。 */
 
 .pairing-toast {
-  /* 覆盖默认 toast 的内边距与背景 */
-  padding: 0 !important;
-  min-width: 320px;
-  max-width: 90vw;
-  border-radius: 16px;
-  overflow: hidden;
-  pointer-events: auto;
-  font-size: var(--text-body);
-  position: relative;
-  /* 颜色由主题分支控制 */
+	/* 覆盖默认 toast 的内边距与背景 */
+	padding: 0 !important;
+	min-width: 320px;
+	max-width: 90vw;
+	border-radius: 16px;
+	overflow: hidden;
+	pointer-events: auto;
+	font-size: var(--text-body);
+	position: relative;
+	/* 颜色由主题分支控制 */
 }
 
 /* 氛围光晕：用 ::before 蒙一层径向渐变 */
 .pairing-toast::before {
-  content: "";
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  pointer-events: none;
-  z-index: 0;
+	content: "";
+	position: absolute;
+	top: -50%;
+	left: -50%;
+	width: 200%;
+	height: 200%;
+	pointer-events: none;
+	z-index: 0;
 }
 
 .pairing-toast-head,
 .pairing-toast-body,
 .pairing-toast-progress {
-  position: relative;
-  z-index: 1;
+	position: relative;
+	z-index: 1;
 }
 
 .pairing-toast-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 18px 4px;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 14px 18px 4px;
 }
 
 .pairing-toast-icon {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+	width: 26px;
+	height: 26px;
+	border-radius: 7px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 }
 
 .pairing-toast-icon svg {
-  width: 16px;
-  height: 16px;
+	width: 16px;
+	height: 16px;
 }
 
 .pairing-toast-title {
-  flex: 1;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+	flex: 1;
+	font-size: 13px;
+	font-weight: 600;
+	letter-spacing: 0.01em;
 }
 
 .pairing-toast-close {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background: transparent;
-  border: none;
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s, color 0.15s;
+	width: 22px;
+	height: 22px;
+	border-radius: 6px;
+	background: transparent;
+	border: none;
+	font-size: 15px;
+	line-height: 1;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition:
+		background 0.15s,
+		color 0.15s;
 }
 
 .pairing-toast-body {
-  padding: 8px 18px 18px;
-  text-align: center;
+	padding: 8px 18px 18px;
+	text-align: center;
 }
 
 .pairing-toast-label {
-  font-size: 11px;
-  margin-bottom: 6px;
+	font-size: 11px;
+	margin-bottom: 6px;
 }
 
 .pairing-toast-code {
-  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
-  font-size: 44px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-indent: 0.18em;
-  line-height: 1.05;
-  margin: 2px 0 14px;
-  user-select: all;
+	font-family: "SF Mono", "Menlo", "Consolas", monospace;
+	font-size: 44px;
+	font-weight: 700;
+	letter-spacing: 0.18em;
+	text-indent: 0.18em;
+	line-height: 1.05;
+	margin: 2px 0 14px;
+	user-select: all;
 }
 
 /* v1.5.0 (WP5): requesting-extension digest row. The text is set via
    textContent in toast.ts (XSS-safe); this only styles it. */
 .pairing-toast-caller {
-  font-size: 11px;
-  margin: -8px 0 0;
-  opacity: 0.85;
-  word-break: break-all;
+	font-size: 11px;
+	margin: -8px 0 0;
+	opacity: 0.85;
+	word-break: break-all;
 }
 
 .pairing-toast-progress {
-  height: 3px;
-  overflow: hidden;
+	height: 3px;
+	overflow: hidden;
 }
 
 .pairing-toast-progress-bar {
-  width: 100%;
-  height: 100%;
+	width: 100%;
+	height: 100%;
 }
 
 /* === 浅色主题 V4-Light ===
@@ -713,298 +718,330 @@
    tokens cannot express alpha-wrapped primary colors. */
 :root[data-theme="light"] .pairing-toast,
 :root:not([data-theme]) .pairing-toast {
-  background: var(--color-surface);
-  color: var(--color-text);
-  box-shadow: 0 12px 32px rgba(30, 58, 95, 0.12), 0 0 0 1px rgba(30, 58, 95, 0.12);
+	background: var(--color-surface);
+	color: var(--color-text);
+	box-shadow:
+		0 12px 32px rgba(30, 58, 95, 0.12),
+		0 0 0 1px rgba(30, 58, 95, 0.12);
 }
 
 :root[data-theme="light"] .pairing-toast::before,
 :root:not([data-theme]) .pairing-toast::before {
-  background:
-    radial-gradient(circle at 30% 20%, rgba(30, 58, 95, 0.06), transparent 50%),
-    radial-gradient(circle at 70% 80%, rgba(13, 148, 136, 0.05), transparent 50%);
+	background:
+		radial-gradient(circle at 30% 20%, rgba(30, 58, 95, 0.06), transparent 50%),
+		radial-gradient(
+			circle at 70% 80%,
+			rgba(13, 148, 136, 0.05),
+			transparent 50%
+		);
 }
 
 :root[data-theme="light"] .pairing-toast-icon,
 :root:not([data-theme]) .pairing-toast-icon {
-  background: rgba(30, 58, 95, 0.10);
-  color: var(--color-primary);
+	background: rgba(30, 58, 95, 0.1);
+	color: var(--color-primary);
 }
 
 :root[data-theme="light"] .pairing-toast-title,
 :root:not([data-theme]) .pairing-toast-title {
-  color: var(--color-text);
+	color: var(--color-text);
 }
 
 :root[data-theme="light"] .pairing-toast-close,
 :root:not([data-theme]) .pairing-toast-close {
-  color: var(--color-text-muted);
+	color: var(--color-text-muted);
 }
 
 :root[data-theme="light"] .pairing-toast-close:hover,
 :root:not([data-theme]) .pairing-toast-close:hover,
 :root[data-theme="light"] .pairing-toast-close:focus-visible,
 :root:not([data-theme]) .pairing-toast-close:focus-visible {
-  background: rgba(30, 58, 95, 0.08);
-  color: var(--color-text);
-  outline: none;
+	background: rgba(30, 58, 95, 0.08);
+	color: var(--color-text);
+	outline: none;
 }
 
 :root[data-theme="light"] .pairing-toast-label,
 :root:not([data-theme]) .pairing-toast-label {
-  color: var(--color-text-secondary);
+	color: var(--color-text-secondary);
 }
 
 :root[data-theme="light"] .pairing-toast-code,
 :root:not([data-theme]) .pairing-toast-code {
-  color: var(--color-primary);
-  /* 浅底发光需更柔和，避免过曝 */
-  text-shadow: 0 0 12px rgba(30, 58, 95, 0.25), 0 0 24px rgba(30, 58, 95, 0.12);
+	color: var(--color-primary);
+	/* 浅底发光需更柔和，避免过曝 */
+	text-shadow:
+		0 0 12px rgba(30, 58, 95, 0.25),
+		0 0 24px rgba(30, 58, 95, 0.12);
 }
 
 :root[data-theme="light"] .pairing-toast-progress,
 :root:not([data-theme]) .pairing-toast-progress {
-  background: rgba(30, 58, 95, 0.08);
+	background: rgba(30, 58, 95, 0.08);
 }
 
 :root[data-theme="light"] .pairing-toast-progress-bar,
 :root:not([data-theme]) .pairing-toast-progress-bar {
-  background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+	background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
 }
 
 /* === 深色主题 V4-Dark === */
 :root[data-theme="dark"] .pairing-toast {
-  background: var(--color-surface);
-  color: var(--color-text);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(20, 184, 166, 0.25);
+	background: var(--color-surface);
+	color: var(--color-text);
+	box-shadow:
+		0 12px 32px rgba(0, 0, 0, 0.5),
+		0 0 0 1px rgba(20, 184, 166, 0.25);
 }
 
 :root[data-theme="dark"] .pairing-toast::before {
-  background:
-    radial-gradient(circle at 30% 20%, rgba(20, 184, 166, 0.15), transparent 50%),
-    radial-gradient(circle at 70% 80%, rgba(94, 234, 212, 0.10), transparent 50%);
+	background:
+		radial-gradient(
+			circle at 30% 20%,
+			rgba(20, 184, 166, 0.15),
+			transparent 50%
+		),
+		radial-gradient(circle at 70% 80%, rgba(94, 234, 212, 0.1), transparent 50%);
 }
 
 :root[data-theme="dark"] .pairing-toast-icon {
-  background: rgba(20, 184, 166, 0.15);
-  color: var(--color-primary);
+	background: rgba(20, 184, 166, 0.15);
+	color: var(--color-primary);
 }
 
 :root[data-theme="dark"] .pairing-toast-title {
-  color: var(--color-text);
+	color: var(--color-text);
 }
 
 :root[data-theme="dark"] .pairing-toast-close {
-  color: var(--color-text-muted);
+	color: var(--color-text-muted);
 }
 
 :root[data-theme="dark"] .pairing-toast-close:hover,
 :root[data-theme="dark"] .pairing-toast-close:focus-visible {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--color-text);
-  outline: none;
+	background: rgba(255, 255, 255, 0.08);
+	color: var(--color-text);
+	outline: none;
 }
 
 :root[data-theme="dark"] .pairing-toast-label {
-  color: var(--color-text-secondary);
+	color: var(--color-text-secondary);
 }
 
 :root[data-theme="dark"] .pairing-toast-code {
-  color: var(--color-primary);
-  /* 深底发光可更强，霓虹感显著 */
-  text-shadow: 0 0 20px rgba(20, 184, 166, 0.5), 0 0 40px rgba(20, 184, 166, 0.3);
+	color: var(--color-primary);
+	/* 深底发光可更强，霓虹感显著 */
+	text-shadow:
+		0 0 20px rgba(20, 184, 166, 0.5),
+		0 0 40px rgba(20, 184, 166, 0.3);
 }
 
 :root[data-theme="dark"] .pairing-toast-progress {
-  background: rgba(255, 255, 255, 0.08);
+	background: rgba(255, 255, 255, 0.08);
 }
 
 :root[data-theme="dark"] .pairing-toast-progress-bar {
-  background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+	background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
 }
 
 /* --- Strength meter --- */
 
 .strength-meter {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-top: var(--space-sm);
-  min-height: 1.25rem;
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	margin-top: var(--space-sm);
+	min-height: 1.25rem;
 }
 
 .strength-track {
-  flex: 1;
-  height: 4px;
-  appearance: none;
-  border: 0;
-  border-radius: 2px;
-  background: var(--color-border);
-  overflow: hidden;
+	flex: 1;
+	height: 4px;
+	appearance: none;
+	border: 0;
+	border-radius: 2px;
+	background: var(--color-border);
+	overflow: hidden;
 }
 
 .strength-track::-webkit-progress-bar {
-  background: var(--color-border);
+	background: var(--color-border);
 }
 
 .strength-track::-webkit-progress-value {
-  background: currentColor;
-  transition: width var(--duration-slow) var(--easing-out);
+	background: currentColor;
+	transition: width var(--duration-slow) var(--easing-out);
 }
 
 .strength-track::-moz-progress-bar {
-  background: currentColor;
+	background: currentColor;
 }
 
-.strength-very-weak { color: var(--color-danger); }
-.strength-weak { color: var(--color-warning); }
-.strength-fair { color: var(--color-accent); }
+.strength-very-weak {
+	color: var(--color-danger);
+}
+.strength-weak {
+	color: var(--color-warning);
+}
+.strength-fair {
+	color: var(--color-accent);
+}
 .strength-strong,
-.strength-very-strong { color: var(--color-success); }
+.strength-very-strong {
+	color: var(--color-success);
+}
 
 .strength-label {
-  font-size: var(--text-label);
-  font-weight: 500;
-  white-space: nowrap;
-  min-width: 5.5rem;
-  text-align: right;
-  color: var(--color-text-secondary);
+	font-size: var(--text-label);
+	font-weight: 500;
+	white-space: nowrap;
+	min-width: 5.5rem;
+	text-align: right;
+	color: var(--color-text-secondary);
 }
 
 /* The LABELS use the text-grade tokens (v1.3.2): at 12px the plain
    warning/accent/success fill colors miss AA contrast on both themes. */
-.strength-label.strength-very-weak { color: var(--color-danger); }
-.strength-label.strength-weak { color: var(--color-warning-text); }
-.strength-label.strength-fair { color: var(--color-accent-text); }
+.strength-label.strength-very-weak {
+	color: var(--color-danger);
+}
+.strength-label.strength-weak {
+	color: var(--color-warning-text);
+}
+.strength-label.strength-fair {
+	color: var(--color-accent-text);
+}
 .strength-label.strength-strong,
-.strength-label.strength-very-strong { color: var(--color-success-text); }
+.strength-label.strength-very-strong {
+	color: var(--color-success-text);
+}
 
 /* --- Empty state --- */
 
 .empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 4rem var(--space-xl);
-  color: var(--color-text-muted);
-  text-align: center;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 4rem var(--space-xl);
+	color: var(--color-text-muted);
+	text-align: center;
 }
 
 .empty-state svg {
-  width: 64px;
-  height: 64px;
-  margin-bottom: var(--space-md);
-  opacity: 0.5;
+	width: 64px;
+	height: 64px;
+	margin-bottom: var(--space-md);
+	opacity: 0.5;
 }
 
 /* --- Theme switcher (vault header) --- */
 
 .header-separator {
-  width: 1px;
-  height: 16px;
-  background: var(--color-border);
-  margin: 0 3px;
+	width: 1px;
+	height: 16px;
+	background: var(--color-border);
+	margin: 0 3px;
 }
 
 .theme-dot {
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  border-radius: var(--radius-md);
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s;
-  padding: 0;
-  background: transparent;
-  flex-shrink: 0;
+	width: 40px;
+	height: 40px;
+	min-width: 40px;
+	border-radius: var(--radius-md);
+	border: none;
+	cursor: pointer;
+	transition: all 0.2s;
+	padding: 0;
+	background: transparent;
+	flex-shrink: 0;
 }
 
 .theme-dot::before {
-  content: "";
-  display: block;
-  width: 14px;
-  height: 14px;
-  margin: auto;
-  border-radius: 50%;
-  background: var(--color-primary);
+	content: "";
+	display: block;
+	width: 14px;
+	height: 14px;
+	margin: auto;
+	border-radius: 50%;
+	background: var(--color-primary);
 }
 
 .theme-dot:hover {
-  background: var(--color-primary-dim);
+	background: var(--color-primary-dim);
 }
 
 /* --- Update notification --- */
 
 .update-notification {
-  background: var(--color-primary-dim);
-  border-bottom: 1px solid var(--color-primary-border);
-  padding: var(--space-sm) var(--space-md);
+	background: var(--color-primary-dim);
+	border-bottom: 1px solid var(--color-primary-border);
+	padding: var(--space-sm) var(--space-md);
 }
 
 .update-notification-content {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  font-size: var(--text-label);
-  color: var(--color-primary);
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
+	font-size: var(--text-label);
+	color: var(--color-primary);
 }
 
 .update-icon {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
+	width: 16px;
+	height: 16px;
+	flex-shrink: 0;
 }
 
 .update-text {
-  flex: 1;
+	flex: 1;
 }
 
 /* Phase AU: download progress bar under the banner text row. */
 .update-progress {
-  height: 4px;
-  margin-top: var(--space-xs);
-  border-radius: var(--radius-sm);
-  background: var(--color-input);
-  overflow: hidden;
+	height: 4px;
+	margin-top: var(--space-xs);
+	border-radius: var(--radius-sm);
+	background: var(--color-input);
+	overflow: hidden;
 }
 
 .update-progress-bar {
-  height: 100%;
-  background: var(--color-primary);
-  transition: width 0.2s ease;
+	height: 100%;
+	background: var(--color-primary);
+	transition: width 0.2s ease;
 }
 
 /* Settings page manual-check status line (aria-live="polite"). */
 .update-check-status {
-  font-size: var(--text-label);
-  color: var(--color-text-muted);
+	font-size: var(--text-label);
+	color: var(--color-text-muted);
 }
 
 /* --- Layout utilities --- */
 
 .header-spacer {
-  width: 40px;
-  flex-shrink: 0;
+	width: 40px;
+	flex-shrink: 0;
 }
 
 .tag-input-row {
-  display: flex;
-  gap: var(--space-sm);
+	display: flex;
+	gap: var(--space-sm);
 }
 
 .tag-input-row .form-input {
-  flex: 1;
+	flex: 1;
 }
 
 .entry-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-sm);
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-sm);
+	margin-bottom: var(--space-sm);
 }
 
 .tag-label {
-  display: block;
-  margin-top: var(--space-md);
+	display: block;
+	margin-top: var(--space-md);
 }
