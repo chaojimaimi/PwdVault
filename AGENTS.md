@@ -2,10 +2,10 @@
 
 A secure, local-first password manager built with Tauri + React.
 
-**Last Updated**: 2026-10-26
+**Last Updated**: 2026-10-27
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.6.0
-**Current Version**: `v1.6.0` — 2026-10-26 M-tier kernel batch (per-entry custom fields on a four-generation entry codec, sync container v3 + LWW conflict counter + opt-in auto-sync behind the sync_cycle leaf lock, browser-extension save/update prompt backed by a digest-only verify command, backup fidelity fix — .pvault now carries the TOTP/match-mode/custom-fields it had been silently dropping since v1.1.6/v1.5.0) on top of v1.5.1 UI patch + v1.5.0 M-tier product batch (security dashboard with in-process aggregation, 4-vendor CSV importers, trash auto-purge, per-entry URL match override on a three-generation codec + sync container v2, pair toast caller digest) + v1.4.1 trash-tab UI patch + v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.6.1
+**Current Version**: `v1.6.1` — 2026-10-27 acceptance patch (confirm-dialog error channel — save rejections were invisible behind the modal overlay; errorMessage strips the raw `CODE:` transport prefix; custom-field values lazy-load on section focus / row-reveal through the shared secret channel; spellcheck off + form-group rhythm) on top of v1.6.0 M-tier kernel batch (per-entry custom fields on a four-generation entry codec, sync container v3 + LWW conflict counter + opt-in auto-sync behind the sync_cycle leaf lock, browser-extension save/update prompt backed by a digest-only verify command, backup fidelity fix — .pvault now carries the TOTP/match-mode/custom-fields it had been silently dropping since v1.1.6/v1.5.0) + v1.5.1 UI patch + v1.5.0 M-tier product batch (security dashboard with in-process aggregation, 4-vendor CSV importers, trash auto-purge, per-entry URL match override on a three-generation codec + sync container v2, pair toast caller digest) + v1.4.1 trash-tab UI patch + v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -206,7 +206,7 @@ PwdVault/
 | Rust infrastructure crate | 133 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                 | (same run)                                |
 | Rust domain crate         | 15                                                                                                                             | (same run)                                |
 | Rust native-host          | 23                                                                                                                             | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 572 (75 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
+| Frontend (total)          | 585 (75 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -327,6 +327,42 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-10-27 (v1.6.1 — acceptance patch: confirm-dialog error channel, lazy custom-field values, input hygiene)
+
+Compact pipeline (T45 real-device feedback → root causes located at code
+level by the main agent → mini-plan R1 → plan-reviewer REVISE (2×P1: the
+F2 transport premise was wrong — VaultError has serialized to the
+public_message STRING since v1.3.2, so the planned object-shape mock was
+a fictional contract and the visible text carries the raw "CODE: "
+prefix; EntryScreen at 799 lines had no budget plan) → R2 REVISE (1×P1
+was a merge residue: the superseded R1 F2 section survived alongside the
+rewritten one) → R3 **PASS** → single ds-worker → react-reviewer REQUEST
+CHANGES on a real P1 the suite structurally couldn't see — the shared
+in-flight lazy-load promise returned the ROW SNAPSHOT taken at fetch
+start, so rows typed during the fetch window were silently dropped from
+both the diff and the patch (reviewer proved it with a probe test: zero
+changes → leaveEntry, updateEntry never called) → fix: resolution-time
+assembly from a latest-ref mirror + regression test (red→green verified;
+all 12 earlier tests had scheduled edits before the fetch, exactly
+skirting the window) → focused re-review **APPROVE** → clean-worktree
+gates.
+
+Shipped: ConfirmationModal error channel (role=alert inside the dialog;
+form banner + 3 aria-describedby gated on `error && !showConfirmation`);
+errorMessage strips an all-caps `CODE: ` prefix when the remainder is
+non-empty (global display improvement closing CQ-P2a; TOTP/Baidu setup
+classifiers read the raw rejection upstream, unaffected — reviewer
+verified); Custom Fields section lazily loads stored values on
+focus-capture / row-reveal via `loadValues(trigger)` sharing one
+in-flight promise with the save guard (failure backs off focus retries
+only, explicit/save unaffected; keyboard-through posture documented);
+spellCheck off on field inputs; Custom Fields in its own form-group;
+detectChanges verbatim to entryChanges.ts (EntryScreen 799→718).
+
+Tests: 585 frontend CI-true (75 files; +13) / Rust & native-host
+unchanged (434+1 / 23). Plan: fix_impl_plan_v1.6.1.md (R3). QA T52
+appended.
 
 ### 2026-10-26 (v1.6.0 — M-tier kernel batch: custom fields, sync v3 + conflict counter + auto-sync, extension save prompt, backup fidelity)
 
