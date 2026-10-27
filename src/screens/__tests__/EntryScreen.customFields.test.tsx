@@ -126,7 +126,9 @@ describe("sameCustomFields", () => {
 		expect(sameCustomFields([], [row("a", "1")])).toBe(false);
 		expect(sameCustomFields([row("a", "1")], [])).toBe(false);
 		expect(sameCustomFields([row("a", "1")], [row("a", "2")])).toBe(false);
-		expect(sameCustomFields([row("a", "1")], [row("a", "1", true)])).toBe(false);
+		expect(sameCustomFields([row("a", "1")], [row("a", "1", true)])).toBe(
+			false,
+		);
 	});
 
 	test("labels are trimmed for matching; values are compared verbatim", () => {
@@ -138,9 +140,9 @@ describe("sameCustomFields", () => {
 	// sameTags precedent: duplicate multiplicity must survive or removing one
 	// of two same-label rows would not dirty the form.
 	test("duplicate multiplicity is preserved", () => {
-		expect(sameCustomFields([row("a", "1"), row("a", "2")], [row("a", "1")])).toBe(
-			false,
-		);
+		expect(
+			sameCustomFields([row("a", "1"), row("a", "2")], [row("a", "1")]),
+		).toBe(false);
 	});
 });
 
@@ -169,15 +171,9 @@ describe("detectChanges custom branch", () => {
 			},
 		]);
 		expect(
-			detectChanges(
-				baseMeta(),
-				null,
-				form(),
-				false,
-				false,
-				false,
-				[row("token", "t0k3n")],
-			),
+			detectChanges(baseMeta(), null, form(), false, false, false, [
+				row("token", "t0k3n"),
+			]),
 		).toEqual([
 			{
 				fieldId: "custom:token",
@@ -392,7 +388,9 @@ describe("editor wiring", () => {
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-		expect(await screen.findByText("Failed to load custom fields")).toBeInTheDocument();
+		expect(
+			await screen.findByText("Failed to load custom fields"),
+		).toBeInTheDocument();
 		expect(updateEntry).not.toHaveBeenCalled();
 	});
 
@@ -408,7 +406,9 @@ describe("editor wiring", () => {
 		fireEvent.change(screen.getByLabelText("Field 1 value"), {
 			target: { value: "s3cret" },
 		});
-		fireEvent.click(screen.getByRole("button", { name: "Mark field 1 as secret" }));
+		fireEvent.click(
+			screen.getByRole("button", { name: "Mark field 1 as secret" }),
+		);
 
 		fireEvent.click(screen.getByRole("button", { name: "Save" }));
 		await waitFor(() => expect(createEntry).toHaveBeenCalledOnce());
@@ -418,7 +418,9 @@ describe("editor wiring", () => {
 			}),
 		);
 		// The UI-internal row id never reaches the IPC payload.
-		expect(createEntry.mock.calls[0][0].custom_fields[0]).not.toHaveProperty("id");
+		expect(createEntry.mock.calls[0][0].custom_fields[0]).not.toHaveProperty(
+			"id",
+		);
 	});
 
 	test("edit: flipping a stored row's secret flag dirties and replaces", async () => {
@@ -432,7 +434,9 @@ describe("editor wiring", () => {
 		});
 		render(<EntryScreen />);
 
-		fireEvent.click(screen.getByRole("button", { name: "Mark field 1 as secret" }));
+		fireEvent.click(
+			screen.getByRole("button", { name: "Mark field 1 as secret" }),
+		);
 
 		const patch = await saveAndCapturePatch();
 		// The flag flip alone dirties the form → the guarded fetch ran once
