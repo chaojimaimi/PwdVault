@@ -383,8 +383,7 @@ the 800 cap (useCustomFields.ts / EntryGeneratorModal.tsx /
 utils/urlMatchMode.ts extracted; sync_cycle split state_io 800→604 +
 sealed_rows.rs).
 
-Noted for a future batch: extension JS (content.js 2159, background.js
-1057) exceeds the 800-line cap but commit-gate only checks .rs files —
+Noted for a future batch: extension JS (content.js 2159, background.js 1057) exceeds the 800-line cap but commit-gate only checks .rs files —
 either extend the gate or split via manifest multi-file content scripts
 (reviewer suggestion; both need their own session).
 
