@@ -4,8 +4,8 @@ A secure, local-first password manager built with Tauri + React.
 
 **Last Updated**: 2026-10-27
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.6.1
-**Current Version**: `v1.6.1` — 2026-10-27 acceptance patch (confirm-dialog error channel — save rejections were invisible behind the modal overlay; errorMessage strips the raw `CODE:` transport prefix; custom-field values lazy-load on section focus / row-reveal through the shared secret channel; spellcheck off + form-group rhythm) on top of v1.6.0 M-tier kernel batch (per-entry custom fields on a four-generation entry codec, sync container v3 + LWW conflict counter + opt-in auto-sync behind the sync_cycle leaf lock, browser-extension save/update prompt backed by a digest-only verify command, backup fidelity fix — .pvault now carries the TOTP/match-mode/custom-fields it had been silently dropping since v1.1.6/v1.5.0) + v1.5.1 UI patch + v1.5.0 M-tier product batch (security dashboard with in-process aggregation, 4-vendor CSV importers, trash auto-purge, per-entry URL match override on a three-generation codec + sync container v2, pair toast caller digest) + v1.4.1 trash-tab UI patch + v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.6.2
+**Current Version**: `v1.6.2` — 2026-10-27 restore-duplication fix (backup restore keeps the payload's original entry/group ids and group timestamps — ends the delete+sync ×2 duplication whose root cause was re-id meeting REPLACE semantics; backup validation now rejects tombstoned groups; typed-RESTORE gate made visible with per-variant disabled dimming + live hint; restore-dialog cloud-sync advisory) on top of v1.6.1 acceptance patch (confirm-dialog error channel — save rejections were invisible behind the modal overlay; errorMessage strips the raw `CODE:` transport prefix; custom-field values lazy-load on section focus / row-reveal through the shared secret channel; spellcheck off + form-group rhythm) on top of v1.6.0 M-tier kernel batch (per-entry custom fields on a four-generation entry codec, sync container v3 + LWW conflict counter + opt-in auto-sync behind the sync_cycle leaf lock, browser-extension save/update prompt backed by a digest-only verify command, backup fidelity fix — .pvault now carries the TOTP/match-mode/custom-fields it had been silently dropping since v1.1.6/v1.5.0) + v1.5.1 UI patch + v1.5.0 M-tier product batch (security dashboard with in-process aggregation, 4-vendor CSV importers, trash auto-purge, per-entry URL match override on a three-generation codec + sync container v2, pair toast caller digest) + v1.4.1 trash-tab UI patch + v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -195,18 +195,18 @@ PwdVault/
 
 - Initial release: Tauri v2 + React 5 screens, AES-256-GCM + Argon2id, redb, HTTP API, Chrome extension, CI/CD
 
-**Test Suite Summary** (counts from actual test output, 2026-10-26):
+**Test Suite Summary** (counts from actual test output, 2026-10-27):
 
 | Module                    | Tests                                                                                                                          | Command                                   |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
 | Rust tauri-app lib        | 42                                                                                                                             | `cd src-tauri && cargo test`              |
 | Rust capability contract  | 1                                                                                                                              | (same run)                                |
 | Rust golden contract      | 3                                                                                                                              | (same run)                                |
-| Rust application crate    | 240                                                                                                                            | `cd src-tauri && cargo test --workspace`  |
+| Rust application crate    | 243                                                                                                                            | `cd src-tauri && cargo test --workspace`  |
 | Rust infrastructure crate | 133 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                 | (same run)                                |
 | Rust domain crate         | 15                                                                                                                             | (same run)                                |
 | Rust native-host          | 23                                                                                                                             | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 585 (75 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
+| Frontend (total)          | 591 (76 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -323,10 +323,56 @@ git tag vX.Y.Z && git push origin main --tags
 - Extension save prompt: captured credentials live only in the
   page-side closure until the user confirms (≤60s); the background
   worker never holds them (v1.6.0)
+- Backup payloads containing tombstoned groups are rejected on import
+  (`TOMBSTONED_GROUP_IN_BACKUP`) — the export side's live-only filter
+  is now a symmetric import-side invariant; preserved payload ids make
+  restore converge with sync instead of duplicating (v1.6.2)
 
 ---
 
 ## 7. Session Log
+
+### 2026-10-27 (v1.6.2 — restore keeps payload ids: ends delete+sync ×2 duplication; typed-RESTORE gate made visible)
+
+Compact pipeline (two real-device findings → code-level root causes by
+the main agent → plan R1 → plan-reviewer REVISE (1×P1: the
+clone-verbatim design would have lost the tombstone sanitization that
+re-id provided by accident — hand-crafted payloads could land
+tombstoned groups that then sync as deletions to every device;
+1×P2: fourth convergence pairing — cloud tombstone older than the
+restored row = conflict + revive; 2×P3 copy/gating nits) → R2 →
+re-review **PASS** (stale test count + 2×P3 reference wording folded)
+→ single ds-worker (two red→green Rust tests with evidence;
+documented deviations: .error-message reuse for the advisory +
+probe-per-dialog-open semantics — both accepted) → dual review
+(rust **APPROVE** 0 P0-P2, 2×P3: test-helper dedup + comment
+precision; react **APPROVE** 0 P0-P2, 4×P3: warning severity class,
+syncActive symmetry, role=status, csv mock hygiene) → main-agent
+folded all six P3s → clean-worktree gates (fresh worktree + sidecar
+pre-step; clean frontend count 591/76 exactly matching the fold
+math).
+
+Shipped: `import_groups` verbatim (payload.groups.clone() — group ids
+AND timestamps survive; the remap had been silently resetting them to
+now); encrypt_import_entries keeps entry.id/group_id from the payload;
+`TOMBSTONED_GROUP_IN_BACKUP` in backup_payload (the export-side
+live-only filter is now a symmetric import invariant; strictly
+backward compatible — legit exports carry none, pre-v1.1.6 backups
+serde-default to None); restore dialog sync advisory (role=status,
+warning-tinted `.restore-sync-warning`, no invented token) + visible
+typed-RESTORE gate (`.btn-secondary:disabled`/`.btn-danger:disabled`
+mirror `.btn-primary` — a global `.btn:disabled` deliberately avoided
+per the .btn lessons; hint gated on non-empty mismatch, aria-live
+silent on open); convergence pinned by
+`restore_converges_with_cloud_without_duplication` (four same-id
+pairings, conflict_count==1, changed==true). CSV import re-id
+untouched (true merge semantics); merge/publish/engine untouched.
+Real-vault duplicate cleanup stays manual (recipe given; automatic
+duplicate detection recorded as an independent future item).
+
+Tests: 591 frontend CI-true (76 files; +6) / Rust 437 (+1 ignored; +3)
+/ native-host 23. Plan: fix_impl_plan_v1.6.2.md (R3). QA T53 appended —
+item 1 (restore→sync no-duplication E2E) is the gating item.
 
 ### 2026-10-27 (v1.6.1 — acceptance patch: confirm-dialog error channel, lazy custom-field values, input hygiene)
 
