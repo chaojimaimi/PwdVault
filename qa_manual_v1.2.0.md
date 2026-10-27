@@ -330,3 +330,18 @@
    Re-run、trash Empty trash、更新通知横幅三按钮——全部内容宽、无塌缩、
    无溢出（rider 迁移了 5 处 scoped 压制 + update-notification 新增）。
 2. Light/Dark 两主题各过一遍。
+
+## T52 v1.6.1 修补真机（确认框错误 + 字段值懒加载 + 输入卫生）
+
+1. **错误可见性（P1 回归）**：编辑条目加两行同 label 字段 → Save → 勾选 → Save
+   Changes → 确认框**内**出现红字 "Duplicate custom field label"（不再无提示）；
+   弹窗保持打开、勾选保留；Cancel 后错误回落到表单区；修正 label 后保存成功。
+2. **文案剥离**：只填 value 不填 label 保存 → 弹窗内显示 "Custom field label is
+   empty or too long"（无 "INVALID_CUSTOM_FIELD_LABEL:" 码前缀）。
+3. **懒加载**：重进带自定义字段的条目 → 点进 Custom Fields 任意输入框 → 已存值
+   自动出现（无需先点主密码眼睛）；点行内眼睛 → 掩码解除且值填充；全程网络面板
+   （或体感）确认只发一次取值。
+4. **不打扰**：create 表单、无字段条目、已加载条目 → 点进字段区不发请求。
+5. **输入卫生**：value 框键入乱串无拼写红线；Custom Fields 小节与 Tags 的间距
+   与其它小节一致（两主题目检）。
+6. **回归**：v1.6.0 的 T45 全部用例快速过一遍（焦点不丢、掩码、diff、保存往返）。
