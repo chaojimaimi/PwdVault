@@ -353,6 +353,20 @@ pub fn backup_payload(payload: &BackupPayload) -> Result<(), DomainError> {
     }
     let mut group_names = HashSet::new();
     for group in &payload.groups {
+        // Symmetric live-only invariant (v1.6.2): export filters tombstoned
+        // groups out (backup.rs), so import must REJECT them. The previous
+        // re-id path sanitized `deleted_at` away through `Group::new`, which
+        // let a hand-edited payload bury a deletion into the vault and spread
+        // it to every peer on the next sync. Backwards compatible by
+        // construction: legitimate exports never carry tombstones, and
+        // pre-v1.1.6 backups deserialize with `deleted_at: None` (serde
+        // default).
+        if group.deleted_at.is_some() {
+            return Err(invalid(
+                "TOMBSTONED_GROUP_IN_BACKUP",
+                "Backup contains a deleted (tombstoned) group",
+            ));
+        }
         id(&group.id)?;
         let name = group_name(&group.name)?;
         if !group_names.insert(name.to_lowercase()) {

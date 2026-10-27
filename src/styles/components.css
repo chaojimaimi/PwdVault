@@ -74,6 +74,14 @@
   background: var(--color-border-light);
 }
 
+/* v1.6.2 (F3): per-variant disabled affordance. Deliberately NOT a global
+   .btn:disabled rule — global .btn changes have a large blast radius (the
+   v1.5.1 width lesson), so each variant mirrors .btn-primary:disabled. */
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .btn-danger {
   background: var(--color-danger);
   color: var(--color-on-danger);
@@ -81,6 +89,13 @@
 
 .btn-danger:hover:not(:disabled) {
   background: var(--color-danger-hover);
+}
+
+/* v1.6.2 (F3): see .btn-secondary:disabled — a disabled danger button used
+   to look identical to an enabled one (restore-dialog QA finding). */
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .btn-icon {
@@ -238,6 +253,18 @@
   background: var(--color-danger-dim);
   border: 1px solid var(--color-danger);
   color: var(--color-danger);
+  padding: 0.75rem var(--space-md);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-md);
+  font-size: var(--text-body);
+}
+
+/* v1.6.2: advisory (not error) notice — warning-tinted box with the same
+   shape as .error-message. No --color-warning-dim token exists, so the
+   background is intentionally omitted rather than inventing a token. */
+.restore-sync-warning {
+  border: 1px solid var(--color-warning);
+  color: var(--color-warning-text);
   padding: 0.75rem var(--space-md);
   border-radius: var(--radius-md);
   margin-bottom: var(--space-md);

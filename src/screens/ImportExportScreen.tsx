@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth, useVault } from "../context/AppContext";
 import {
 	exportVaultFile,
@@ -6,6 +6,7 @@ import {
 	importCsvCommit,
 	importCsvOpen,
 	importCsvOpenBytes,
+	syncStatus,
 } from "../api/vault";
 import { showToast } from "../utils/toast";
 import { BackHeader } from "../components/BackHeader";
@@ -47,6 +48,38 @@ export function ImportExportScreen() {
 	const [csvFileName, setCsvFileName] = useState("");
 	const [csvError, setCsvError] = useState<string | null>(null);
 	const [csvImporting, setCsvImporting] = useState(false);
+	// v1.6.2 (F2): advisory-only cloud-sync warning while the restore confirm
+	// dialog is open. One probe per dialog-open (the ref keeps duplicate
+	// effect runs from issuing parallel probes); a response arriving after
+	// close/unmount is dropped so it never sets state. A failed probe stays
+	// silent by design — the restore itself does not depend on sync state.
+	const [syncActive, setSyncActive] = useState(false);
+	const syncProbeInFlight = useRef(false);
+	useEffect(() => {
+		if (!showImportConfirm) {
+			syncProbeInFlight.current = false;
+			return;
+		}
+		if (syncProbeInFlight.current) return;
+		syncProbeInFlight.current = true;
+		let cancelled = false;
+		syncStatus()
+			.then((status) => {
+				// Mirror the probe result exactly (not just the true arm): today
+				// enabled cannot flip within one mount, but keeping the state
+				// equal to the latest probe removes the dependency on that
+				// external fact.
+				if (!cancelled) {
+					setSyncActive(status.enabled === true);
+				}
+			})
+			.catch(() => {
+				// Advisory-only: a failed probe leaves the warning absent.
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [showImportConfirm]);
 
 	const handleBack = () => {
 		authActions.navigate("settings");
@@ -469,6 +502,18 @@ export function ImportExportScreen() {
 						This will replace all current vault data with the backup contents.
 						This action cannot be undone.
 					</p>
+					{syncActive && (
+						// role="status" (implied aria-live=polite): the warning is
+						// inserted after the dialog opens, so without a live region
+						// a screen reader that started announcing on open never
+						// hears it. Advisory content, warning-tinted — not an error.
+						<p className="restore-sync-warning" role="status">
+							Cloud sync is active — after restoring, the next sync merges
+							both sides by timestamp (newer wins). Entries deleted after
+							this backup was taken stay deleted once their deletion has
+							synced.
+						</p>
+					)}
 					<label htmlFor="restore-confirmation">Type RESTORE to continue</label>
 					<input
 						id="restore-confirmation"
@@ -478,6 +523,16 @@ export function ImportExportScreen() {
 						onChange={(event) => setRestoreConfirmation(event.target.value)}
 						autoComplete="off"
 					/>
+					{/* v1.6.2 (F3): visible answer to a disabled Restore button.
+					    Empty input stays silent — the label right above already says
+					    what to type, and an aria-live region must not announce on
+					    dialog open. */}
+					{restoreConfirmation.length > 0 &&
+						restoreConfirmation !== "RESTORE" && (
+							<p className="error-message" aria-live="polite">
+								Type exactly RESTORE to continue (case-sensitive)
+							</p>
+						)}
 				</div>
 				<div className="confirm-modal-footer">
 					<div className="confirm-modal-actions">

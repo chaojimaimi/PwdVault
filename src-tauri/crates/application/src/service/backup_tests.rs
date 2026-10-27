@@ -263,16 +263,15 @@ fn invalid_kdf_and_oversized_backup_rejected_before_work() {
     assert!(import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).is_err());
 }
 
-/// X6 helper: build a minimal VALID backup-v1 envelope whose KDF params
-/// are fixed explicitly (v1 has no AAD, so the params are freely chosen
-/// without breaking the ciphertext). Used to probe the import floor.
-fn v1_backup_with_params(params: AdaptiveParams) -> VaultBackup {
-    let payload = BackupPayload {
-        entries: vec![],
-        groups: vec![],
-        settings: Settings::default(),
-    };
-    let payload_json = serde_json::to_vec(&payload).unwrap();
+/// Shared envelope builder: wraps a caller-chosen payload with the caller's
+/// KDF params into a minimal VALID backup-v1 envelope (v1 has no AAD, so the
+/// payload bytes and params are freely chosen without breaking the
+/// ciphertext).
+fn v1_backup_with_payload_and_params(
+    payload: &BackupPayload,
+    params: AdaptiveParams,
+) -> VaultBackup {
+    let payload_json = serde_json::to_vec(payload).unwrap();
     let salt = [0x42u8; 16];
     let (key, _) = crypto::kdf::derive_key_with_params(TEST_PASSWORD, &salt, &params).unwrap();
     let encrypted = crypto::encrypt(&key, &payload_json).unwrap();
@@ -290,6 +289,18 @@ fn v1_backup_with_params(params: AdaptiveParams) -> VaultBackup {
         nonce: b64.encode(&encrypted.nonce),
         data: b64.encode(&encrypted.ciphertext),
     }
+}
+
+/// X6 helper: build a minimal VALID backup-v1 envelope whose KDF params
+/// are fixed explicitly (v1 has no AAD, so the params are freely chosen
+/// without breaking the ciphertext). Used to probe the import floor.
+fn v1_backup_with_params(params: AdaptiveParams) -> VaultBackup {
+    let payload = BackupPayload {
+        entries: vec![],
+        groups: vec![],
+        settings: Settings::default(),
+    };
+    v1_backup_with_payload_and_params(&payload, params)
 }
 
 /// X6: a backup embedded with params exactly at the import floor
@@ -406,4 +417,110 @@ fn parse_accepts_well_formed_v1_envelope() {
     assert_eq!(parsed.salt, backup.salt);
     assert_eq!(parsed.nonce, backup.nonce);
     assert_eq!(parsed.data, backup.data);
+}
+
+// ---------------------------------------------------------------------------
+// v1.6.2 (F1): restore keeps the payload's original ids. The old import path
+// minted fresh ids for every row, so after a restore the id-union LWW sync
+// merge saw two unrelated live copies of every row and duplicated the vault
+// on every device. These tests pin the replacement semantics: payload ids
+// and group timestamps survive the restore.
+// ---------------------------------------------------------------------------
+
+/// Build a minimal VALID backup-v1 envelope around a caller-chosen payload
+/// (v1 has no AAD binding, so the payload bytes are freely chosen — same
+/// trick as [`v1_backup_with_params`]), sealed at the import-floor params.
+fn v1_backup_with_payload(payload: &BackupPayload) -> VaultBackup {
+    v1_backup_with_payload_and_params(
+        payload,
+        AdaptiveParams {
+            m_cost: crypto::kdf::KdfPolicy::IMPORT_MIN_MEMORY_KIB,
+            t_cost: crypto::kdf::KdfPolicy::IMPORT_MIN_ITERATIONS,
+            p_cost: 1,
+        },
+    )
+}
+
+fn restore_payload() -> BackupPayload {
+    BackupPayload {
+        entries: vec![ExportEntry {
+            id: "restore-entry-1".to_string(),
+            title: "Restored Entry".to_string(),
+            url: Some("https://restore.example.test".to_string()),
+            username: "restore-user".to_string(),
+            password: Zeroizing::new("restore-password".to_string()),
+            notes: None,
+            tags: vec![],
+            group_id: Some("restore-group-1".to_string()),
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_100,
+            url_match_mode: pwdvault_domain::UrlMatchMode::Auto,
+            totp_secret: None,
+            custom_fields: vec![],
+        }],
+        groups: vec![Group {
+            id: "restore-group-1".to_string(),
+            name: "Restored Group".to_string(),
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_050,
+            deleted_at: None,
+        }],
+        settings: Settings::default(),
+    }
+}
+
+/// v1.6.2 (F1): the restore carries the payload's original entry id, group
+/// id and group timestamps into the vault. Preserving ids is the premise for
+/// the id-union LWW sync merge to converge with the cloud after a restore
+/// (fix_impl_plan_v1.6.2 §0) instead of duplicating every row.
+#[test]
+fn import_preserves_entry_and_group_ids() {
+    let (state, _dir) = unlocked_state();
+    let backup = v1_backup_with_payload(&restore_payload());
+
+    let result = import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap();
+    assert_eq!(result.entries_imported, 1);
+    assert_eq!(result.groups_imported, 1);
+
+    let entries = crate::service::list_all_entries(&state).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, "restore-entry-1");
+    assert_eq!(entries[0].group_id.as_deref(), Some("restore-group-1"));
+
+    let groups = crate::service::list_all_groups(&state).unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].id, "restore-group-1");
+    assert_eq!(groups[0].name, "Restored Group");
+    // Group timestamps ride the payload verbatim too — the old remap reset
+    // them to "now", silently discarding the backup's group history.
+    assert_eq!(groups[0].created_at, 1_700_000_000);
+    assert_eq!(groups[0].updated_at, 1_700_000_050);
+}
+
+/// v1.6.2 (F1, R1 review P1): a hand-edited payload carrying a tombstoned
+/// group is rejected outright. The old re-id path sanitized `deleted_at`
+/// away through `Group::new`, letting such a payload bury a deletion into
+/// the vault and spread it to every peer on the next sync. Export filters
+/// tombstones (backup.rs), so no legitimate backup ever trips this — the
+/// check only closes the hole the sanitizing layer used to cover.
+#[test]
+fn import_rejects_tombstoned_group() {
+    let (state, _dir) = unlocked_state();
+    let mut payload = restore_payload();
+    payload.groups[0].deleted_at = Some(1_700_000_300);
+    let backup = v1_backup_with_payload(&payload);
+
+    let error =
+        import_vault(&state, backup, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap_err();
+    match error {
+        VaultError::InvalidInput { code, .. } => {
+            assert_eq!(code, "TOMBSTONED_GROUP_IN_BACKUP");
+        }
+        other => panic!("expected TOMBSTONED_GROUP_IN_BACKUP, got {other:?}"),
+    }
+    // Rejected in the validation stage, BEFORE any destructive step: the
+    // pre-existing vault content survives untouched.
+    let entries = crate::service::list_all_entries(&state).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].title, "Backup entry");
 }

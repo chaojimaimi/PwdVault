@@ -83,8 +83,11 @@ pub fn export_vault(
     // Uses list_all_entries_bulk (single read txn, §5.6.2) instead of the
     // old list_entries + N×load_entry pattern.
     // Soft delete (P2.2): tombstoned rows are excluded — a restore must not
-    // resurrect entries the user deleted (note: restoring an older backup
-    // can still re-add a deleted entry under its old ID; documented).
+    // resurrect entries the user deleted. Restoring an older backup CAN
+    // still re-add a deleted entry under its old ID; since v1.6.2 the import
+    // keeps payload ids, so that is the desired behavior: the id-union LWW
+    // sync merge arbitrates the restored copy against the cloud (newer wins,
+    // a newer deletion stands) instead of duplicating the row.
     let all_entries = database::list_all_entries_bulk(&db, key, None)?;
     let live_group_ids: std::collections::HashSet<String> =
         database::list_all_groups_bulk(&db, key)?
@@ -395,27 +398,29 @@ fn decrypt_backup_payload(
     .map_err(|_| VaultError::InvalidPassword)
 }
 
-/// Stage 5a: re-ID the payload groups (new IDs avoid conflicts with the
-/// live vault) and return the old→new group-id map for the entry remap.
-fn remap_import_groups(
-    payload: &BackupPayload,
-) -> (Vec<Group>, std::collections::HashMap<String, String>) {
-    let mut group_id_map: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-    let mut new_groups = Vec::new();
-    for g in &payload.groups {
-        let new_group = Group::new(g.name.clone());
-        group_id_map.insert(g.id.clone(), new_group.id.clone());
-        new_groups.push(new_group);
-    }
-    (new_groups, group_id_map)
+/// Stage 5a: restore the payload groups verbatim (v1.6.2 F1). import_vault is
+/// REPLACE semantics — every existing row (local tombstones included) is
+/// removed before the payload rows are inserted — so a payload id can never
+/// collide with a surviving row and the old mint-new-ids defense protected
+/// nothing. Keeping the original ids AND timestamps is what lets the
+/// id-union LWW sync merge converge after a restore (cloud-newer wins / a
+/// newer deletion stands / identical content silently dedups — the
+/// convergence table in fix_impl_plan_v1.6.2 §0) instead of duplicating
+/// every row. Restoring the same backup into two vaults yields identical
+/// ids and content, which dedups the same way once both sync.
+fn import_groups(payload: &BackupPayload) -> Vec<Group> {
+    payload.groups.clone()
 }
 
-/// Stage 5b: re-encrypt every entry under the current master key, mapping
-/// group references through the old→new ID map.
+/// Stage 5b: re-encrypt every entry under the current master key. Ids, group
+/// references and timestamps ride the payload verbatim (v1.6.2 F1 — see
+/// [`import_groups`]); only the secret material is re-sealed.
+/// last_used_at (device-local) and deleted_at reset to the constructor's
+/// `None` — the payload cannot carry them (ExportEntry has no such fields)
+/// and a restored row is live by the export-side tombstone filter, which is
+/// exactly the premise the sync convergence narrative relies on.
 fn encrypt_import_entries(
     payload: &BackupPayload,
-    group_id_map: &std::collections::HashMap<String, String>,
     key: &[u8; 32],
 ) -> Result<Vec<PasswordEntry>, VaultError> {
     let mut new_entries = Vec::new();
@@ -425,6 +430,11 @@ fn encrypt_import_entries(
             pwdvault_domain::validation::normalize_url(export_entry.url.clone()),
             export_entry.username.clone(),
         );
+        // v1.6.2 (F1): keep the payload's original id and group reference —
+        // replace semantics make an id conflict impossible, and preserved
+        // ids are the convergence premise for sync (see [`import_groups`]).
+        entry.id = export_entry.id.clone();
+        entry.group_id = export_entry.group_id.clone();
 
         // Encrypt password with current master key
         let enc_pwd = encrypt(key, export_entry.password.as_bytes())?;
@@ -440,11 +450,6 @@ fn encrypt_import_entries(
         };
 
         entry.tags = export_entry.tags.clone();
-        // Map old group_id to new group_id
-        entry.group_id = export_entry
-            .group_id
-            .as_ref()
-            .and_then(|gid| group_id_map.get(gid).cloned());
         entry.created_at = export_entry.created_at;
         entry.updated_at = export_entry.updated_at;
         // v1.6.0 (D8): restore the payload's three newer fields. Old backups
@@ -480,14 +485,14 @@ fn encrypt_import_entries(
 
 /// Stage 5: pre-validate and pre-encrypt every row BEFORE any destructive
 /// operations — a validation or encryption failure must leave the database
-/// untouched. Returns the re-IDed groups and the entries re-encrypted under
-/// the current master key.
+/// untouched. Returns the payload groups verbatim and the entries re-encrypted
+/// under the current master key.
 fn prepare_import_rows(
     payload: &BackupPayload,
     key: &[u8; 32],
 ) -> Result<(Vec<Group>, Vec<PasswordEntry>), VaultError> {
-    let (new_groups, group_id_map) = remap_import_groups(payload);
-    let new_entries = encrypt_import_entries(payload, &group_id_map, key)?;
+    let new_groups = import_groups(payload);
+    let new_entries = encrypt_import_entries(payload, key)?;
     Ok((new_groups, new_entries))
 }
 

@@ -14,6 +14,11 @@ const importCsvCommit = vi.fn();
 vi.mock("../../api/vault", () => ({
 	exportVaultFile: vi.fn().mockResolvedValue(null),
 	readBackupFile: vi.fn().mockResolvedValue(null),
+	// v1.6.2: the restore dialog probes sync state on open. These tests never
+	// open that dialog, but the factory must carry the export anyway — a
+	// missing entry would fail with the opaque vitest mock error if a future
+	// case ever opens it.
+	syncStatus: vi.fn().mockResolvedValue({ enabled: false }),
 	importCsvOpen: (...args: unknown[]) => importCsvOpen(...args),
 	importCsvOpenBytes: (...args: unknown[]) => importCsvOpenBytes(...args),
 	importCsvCommit: (...args: unknown[]) => importCsvCommit(...args),

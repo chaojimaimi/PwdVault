@@ -348,6 +348,127 @@ fn snapshots_equivalent_ignores_envelope_and_detects_content_changes() {
 }
 
 // ------------------------------------------------------------------
+// v1.6.2 (F1): restore convergence. A restored backup now keeps its
+// original ids (backup.rs), so every restore-vs-cloud state resolves
+// through the ordinary id-paired LWW rules below — no duplication. This
+// pins the convergence CONTRACT the restore path relies on; merge.rs is
+// deliberately untouched by the fix.
+// ------------------------------------------------------------------
+
+/// The four restore-vs-cloud states (fix_impl_plan_v1.6.2 §0): cloud edit
+/// newer than the backup, cloud deletion after the backup, cloud deletion
+/// before the backup (remove_entry stamps updated_at = deleted_at), and
+/// identical content.
+#[test]
+fn restore_converges_with_cloud_without_duplication() {
+    // t0 = the backup moment — every restored row's updated_at.
+    let t0 = 1_700_001_000;
+    let restored = |id: &str| {
+        let mut entry = sync_entry(id);
+        entry.updated_at = t0;
+        entry
+    };
+
+    let mut cloud_newer = sync_entry("e-cloud-newer");
+    cloud_newer.updated_at = t0 + 1_000;
+    cloud_newer.title = "Cloud edit".to_string();
+
+    let mut cloud_deleted_after = sync_entry("e-deleted-after");
+    cloud_deleted_after.updated_at = t0 + 1_100;
+    cloud_deleted_after.deleted_at = Some(t0 + 1_100);
+
+    let mut cloud_deleted_before = sync_entry("e-deleted-before");
+    cloud_deleted_before.updated_at = t0 - 500;
+    cloud_deleted_before.deleted_at = Some(t0 - 500);
+
+    let local = SyncSnapshot {
+        rev: 1,
+        device_id: "restored-device".to_string(),
+        generated_at: t0,
+        entries: vec![
+            restored("e-cloud-newer"),
+            restored("e-deleted-after"),
+            restored("e-deleted-before"),
+            restored("e-identical"),
+        ],
+        groups: vec![sync_group("g-identical")],
+    };
+    let remote = SyncSnapshot {
+        rev: 7,
+        device_id: "cloud".to_string(),
+        generated_at: t0 + 2_000,
+        entries: vec![
+            cloud_newer,
+            cloud_deleted_after,
+            cloud_deleted_before,
+            restored("e-identical"), // byte-identical content → silent dedup
+        ],
+        groups: vec![sync_group("g-identical")],
+    };
+
+    let merged = merge_snapshots(&local, &remote);
+
+    // No duplication: the four entry ids and one group id stay unique sets.
+    assert_eq!(merged.entries.len(), 4);
+    let ids: std::collections::HashSet<&str> = merged
+        .entries
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect();
+    assert_eq!(ids.len(), 4);
+    for id in [
+        "e-cloud-newer",
+        "e-deleted-after",
+        "e-deleted-before",
+        "e-identical",
+    ] {
+        assert!(ids.contains(&id), "restored id {id} lost by the merge");
+    }
+    assert_eq!(merged.groups.len(), 1);
+    assert_eq!(merged.groups[0].id, "g-identical");
+
+    // ① Cloud edit strictly newer → LWW keeps the cloud content.
+    let winner = &merged
+        .entries
+        .iter()
+        .find(|e| e.id == "e-cloud-newer")
+        .unwrap();
+    assert_eq!(winner.title, "Cloud edit");
+    assert_eq!(winner.updated_at, t0 + 1_000);
+
+    // ② Deletion newer than the backup → stays deleted, no resurrection.
+    let deleted = &merged
+        .entries
+        .iter()
+        .find(|e| e.id == "e-deleted-after")
+        .unwrap();
+    assert_eq!(deleted.deleted_at, Some(t0 + 1_100));
+
+    // ③ Deletion OLDER than the backup (edit after delete): counted exactly
+    //    once, and the restored live row wins (merge.rs live-wins branch).
+    let revived = &merged
+        .entries
+        .iter()
+        .find(|e| e.id == "e-deleted-before")
+        .unwrap();
+    assert_eq!(revived.deleted_at, None);
+    assert_eq!(revived.title, "Title e-deleted-before");
+    assert_eq!(merged.conflicts, 1);
+    // The divergent row differs from the remote snapshot → flagged for
+    // upload, which is what re-propagates the restored content.
+    assert!(merged.changed);
+
+    // ④ Identical content → silent dedup; contributes no conflict.
+    let same = &merged
+        .entries
+        .iter()
+        .find(|e| e.id == "e-identical")
+        .unwrap();
+    assert_eq!(same.updated_at, t0);
+    assert_eq!(same.deleted_at, None);
+}
+
+// ------------------------------------------------------------------
 // Property tests (P3.6 item 2): commutativity / idempotence / lossless
 // union over 100 pseudo-random scenarios from FIXED seeds — no true
 // randomness, failures reproduce exactly.
