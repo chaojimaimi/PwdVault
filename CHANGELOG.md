@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.6.2] - 2026-10-27
+
+### Fixed
+
+- **Restoring a backup no longer duplicates everything on the next
+  sync**: restores used to mint fresh ids for every entry and group
+  while wiping the local vault — including deletion markers that had
+  not reached the cloud yet. The next sync then saw the old cloud rows
+  and the new restored rows as unrelated data and kept both, doubling
+  every entry and group. Restores now keep the backup's original ids
+  (and group timestamps), so the next sync converges by its normal
+  newest-wins rules: newer cloud edits win, entries deleted after the
+  backup stays deleted, identical content merges silently.
+- **Hand-crafted backup files can no longer smuggle deleted groups**:
+  backup validation now rejects a payload containing a tombstoned
+  group (the export side never produces one). Legitimate backups —
+  including those from versions before soft-delete — are unaffected.
+- **The typed-RESTORE gate is now visible**: the Restore button was
+  correctly disabled until the exact word was typed, but a disabled
+  button looked identical to an enabled one and nothing explained the
+  wait. Disabled secondary/danger buttons now dim (matching the
+  primary button), a live hint appears while the typed text is wrong,
+  and the busy states of the CSV picker/import buttons dim too.
+- **Restore dialog warns when cloud sync is on**: before you confirm,
+  the dialog states how the next sync will merge both sides (newest
+  wins; deletions that have already synced stay deleted).
+
 ## [1.6.1] - 2026-10-27
 
 ### Fixed
