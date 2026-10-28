@@ -363,3 +363,23 @@
    不一样，停下来先报告再删。
 6. **回归**：导出 → 改主密码 → 用导出密码恢复旧备份仍可用（v1.6.0 备份忠实性
    不回退）；恢复后条目 id 与备份一致（重复场景不再复现的结构性保证）。
+
+## T54 v1.6.3 技术债真机（.btn 宽度反转 + 扩展拆分冒烟）
+
+**核心注意：`.btn` 不再默认整宽**——本批把全局 `width:100%` 反转为默认内容宽、
+`.btn-block` 显式整宽。jsdom 全盲，全屏 sweep 是唯一验证手段。重点核对四组
+"刻意内容宽"新态 + 一切老按钮的宽度与节奏：
+
+1. **全屏按钮 sweep（Light/Dark 两主题各一遍）**：Unlock/Setup/Recovery 表单
+   主按钮（应整宽）；Settings 全部区块主操作（Revoke/Re-run/Connect 等，应整
+   宽）；条目页 Load notes、生成器页按钮；各弹窗 footer（确认/删除弹窗应保持
+   Cancel/Save 50/50 等宽分栏；UnsavedChangesModal、EntryGeneratorModal footer、
+   ErrorBoundary 三处是无 flex:1 的分栏行——重点核对）；仪表盘/回收站/分组管理
+   图标按钮与 flex 行按钮（应内容宽、不塌缩不溢出）。
+2. **四组刻意内容宽新态**：Updates 区 Check for updates 按钮（option-row 内右
+   侧内容宽）；分组 tab 行错误重试链接；回收站条目行 Restore/Delete 小按钮对；
+   trash Empty trash（仍应保持内容宽不横穿 header）。
+3. **扩展拆分冒烟（unpacked 加载 v1.6.3 chrome/）**：登录页填充提示 + 自动填
+   充；提交登录触发保存/更新提示；popup 三功能（搜索、复制、生成器）；悬浮按
+   钮与 overlay；锁后行为（扩展提示锁定）；Firefox 同套冒烟。
+4. **回归**：v1.6.2 的 T53.1（恢复→同步不重复）快速过一遍。

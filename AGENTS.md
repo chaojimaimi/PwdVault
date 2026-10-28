@@ -2,10 +2,10 @@
 
 A secure, local-first password manager built with Tauri + React.
 
-**Last Updated**: 2026-10-27
+**Last Updated**: 2026-10-28
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.6.2
-**Current Version**: `v1.6.2` — 2026-10-27 restore-duplication fix (backup restore keeps the payload's original entry/group ids and group timestamps — ends the delete+sync ×2 duplication whose root cause was re-id meeting REPLACE semantics; backup validation now rejects tombstoned groups; typed-RESTORE gate made visible with per-variant disabled dimming + live hint; restore-dialog cloud-sync advisory) on top of v1.6.1 acceptance patch (confirm-dialog error channel — save rejections were invisible behind the modal overlay; errorMessage strips the raw `CODE:` transport prefix; custom-field values lazy-load on section focus / row-reveal through the shared secret channel; spellcheck off + form-group rhythm) on top of v1.6.0 M-tier kernel batch (per-entry custom fields on a four-generation entry codec, sync container v3 + LWW conflict counter + opt-in auto-sync behind the sync_cycle leaf lock, browser-extension save/update prompt backed by a digest-only verify command, backup fidelity fix — .pvault now carries the TOTP/match-mode/custom-fields it had been silently dropping since v1.1.6/v1.5.0) + v1.5.1 UI patch + v1.5.0 M-tier product batch (security dashboard with in-process aggregation, 4-vendor CSV importers, trash auto-purge, per-entry URL match override on a three-generation codec + sync container v2, pair toast caller digest) + v1.4.1 trash-tab UI patch + v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.6.3
+**Current Version**: `v1.6.3` — 2026-10-28 tech-debt train (extension JS split under the 800-line cap — content.js 2159 → frozen domain-match block + four cohesive modules + 157-line entry riding a globalThis.PwdVaultContent namespace, background.js 1073 → native/commands modules, popup.js explicitly exempted with a tracked marker; permanent CI line-count guard; .btn global width:100% inverted to content-width default + explicit .btn-block — ends the four-crash flex-starvation trap) on top of v1.6.2 restore-duplication fix (backup restore keeps the payload's original entry/group ids and group timestamps — ends the delete+sync ×2 duplication whose root cause was re-id meeting REPLACE semantics; backup validation now rejects tombstoned groups; typed-RESTORE gate made visible with per-variant disabled dimming + live hint; restore-dialog cloud-sync advisory) on top of v1.6.1 acceptance patch (confirm-dialog error channel — save rejections were invisible behind the modal overlay; errorMessage strips the raw `CODE:` transport prefix; custom-field values lazy-load on section focus / row-reveal through the shared secret channel; spellcheck off + form-group rhythm) on top of v1.6.0 M-tier kernel batch (per-entry custom fields on a four-generation entry codec, sync container v3 + LWW conflict counter + opt-in auto-sync behind the sync_cycle leaf lock, browser-extension save/update prompt backed by a digest-only verify command, backup fidelity fix — .pvault now carries the TOTP/match-mode/custom-fields it had been silently dropping since v1.1.6/v1.5.0) + v1.5.1 UI patch + v1.5.0 M-tier product batch (security dashboard with in-process aggregation, 4-vendor CSV importers, trash auto-purge, per-entry URL match override on a three-generation codec + sync container v2, pair toast caller digest) + v1.4.1 trash-tab UI patch + v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -195,7 +195,7 @@ PwdVault/
 
 - Initial release: Tauri v2 + React 5 screens, AES-256-GCM + Argon2id, redb, HTTP API, Chrome extension, CI/CD
 
-**Test Suite Summary** (counts from actual test output, 2026-10-27):
+**Test Suite Summary** (counts from actual test output, 2026-10-28):
 
 | Module                    | Tests                                                                                                                          | Command                                   |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
@@ -206,7 +206,7 @@ PwdVault/
 | Rust infrastructure crate | 133 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                 | (same run)                                |
 | Rust domain crate         | 15                                                                                                                             | (same run)                                |
 | Rust native-host          | 23                                                                                                                             | `cd extensions/native-host && cargo test` |
-| Frontend (total)          | 591 (76 files; local `pnpm test` may report more if `dist/` build copies exist — run from a clean checkout for the true count) | `pnpm test`                               |
+| Frontend + extension      | 603 (78 files; vitest collects chrome/ AND firefox/ via symlink — extension tests double-count by design; local `pnpm test` may report more if `dist/`/`releases/` copies exist) | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -246,12 +246,18 @@ PwdVault/
 
 ### Future (post-v1.0)
 
-- [ ] Biometric unlock (Touch ID / Windows Hello)
-- [ ] Secure notes
-- [ ] Breach monitoring (HIBP API)
-- [ ] TOTP/2FA generator
-- [ ] Multi-device sync (self-hosted)
+- [x] Biometric unlock — Touch ID (macOS Keychain wrap key, v1.1.6); **Windows Hello remains**
+- [x] TOTP/2FA generator (v1.1.6 Phase 2)
+- [x] Multi-device sync — encrypted container on the user's own cloud drive, LWW merge, conflict counter, auto-sync (v1.1.6 Phase 3 + v1.6.0)
+- [ ] Secure notes (dedicated note-type entries beyond the existing notes field)
+- [ ] Breach monitoring (HIBP) — **needs a privacy decision first**: k-anonymity hash prefixes leave the device
 - [ ] Mobile apps (Tauri Mobile)
+- [ ] Windows Hello biometric unlock (mirror of the Touch ID stack)
+- [ ] Duplicate-entry auto-detection in the dashboard (same title+username) — post-v1.6.2 nice-to-have; real-vault cleanup recipe lives in qa_manual T53.5
+- [ ] Extension popup.js split (1693 lines, single PopupApp class — the only LINE-CAP EXEMPTION; CI guard asserts exactly one)
+- [ ] Extension native-host signing for distribution (bundle with F1)
+- [ ] zip ≥9 / tauri-plugin-updater upgrade — allowlist expires **2027-06-30**, drags wry across minors
+- [ ] Extend the local ZCode commit-gate hook to .js/.css (user-level infra; the in-repo CI guard covers CI, the local gate still checks .rs only)
 
 ---
 
@@ -331,6 +337,60 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-10-28 (v1.6.3 — tech-debt train: extension JS split + .btn width inversion + CI line-count guard)
+
+Pipeline: targeted recon (line counts, manifest loading modes, guard-test
+reading paths, .btn site inventory) → plan R1 → plan-reviewer REVISE
+(6×P1: content four-way split failed the cap arithmetic → five-way;
+guard list was 4/6 — content-save-prompt + search-parity missed and
+cross-file count assertions must be joined in manifest order, never
+split; the scoped-override list was v1.5.1-era stale and
+`.confirm-modal-actions .btn` is flex:1 50/50 split, NOT a width
+suppression; popup.js is a single 1660-line PopupApp class with no
+seam → deferred with a tracked exemption; Secure notes is NOT shipped
+— plan claimed it; namespace init contradicted the byte-frozen
+domain-match file) → R2 → re-review REVISE (1×P1: NS-alias form would
+make the namespace contract vacuously pass — pinned to full-name
+refs/defs + non-empty assertions; reviewer authorized fast-pass) → R3
+**PASS** → two ds-workers in parallel (A: WP1 split; B: WP2+WP3) →
+worker B correctly REFUSED a plan item (.group-manage-first width:auto
+suppresses .group-manage-btn's 40px box, not .btn — plan defect) →
+dual review (extension **APPROVE** 0 P0-P2, 4×P3; react **APPROVE**
+0 P0-P2, 3×P3 — its render-semantics audit proved .btn-block
+additions are pixel-identical to the old width:100% and enumerated
+every protected site) → 5 cheap P3s folded (awk NR count, NUL-safe
+find, exemption-removal hint, indentation, is-trusted start anchor
+restored after grep proved uniqueness) → clean-worktree gates →
+release.
+
+Shipped: content.js 2159 → domain-match.js (byte-frozen, sloppy-mode
+kernel — strict-safe, noted) + content-forms/ui-shadow/ui-bar/
+save-prompt + 157-line entry, cross-file refs only via
+`globalThis.PwdVaultContent.<prop>` full names (74 refs/20 props,
+refs∖defs=∅ pinned by content-namespace.test.js with non-empty
+assertions); background.js → background-native (transport + module
+state) + background-commands + entry; 6 readFileSync guard tests
+migrated with union-count semantics (join in manifest order — counts
+never split); both manifests list six content files in dependency
+order; popup.js 1693 deferred behind the only LINE-CAP EXEMPTION
+marker (guard asserts exactly one, path-pinned); quality.yml gains
+the permanent 800-line guard (src-only find, awk NR, NUL-safe).
+Desktop: `.btn` width:100% removed → `.btn-block` explicit opt-in
+(26 stacked-form sites classified), `.btn-full` untouched,
+`.btn-inline` now flex-shrink-only, stale width-suppression comments
+swept. Roadmap §3 refreshed (Touch ID/TOTP/sync checked off; Secure
+notes honestly back on the list; popup split, HIBP-privacy, zip
+2027-06-30, duplicate auto-detection recorded).
+
+Tests: 603 frontend+extension CI-true (78 files — vitest collects
+chrome/ AND firefox/ via symlink, extension tests double-count by
+design; +12/+2 = namespace test counted on both paths) / Rust 437
+(+1 ignored) / native-host 23, all unchanged. web-ext lint 0/0/0.
+Plan: fix_impl_plan_v1.6.3.md (R3). QA T54 appended — full-screen
+.btn sweep (two themes) + the four deliberate-content-width spots +
+extension smoke are the post-release items (jsdom cannot see the
+inversion).
 
 ### 2026-10-27 (v1.6.2 — restore keeps payload ids: ends delete+sync ×2 duplication; typed-RESTORE gate made visible)
 

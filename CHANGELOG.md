@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.6.3] - 2026-10-28
+
+### Changed
+
+- **Extension code split under the 800-line cap**: the auto-fill content
+  script (2159 lines) and the background worker (1073 lines) are now
+  cohesive modules (form detection, overlay UI, save prompt, native
+  transport, command handlers) loaded in manifest order. Behavior is
+  unchanged and guarded by the existing source-contract tests plus a
+  new namespace contract; a permanent CI guard now enforces the cap on
+  all extension JS. The popup (single class, 1693 lines) is explicitly
+  exempted with a tracked marker and stays a separate future batch.
+
+### Fixed
+
+- **The global full-width button rule is gone**: buttons now size to
+  their content by default, which permanently ends the recurring bug
+  where a full-width base size starved flex rows (dashboard summary,
+  Empty trash, Tags input, and friends across four releases). Forms
+  and main actions declare full width explicitly. Modal footers,
+  icon buttons, and inline rows render exactly as before.
+
 ## [1.6.2] - 2026-10-27
 
 ### Fixed
