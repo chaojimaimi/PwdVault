@@ -3,14 +3,30 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-// content.js is a classic content script (no module export, top-level DOM
-// access), so like the sender-auth verbatim guard this test asserts on the
-// source text: every handler that can pull plaintext credentials must begin
-// with the isTrusted gate, before any secret-fetching call. jsdom cannot run
-// these handlers (isTrusted is always false there), so the source contract is
-// what keeps a synthetic-event refactor from silently dropping the gate.
+// The content script is a set of six classic files loaded IN ORDER into one
+// isolated world (the manifest content_scripts.js array), so like the
+// sender-auth verbatim guard this test asserts on the source text: every
+// handler that can pull plaintext credentials must begin with the isTrusted
+// gate, before any secret-fetching call. jsdom cannot run these handlers
+// (isTrusted is always false there), so the source contract is what keeps a
+// synthetic-event refactor from silently dropping the gate.
+//
+// v1.6.3 split: the counts are UNION semantics — the six files are joined in
+// manifest order and asserted as one text. Never split the numbers or assert
+// per-file: a new secret-touching handler in ANY of the six files must be
+// globally visible to this guard.
 const here = dirname(fileURLToPath(import.meta.url));
-const content = readFileSync(join(here, 'content.js'), 'utf8');
+const CONTENT_FILES = [
+	'domain-match.js',
+	'content-forms.js',
+	'content-ui-shadow.js',
+	'content-ui-bar.js',
+	'content-save-prompt.js',
+	'content.js',
+];
+const content = CONTENT_FILES.map((name) =>
+	readFileSync(join(here, name), 'utf8'),
+).join('\n');
 
 const GUARD = 'if (!e.isTrusted) return;';
 
@@ -37,7 +53,7 @@ const GUARDED_SITES = [
   [
     'Ctrl+Shift+L keydown (showOverlay)',
     'document.addEventListener("keydown", (e) => {',
-    'Auto-fill Prompt Logic',
+    'Message Handling',
     'showOverlay(',
   ],
   // v1.6.0 save/update prompt: three submit-capture paths converge on

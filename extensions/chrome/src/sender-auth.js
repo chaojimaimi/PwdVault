@@ -66,11 +66,11 @@ export function authorizeMessage(message, sender, runtimeId) {
 
 // === BEGIN VERBATIM DOMAIN-MATCH BLOCK ===
 // Everything between the BEGIN/END markers is carried as a byte-identical
-// copy in content.js (classic content scripts cannot import ES modules; a
+// copy in domain-match.js (classic content scripts cannot import ES modules; a
 // dynamic import would require web_accessible_resources = a manifest change
 // plus a fingerprint surface). The guard test in sender-auth.test.js fails
 // when the two drift apart. Only difference: the declarations below carry the
-// `export` keyword, which is stripped in the content.js copy.
+// `export` keyword, which is stripped in the domain-match.js copy.
 //
 // Curated multi-label public suffix constants (v1.4.0 eTLD+1 matching):
 // 126 two-label suffixes picked from the ICANN section of the Mozilla Public
@@ -325,7 +325,7 @@ export function entryMatchesSenderUrl(entry, senderUrl) {
 // IS INTENTIONAL: entryMatchesSenderUrl rejects an empty entryUrl (see its
 // comment); this function allows it — an explicit popup fill is a deliberate
 // user action on a generic entry. Do NOT "unify" the two.
-// NOTE: content.js carries a verbatim copy of this whole block — content
+// NOTE: domain-match.js carries a verbatim copy of this whole block — content
 // scripts are classic scripts and cannot import ES modules. Keep the copies
 // byte-identical; the guard test in sender-auth.test.js enforces it.
 export function entryMatchesPageUrl(entry, pageUrl) {

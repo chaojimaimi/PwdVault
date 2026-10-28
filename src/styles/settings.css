@@ -169,9 +169,9 @@
 }
 
 /* Shared by Security AND Cloud Sync rows: the row's buttons carry
-   .btn-inline (v1.6.0 rider) — without it the global `.btn { width: 100% }`
-   acts as the flex base size and stretches them across the panel (v1.5.1;
-   content-width buttons are the intended form here). */
+   .btn-inline (v1.6.0 rider) — content-width buttons in the row are the
+   intended form here (v1.5.1; the flex-shrink:0 keeps them from competing
+   with the badge/spacer text). */
 
 .security-enabled-badge {
 	font-size: var(--text-label);
@@ -277,8 +277,8 @@
 
 .dashboard-rerun {
 	margin-left: auto;
-	/* .btn-inline (v1.6.0 rider) supplies width:auto + flex-shrink:0 — the
-     global width:100% flex base would push this button past the right edge. */
+	/* .btn-inline (v1.6.0 rider): flex-shrink:0 — content width plus the
+     auto margin pins the button to the row's right edge. */
 }
 
 .dashboard-healthy {

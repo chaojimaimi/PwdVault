@@ -3,17 +3,32 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-// Source-guard test (same style as content-is-trusted.test.js): content.js is
-// a classic content script that cannot run under jsdom's test harness, so the
-// v1.3.2 Shadow DOM isolation contract is asserted on the source text.
+// Source-guard test (same style as content-is-trusted.test.js): the content
+// script is a set of six classic files that cannot run under jsdom's test
+// harness, so the v1.3.2 Shadow DOM isolation contract is asserted on the
+// source text.
 //
 // Contract: every injected UI root (auto-fill bar, overlay, toast, floating
 // button, v1.6.0 save/update bar) mounts inside its own closed shadow root
 // seeded from ONE shared CSS constant; no style reaches the host page's
 // document; the palette is the desktop Light theme mirror instead of the
 // retired indigo/dark set.
+//
+// v1.6.3 split: the six content files are joined in manifest order and the
+// counts asserted on the union — never split the numbers or assert per-file,
+// so a rogue shadow-root mount in ANY file stays globally visible here.
 const here = dirname(fileURLToPath(import.meta.url));
-const content = readFileSync(join(here, 'content.js'), 'utf8');
+const CONTENT_FILES = [
+	'domain-match.js',
+	'content-forms.js',
+	'content-ui-shadow.js',
+	'content-ui-bar.js',
+	'content-save-prompt.js',
+	'content.js',
+];
+const content = CONTENT_FILES.map((name) =>
+	readFileSync(join(here, name), 'utf8'),
+).join('\n');
 
 const UI_ROOTS = 5;
 

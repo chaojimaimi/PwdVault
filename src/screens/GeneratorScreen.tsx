@@ -416,7 +416,7 @@ export function GeneratorScreen() {
 				)}
 
 				<button
-					className="btn btn-secondary"
+					className="btn btn-secondary btn-block"
 					// handleGenerate takes the active mode explicitly — never let
 					// the click event slip in as that argument.
 					onClick={() => void handleGenerate()}
@@ -454,7 +454,7 @@ export function GeneratorScreen() {
 
 			<div className="generator-actions">
 				<button
-					className="btn btn-primary"
+					className="btn btn-primary btn-block"
 					onClick={handleCopy}
 					disabled={!password}
 				>

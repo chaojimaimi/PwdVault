@@ -28,7 +28,14 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["src/content.js"],
+      "js": [
+        "src/domain-match.js",
+        "src/content-forms.js",
+        "src/content-ui-shadow.js",
+        "src/content-ui-bar.js",
+        "src/content-save-prompt.js",
+        "src/content.js"
+      ],
       "run_at": "document_idle"
     }
   ],

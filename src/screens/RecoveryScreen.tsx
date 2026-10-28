@@ -106,7 +106,7 @@ export function RecoveryScreen() {
 
 					<button
 						type="submit"
-						className="btn btn-primary"
+						className="btn btn-primary btn-block"
 						disabled={
 							state.isLoading || !recoveryKey || !newPassword || !confirmPassword
 						}

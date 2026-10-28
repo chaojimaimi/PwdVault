@@ -76,7 +76,7 @@ export default function GroupSelector({ value, onChange }: Props) {
       )}
       {state.groupsStatus === 'error' && (
         <div className="error-message group-selector-error">
-          Could not load groups. <button className="btn btn-link" type="button" onClick={() => void actions.loadGroups()}>Retry</button>
+          Could not load groups. <button className="btn btn-link btn-block" type="button" onClick={() => void actions.loadGroups()}>Retry</button>
         </div>
       )}
       {error && <div className="error-message group-selector-error">{error}</div>}

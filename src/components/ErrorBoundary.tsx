@@ -137,14 +137,14 @@ export class ErrorBoundary extends Component<
 				>
 					<button
 						type="button"
-						className="btn btn-primary"
+						className="btn btn-primary btn-block"
 						onClick={this.handleRelaunch}
 					>
 						Restart App
 					</button>
 					<button
 						type="button"
-						className="btn btn-secondary"
+						className="btn btn-secondary btn-block"
 						onClick={() => void this.handleCopyDetails()}
 					>
 						{this.state.copied ? "Copied" : "Copy Error Details"}

@@ -3,15 +3,30 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-// v1.6.0 save/update prompt contract. content.js is a classic content script
-// and background.js a service worker with top-level chrome.* listeners, so
-// (like content-is-trusted.test.js / background-fill-gate.test.js) these are
+// v1.6.0 save/update prompt contract. The content script is a set of six
+// classic files (joined in manifest order for the v1.6.3 split — count
+// assertions keep their union semantics on the joined text) and background.js
+// a service worker with top-level chrome.* listeners, so (like
+// content-is-trusted.test.js / background-fill-gate.test.js) these are
 // source-text contracts: the guard ordering, the digest-only CHECK boundary,
 // the single plaintext disclosure point, and the old-desktop degradation are
 // all pinned on the source so a refactor cannot silently drop them.
+// background-side assertions read background-commands.js — the v1.6.3 split
+// moved the whole save-prompt handler cluster (incl. verifyUnsupported)
+// there.
 const here = dirname(fileURLToPath(import.meta.url));
-const content = readFileSync(join(here, 'content.js'), 'utf8');
-const background = readFileSync(join(here, 'background.js'), 'utf8');
+const CONTENT_FILES = [
+	'domain-match.js',
+	'content-forms.js',
+	'content-ui-shadow.js',
+	'content-ui-bar.js',
+	'content-save-prompt.js',
+	'content.js',
+];
+const content = CONTENT_FILES.map((name) =>
+	readFileSync(join(here, name), 'utf8'),
+).join('\n');
+const background = readFileSync(join(here, 'background-commands.js'), 'utf8');
 
 const GUARD = 'if (!e.isTrusted) return;';
 
@@ -82,7 +97,11 @@ describe('save prompt: digest-only CHECK boundary', () => {
   it('the CHECK message carries a digest and candidate triples, never a password', () => {
     const checkBody = functionBody(content, 'checkSaveDecision');
     expect(checkBody).toContain('CHECK_SAVE_CREDENTIALS');
-    expect(checkBody).toContain('password_sha256: await digestText(password)');
+    // Formatter-tolerant (the call may wrap across lines): the digest is
+    // computed through the namespace digestText, never inline.
+    expect(checkBody).toMatch(
+      /password_sha256:\s*await\s+globalThis\.PwdVaultContent\.digestText\(\s*password,?\s*\)/,
+    );
     expect(checkBody).toContain('id: entry.id');
     expect(checkBody, 'no plaintext field on the CHECK message').not.toContain('password:');
   });

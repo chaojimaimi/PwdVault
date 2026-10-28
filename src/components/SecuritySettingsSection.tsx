@@ -383,7 +383,7 @@ export function SecuritySettingsSection() {
 								</p>
 								<button
 									type="button"
-									className="btn btn-secondary"
+									className="btn btn-secondary btn-block"
 									onClick={() => setShowBioEnable(true)}
 									disabled={busy !== null}
 								>
@@ -521,7 +521,7 @@ export function SecuritySettingsSection() {
 						</p>
 						<button
 							type="button"
-							className="btn btn-secondary"
+							className="btn btn-secondary btn-block"
 							onClick={() => setShowRecoveryEnable(true)}
 							disabled={busy !== null}
 						>

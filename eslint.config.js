@@ -59,4 +59,33 @@ export default tseslint.config(
 			},
 		},
 	},
+	{
+		// v1.6.3 content split: domain-match.js carries the frozen verbatim
+		// block with TOP-LEVEL declarations; the later content files reference
+		// those names as bare identifiers (classic scripts share one isolated
+		// world — there is no import surface). Declared here so no-undef stays
+		// the reference-integrity gate; /* global */ comments are banned in the
+		// content files, and content-namespace.test.js asserts this list equals
+		// domain-match.js's top-level declaration set exactly.
+		files: [
+			"extensions/chrome/src/content.js",
+			"extensions/chrome/src/content-forms.js",
+			"extensions/chrome/src/content-ui-shadow.js",
+			"extensions/chrome/src/content-ui-bar.js",
+			"extensions/chrome/src/content-save-prompt.js",
+		],
+		languageOptions: {
+			// Classic scripts, not modules — matches the browser's parse mode.
+			sourceType: "script",
+			globals: {
+				MULTI_LABEL_SUFFIXES: "readonly",
+				registeredDomain: "readonly",
+				normalizedDomain: "readonly",
+				entryMatchMode: "readonly",
+				exactHost: "readonly",
+				entryMatchesSenderUrl: "readonly",
+				entryMatchesPageUrl: "readonly",
+			},
+		},
+	},
 );

@@ -449,7 +449,7 @@ export function SyncSettingsSection() {
 								{!baiduAwaiting ? (
 									<button
 										type="button"
-										className="btn btn-secondary"
+										className="btn btn-secondary btn-block"
 										onClick={() => void handleBaiduStart()}
 										disabled={busy !== null}
 									>
@@ -539,7 +539,7 @@ export function SyncSettingsSection() {
 
 						<button
 							type="button"
-							className="btn btn-primary"
+							className="btn btn-primary btn-block"
 							onClick={() => void handleConnect()}
 							disabled={busy !== null || (backend === "baidu" && !baiduAuthorized)}
 						>

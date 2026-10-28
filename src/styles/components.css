@@ -33,8 +33,18 @@
 
 /* --- Buttons --- */
 
+/* v1.6.3 WIDTH INVERSION: .btn is content-width by default; full width is
+   declared explicitly via .btn-block (or the legacy .btn-full variant).
+   Rationale: the old `width: 100%` acted as the flex BASE SIZE of any button
+   inside a flex row — the row overflowed, the button never shrank below
+   ~half the container, and a `flex: 1` sibling (basis 0, nothing left to
+   grow into) starved to min-content. That single root cause produced the
+   v1.2.2 tags-row, v1.5.0 CSV-block, v1.5.1 status-row/dashboard/trash and
+   v1.6.0 custom-fields/group-selector regressions, each patched with a
+   scoped width:auto override or the .btn-inline utility. Inverting the
+   default removes the trap class-wide; stacked-form and screen-level main
+   action buttons opt back in with .btn-block. */
 .btn {
-	width: 100%;
 	min-height: 40px;
 	padding: 0.75rem var(--space-lg);
 	border: none;
@@ -46,6 +56,14 @@
 		background var(--duration-fast) ease,
 		color var(--duration-fast) ease,
 		opacity var(--duration-fast) ease;
+}
+
+/* Full-width opt-in for the inverted .btn default: stacked forms and
+   screen-level main action buttons. Pure width — no margins, no other side
+   effects. (.btn-full remains untouched for its 10 existing sites, which
+   also carry margin-top.) */
+.btn-block {
+	width: 100%;
 }
 
 .btn:focus-visible {
@@ -133,17 +151,14 @@
 	font-size: var(--text-micro);
 }
 
-/* v1.6.0 (D9) inline-button utility. Trap mechanism: the global
-   `.btn { width: 100% }` becomes the flex BASE SIZE of any button inside a
-   flex row, so the row overflows, the button never shrinks below ~half the
-   container, and a `flex: 1` sibling input (basis 0, nothing left to grow
-   into) starves to its min-content width — the v1.2.2 tags row and the
-   v1.5.1 status-row/dashboard/trash regressions all share this root cause.
-   REQUIRED whenever a .btn shares a flex row with a flex:1 sibling (input,
-   text, spacer). Do NOT apply to .btn-icon (it owns its 40px square) or to
-   block-context / .btn-full buttons where full width is the design intent. */
+/* v1.6.0 (D9) inline-button utility, simplified by the v1.6.3 .btn width
+   inversion: content width is now the default, so only the flex-shrink half
+   is load-bearing — it keeps a long label from competing for space with a
+   `flex: 1` sibling when the row runs tight. Use it on .btn buttons that
+   share a flex row with a flex:1 sibling (input, text, spacer). Do NOT
+   apply to .btn-icon (it owns its 40px square) or to block-context /
+   .btn-block / .btn-full buttons where full width is the design intent. */
 .btn-inline {
-	width: auto;
 	flex-shrink: 0;
 }
 
@@ -188,8 +203,8 @@
 	align-items: center;
 }
 
-/* The row's buttons carry .btn-inline (v1.6.0 rider): .btn's global
-   width:100% would starve the flex:1 input below. */
+/* The row's buttons carry .btn-inline (v1.6.0 rider): flex-shrink:0 keeps
+   them content-sized next to the flex:1 input below. */
 
 .group-selector-row .form-input {
 	flex: 1;

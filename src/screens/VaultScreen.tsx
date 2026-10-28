@@ -409,7 +409,7 @@ export function VaultScreen() {
 							<div className="resource-error" role="alert">
 								<p>Could not load the trash.</p>
 								<button
-									className="btn btn-secondary"
+									className="btn btn-secondary btn-block"
 									onClick={() =>
 										void actions.loadDeletedEntries().catch((e) => {
 											showToast(errorMessage(e, "Failed to load trash"));
@@ -498,7 +498,7 @@ export function VaultScreen() {
 							<p>Could not load passwords.</p>
 							<p className="text-muted-hint">{state.entriesError}</p>
 							<button
-								className="btn btn-secondary"
+								className="btn btn-secondary btn-block"
 								onClick={() =>
 									void actions.loadEntries().catch((e) => {
 										// loadEntries already flips the resource state; the
@@ -522,7 +522,7 @@ export function VaultScreen() {
 							{!state.searchQuery && (
 								<button
 									type="button"
-									className="btn btn-primary"
+									className="btn btn-primary btn-block"
 									onClick={handleAddClick}
 								>
 									Add your first password

@@ -75,7 +75,7 @@ export function EntryGeneratorModal({
 					{generatedPassword || "Click generate to create a password"}
 				</div>
 				<button
-					className="btn btn-secondary"
+					className="btn btn-secondary btn-block"
 					data-generate-password
 					onClick={handleGeneratePassword}
 				>
@@ -83,11 +83,11 @@ export function EntryGeneratorModal({
 				</button>
 			</div>
 			<div className="modal-footer">
-				<button className="btn btn-secondary" onClick={onClose}>
+				<button className="btn btn-secondary btn-block" onClick={onClose}>
 					Cancel
 				</button>
 				<button
-					className="btn btn-primary"
+					className="btn btn-primary btn-block"
 					onClick={handleUseGenerated}
 					disabled={!generatedPassword}
 				>

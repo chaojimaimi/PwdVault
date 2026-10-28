@@ -18,8 +18,8 @@ export function UnsavedChangesModal({ isOpen, onStay, onDiscard }: Props) {
         <div className="modal-header"><h3 id="unsaved-title">Discard unsaved changes?</h3></div>
         <div className="modal-body"><p id="unsaved-description">Your changes have not been saved.</p></div>
         <div className="modal-footer">
-          <button className="btn btn-secondary" data-dialog-stay onClick={onStay}>Keep editing</button>
-          <button className="btn btn-danger" onClick={onDiscard}>Discard</button>
+          <button className="btn btn-secondary btn-block" data-dialog-stay onClick={onStay}>Keep editing</button>
+          <button className="btn btn-danger btn-block" onClick={onDiscard}>Discard</button>
         </div>
     </AccessibleDialog>
   );

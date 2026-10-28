@@ -120,7 +120,7 @@ function AppContent() {
 					<h1>PwdVault could not start</h1>
 					<p>{state.bootError}</p>
 					<button
-						className="btn btn-primary"
+						className="btn btn-primary btn-block"
 						onClick={() => void actions.retryBoot()}
 					>
 						Retry

@@ -579,7 +579,7 @@ export function EntryScreen() {
 						<>
 							<span className="form-label">Notes</span>
 							<button
-								className="btn btn-secondary"
+								className="btn btn-secondary btn-block"
 								type="button"
 								onClick={() => void handleLoadNotes()}
 								disabled={secretLoading}

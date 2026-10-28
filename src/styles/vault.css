@@ -379,9 +379,8 @@
 	font-size: var(--text-h2);
 }
 
-/* The Empty trash button carries .btn-inline (v1.6.0 rider) — without it
-   the global width:100% is the flex base size and it stretches across the
-   whole header row (v1.5.1). */
+/* The Empty trash button carries .btn-inline (v1.6.0 rider): content width
+   in this header row is the design intent (v1.5.1). */
 
 .trash-list {
 	list-style: none;

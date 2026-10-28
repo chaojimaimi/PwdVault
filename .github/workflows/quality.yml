@@ -222,6 +222,38 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # v1.6.3 (WP3): permanent 800-line cap on extension JS (src only, so
+      # dist/ build copies are naturally excluded and Firefox's symlinked
+      # source is not double-counted; test files are covered too). A file may
+      # only escape the cap via a LINE-CAP EXEMPTION marker in its first 10
+      # lines, and the guard asserts exactly ONE marked file exists and that
+      # it is popup/popup.js — so no other file can self-exempt silently.
+      - name: Extension JS line-count cap (800, popup.js exempt)
+        run: |
+          over=0
+          exempted=0
+          while IFS= read -r -d '' f; do
+            lines=$(awk 'END {print NR}' "$f")
+            if head -n 10 "$f" | grep -q 'LINE-CAP EXEMPTION'; then
+              exempted=$((exempted + 1))
+              if [ "$f" != "extensions/chrome/src/popup/popup.js" ]; then
+                echo "::error::LINE-CAP EXEMPTION marker is only allowed on extensions/chrome/src/popup/popup.js — found on: $f"
+                over=$((over + 1))
+              fi
+              continue
+            fi
+            if [ "$lines" -gt 800 ]; then
+              echo "::error::$f is $lines lines (cap 800) — split the file (popup.js is the only sanctioned exemption)"
+              over=$((over + 1))
+            fi
+          done < <(find extensions/chrome/src -name '*.js' -print0)
+          if [ "$exempted" -ne 1 ]; then
+            echo "::error::expected exactly 1 file with a LINE-CAP EXEMPTION marker (extensions/chrome/src/popup/popup.js), found $exempted — after removing the marker from popup.js, update this guard step too"
+            over=$((over + 1))
+          fi
+          if [ "$over" -gt 0 ]; then
+            exit 1
+          fi
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:

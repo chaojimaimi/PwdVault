@@ -650,22 +650,23 @@ describe("content save/update prompt commands (v1.6.0)", () => {
 	});
 });
 
-describe("content.js verbatim copy guard", () => {
-	// content.js is a classic script and cannot import this module; it carries
-	// a hand-maintained copy of the ENTIRE domain-match block (suffix table +
+describe("content verbatim copy guard", () => {
+	// The classic content scripts cannot import this module; domain-match.js
+	// (the first file of the v1.6.3 content_scripts array) carries a
+	// hand-maintained copy of the ENTIRE domain-match block (suffix table +
 	// registeredDomain + normalizedDomain + both gates). This test fails when
 	// any of them drifts from the source of truth. The BEGIN/END marker
 	// extraction deliberately replaces the old per-function regex: a
 	// `[\s\S]*?\n\}` extraction would silently truncate at the first
 	// column-0 closing brace, and the block approach covers every verbatim
 	// symbol in one assertion.
-	it("content.js carries a byte-identical copy of the whole domain-match block", () => {
+	it("domain-match.js carries a byte-identical copy of the whole domain-match block", () => {
 		// node:url/node:path, NOT the global URL: under the jsdom test
 		// environment `new URL(rel, import.meta.url)` resolves against the
 		// jsdom document (http://localhost:3000), not the file base.
 		const here = dirname(fileURLToPath(import.meta.url));
 		const source = readFileSync(join(here, "sender-auth.js"), "utf8");
-		const content = readFileSync(join(here, "content.js"), "utf8");
+		const content = readFileSync(join(here, "domain-match.js"), "utf8");
 		const block = source.match(
 			/\/\/ === BEGIN VERBATIM DOMAIN-MATCH BLOCK ===[\s\S]*?\/\/ === END VERBATIM DOMAIN-MATCH BLOCK ===/,
 		);

@@ -108,7 +108,7 @@ export function DashboardScreen() {
 							<p>Could not build the security report.</p>
 							<p className="text-muted-hint">{loadError}</p>
 							<button
-								className="btn btn-secondary"
+								className="btn btn-secondary btn-block"
 								onClick={() => void loadReport()}
 							>
 								Retry

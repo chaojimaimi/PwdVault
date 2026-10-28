@@ -85,7 +85,7 @@ export function SetupScreen() {
 
 					<button
 						type="submit"
-						className="btn btn-primary"
+						className="btn btn-primary btn-block"
 						disabled={state.isLoading || !password || !confirmPassword}
 					>
 						{state.isLoading ? (

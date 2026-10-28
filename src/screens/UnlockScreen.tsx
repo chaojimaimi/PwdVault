@@ -92,7 +92,7 @@ export function UnlockScreen() {
 
 					<button
 						type="submit"
-						className="btn btn-primary"
+						className="btn btn-primary btn-block"
 						disabled={state.isLoading || !password}
 					>
 						{state.isLoading ? (

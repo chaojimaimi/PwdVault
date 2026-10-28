@@ -177,7 +177,7 @@ export function SettingsScreen() {
 						</p>
 						<p className="text-muted-hint">{state.error}</p>
 						<button
-							className="btn btn-secondary"
+							className="btn btn-secondary btn-block"
 							onClick={() => void actions.loadSettings()}
 						>
 							Retry
@@ -219,7 +219,7 @@ export function SettingsScreen() {
 						</p>
 						<button
 							type="button"
-							className="btn btn-danger"
+							className="btn btn-danger btn-block"
 							onClick={() => setShowRevoke(true)}
 						>
 							Revoke Extension Access
@@ -488,7 +488,7 @@ export function SettingsScreen() {
 
 			<div className="generator-actions">
 				<button
-					className="btn btn-primary"
+					className="btn btn-primary btn-block"
 					onClick={handleSave}
 					disabled={saving || state.status !== "success" || !charsetValid}
 				>

@@ -1,3 +1,4 @@
+// LINE-CAP EXEMPTION (v1.6.3): single PopupApp class, split tracked as its own batch — remove when under 800.
 // PwdVault Popup Script - Enhanced with Groups, Generator UI, and Theme Switching
 import Fuse from "./fuse.min.mjs";
 import { entryMatchesPageUrl } from "../sender-auth.js";
