@@ -29,8 +29,8 @@
    Replaces the plain .screen for the three auth screens: three radial
    glow layers over --color-bg (navy #1E3A5F / teal #0D9488 in Light,
    teal #14B8A6 / navy in Dark). Layout mirrors base.css .screen
-   (flex-start + only-child auto margin, the v1.3.1 anti-clipping fix) —
-   centering for short content, top-aligned scroll for tall content. */
+   (flex-start, overflow-y auto; the card centers through its own auto
+   margins, the v1.3.1 anti-clipping mechanics). */
 .auth-screen {
 	position: relative;
 	display: flex;
@@ -81,9 +81,15 @@
 		var(--color-bg);
 }
 
-/* Short content centers vertically; overflowing content starts at the top
-   and scrolls (same mechanics as .screen > :only-child in base.css). */
-.auth-screen > :only-child {
+/* The card centers vertically when content is short — its auto margins
+   absorb the free space and push a following .auth-hint to the true
+   bottom — and degrades to top-aligned + scroll when it overflows (auto
+   margins resolve to 0 on negative free space; same safe mechanism as
+   .screen > :only-child in base.css, v1.3.1). Pinned to the card CLASS
+   instead of :only-child: UnlockScreen renders a second flow child (the
+   recovery-key hint), which silently un-matched :only-child and left the
+   card top-aligned (v1.7.1). */
+.auth-screen > .auth-card {
 	margin: auto;
 }
 
@@ -375,13 +381,21 @@
 
 /* --- Recovery-key status hint (UnlockScreen only) ---
    Pure display: not clickable, no navigation (the lock screen has no
-   settings route). Absolutely positioned along the bottom edge; the
-   descendant svg rule sizes the 13px status icon over the .icon default. */
+   settings route). A normal flow child pinned to the bottom by the
+   card's auto margins above — it can never overlap the card and stays
+   scroll-reachable on short windows (v1.7.1: the old absolute bottom
+   placement floated over the overflowed card). The 4px side padding plus
+   the screen's 24px padding reproduce the pre-flow 28px inset exactly;
+   bottom spacing moves 16px (old bottom offset) → 24px (screen padding),
+   accepted in plan §1.
+   The descendant svg rule sizes the 13px status icon over the .icon
+   default. */
 .auth-hint {
-	position: absolute;
-	bottom: 16px;
-	left: 28px;
-	right: 28px;
+	position: static;
+	flex: none;
+	align-self: stretch;
+	margin-top: 16px;
+	padding: 0 4px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
