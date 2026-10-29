@@ -56,6 +56,13 @@ vault.db
 /releases/**/*.exe
 /releases/**/pwdvault-native*
 /releases/**/PwdVault-*-Extension-*/
+# Whole-dir catch-all (v1.7.0 lesson: per-type rules missed tar.gz/sig and
+# git add -A swept a partial download into a commit)
+/releases/
+# Root-level release artifacts (accident-proofing: downloads live in releases/)
+/*.app.tar.gz*
+/*-setup.exe*
+/*.dmg
 
 # Python bytecode / caches (Phase 5 automation)
 __pycache__/
