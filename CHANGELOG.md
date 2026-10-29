@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.7.1] - 2026-10-30
+
+### Fixed
+
+- **The lock-screen recovery hint no longer overlaps the card on short
+  windows**: the hint was pinned to the window bottom out of the layout
+  flow, so shrinking the window made the centered glass card slide under
+  it — and, worse, the presence of the hint silently un-matched the
+  `:only-child` centering rule, top-aligning the unlock card even at
+  normal heights. The hint is now a normal flow child pinned below the
+  card, everything scrolls on short windows, and the unlock card is
+  vertically centered like Setup and Recovery at every height.
+
 ## [1.7.0] - 2026-10-29
 
 ### Added
