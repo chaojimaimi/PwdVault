@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   token-driven; the global button/card styles are untouched.
 - **Recovery-key status on the lock screen**: the unlock screen now shows
   whether a recovery key is configured — a muted warning with pointers to
-  Settings → Security when it is not (so you enable one *before* you need
+  Settings → Security when it is not (so you enable one _before_ you need
   it), or a quiet "Recovery key enabled" confirmation when it is. The
   status renders only after the probe answers; if the probe fails, the
   screen asserts nothing.

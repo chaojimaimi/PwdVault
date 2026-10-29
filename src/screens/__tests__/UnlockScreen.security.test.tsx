@@ -32,7 +32,9 @@ describe("UnlockScreen security affordances", () => {
 		const { UnlockScreen } = await import("../UnlockScreen");
 		render(<UnlockScreen />);
 
-		expect(await screen.findByRole("button", { name: "Use Touch ID" })).toBeInTheDocument();
+		expect(
+			await screen.findByRole("button", { name: "Use Touch ID" }),
+		).toBeInTheDocument();
 		expect(screen.queryByText("Forgot password?")).not.toBeInTheDocument();
 	});
 
@@ -42,7 +44,9 @@ describe("UnlockScreen security affordances", () => {
 		render(<UnlockScreen />);
 
 		await waitFor(() => expect(biometricStatus).toHaveBeenCalled());
-		expect(screen.queryByRole("button", { name: "Use Touch ID" })).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "Use Touch ID" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("shows the recovery link only when recovery is enabled", async () => {
@@ -68,7 +72,9 @@ describe("UnlockScreen security affordances", () => {
 		const { UnlockScreen } = await import("../UnlockScreen");
 		render(<UnlockScreen />);
 
-		fireEvent.click(await screen.findByRole("button", { name: "Use Touch ID" }));
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Use Touch ID" }),
+		);
 
 		await waitFor(() => expect(unlockBiometric).toHaveBeenCalled());
 		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -79,7 +85,9 @@ describe("UnlockScreen security affordances", () => {
 		const { UnlockScreen } = await import("../UnlockScreen");
 		render(<UnlockScreen />);
 
-		expect(await screen.findByText(/No recovery key set up/)).toBeInTheDocument();
+		expect(
+			await screen.findByText(/No recovery key set up/),
+		).toBeInTheDocument();
 		expect(screen.queryByText("Recovery key enabled")).not.toBeInTheDocument();
 	});
 
@@ -89,7 +97,9 @@ describe("UnlockScreen security affordances", () => {
 		render(<UnlockScreen />);
 
 		expect(await screen.findByText("Recovery key enabled")).toBeInTheDocument();
-		expect(screen.queryByText(/No recovery key set up/)).not.toBeInTheDocument();
+		expect(
+			screen.queryByText(/No recovery key set up/),
+		).not.toBeInTheDocument();
 		expect(screen.getByText("Forgot password?")).toBeInTheDocument();
 	});
 
@@ -100,7 +110,9 @@ describe("UnlockScreen security affordances", () => {
 
 		// Give the effect a tick to settle into its rejection path.
 		await waitFor(() => expect(recoveryStatus).toHaveBeenCalled());
-		expect(screen.queryByText(/No recovery key set up/)).not.toBeInTheDocument();
+		expect(
+			screen.queryByText(/No recovery key set up/),
+		).not.toBeInTheDocument();
 		expect(screen.queryByText("Recovery key enabled")).not.toBeInTheDocument();
 		expect(screen.queryByText("Forgot password?")).not.toBeInTheDocument();
 	});
@@ -113,11 +125,19 @@ describe("UnlockScreen security affordances", () => {
 		expect(input).toHaveAttribute("type", "password");
 
 		fireEvent.click(screen.getByRole("button", { name: "Show password" }));
-		expect(screen.getByLabelText("Master password")).toHaveAttribute("type", "text");
-		expect(screen.getByRole("button", { name: "Hide password" })).toBeInTheDocument();
+		expect(screen.getByLabelText("Master password")).toHaveAttribute(
+			"type",
+			"text",
+		);
+		expect(
+			screen.getByRole("button", { name: "Hide password" }),
+		).toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: "Hide password" }));
-		expect(screen.getByLabelText("Master password")).toHaveAttribute("type", "password");
+		expect(screen.getByLabelText("Master password")).toHaveAttribute(
+			"type",
+			"password",
+		);
 	});
 
 	it("surfaces the local error when the unlock call rejects", async () => {

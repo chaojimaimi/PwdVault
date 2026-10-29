@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AppContext";
 import { biometricStatus, recoveryStatus } from "../api/vault";
-import { FingerprintIcon, ShieldAlertIcon, ShieldCheckIcon, ShieldIcon } from "../components/Icons";
+import {
+	FingerprintIcon,
+	ShieldAlertIcon,
+	ShieldCheckIcon,
+	ShieldIcon,
+} from "../components/Icons";
 import { PasswordField } from "../components/PasswordField";
 import type { BiometricStatus } from "../types";
 
