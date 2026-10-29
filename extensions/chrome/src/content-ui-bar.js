@@ -109,10 +109,7 @@
 				}
 
 				hideNotificationBar();
-				globalThis.PwdVaultContent.autofillLogin(
-					full.username,
-					full.password,
-				);
+				globalThis.PwdVaultContent.autofillLogin(full.username, full.password);
 			} catch (error) {
 				const message = error && error.message ? error.message : "";
 				showAutoFillPromptError(
@@ -348,10 +345,7 @@
 			}
 
 			hideOverlay();
-			globalThis.PwdVaultContent.autofillLogin(
-				entry.username,
-				entry.password,
-			);
+			globalThis.PwdVaultContent.autofillLogin(entry.username, entry.password);
 		} catch (error) {
 			showNotification(
 				"Failed to get entry: " + (error.message || "Unknown error"),
@@ -443,10 +437,7 @@
 		// call sites) covers all three callers: checkForAutoFillPrompt, the init
 		// ready callback, and the MutationObserver callback. Explicit user
 		// actions (popup fill, overlay, context menu) are unaffected.
-		if (
-			loginForm.formType ===
-			globalThis.PwdVaultContent.FORM_TYPES.REGISTER
-		)
+		if (loginForm.formType === globalThis.PwdVaultContent.FORM_TYPES.REGISTER)
 			return;
 
 		entryCount = entries ? entries.length : 0;
@@ -530,17 +521,13 @@
 			removeFloatingButton();
 			return;
 		}
-		if (
-			loginForm.formType ===
-			globalThis.PwdVaultContent.FORM_TYPES.REGISTER
-		) {
+		if (loginForm.formType === globalThis.PwdVaultContent.FORM_TYPES.REGISTER) {
 			removeFloatingButton();
 			return;
 		}
 
 		const rect = loginForm.passwordField.getBoundingClientRect();
-		globalThis.PwdVaultContent.floatingButton.style.top =
-			`${rect.top - 50}px`;
+		globalThis.PwdVaultContent.floatingButton.style.top = `${rect.top - 50}px`;
 	}
 
 	// Simple timestamp throttle — no library, no timer leak; trailing calls
@@ -575,10 +562,7 @@
 		// Register pages never get the automatic prompt bar. Explicit fill paths
 		// (popup, overlay, context menu) stay available; the floating button has
 		// its own register gate, so skipping both calls here is safe.
-		if (
-			loginForm.formType ===
-			globalThis.PwdVaultContent.FORM_TYPES.REGISTER
-		)
+		if (loginForm.formType === globalThis.PwdVaultContent.FORM_TYPES.REGISTER)
 			return;
 
 		try {

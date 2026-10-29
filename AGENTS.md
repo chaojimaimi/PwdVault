@@ -197,15 +197,15 @@ PwdVault/
 
 **Test Suite Summary** (counts from actual test output, 2026-10-28):
 
-| Module                    | Tests                                                                                                                          | Command                                   |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| Rust tauri-app lib        | 42                                                                                                                             | `cd src-tauri && cargo test`              |
-| Rust capability contract  | 1                                                                                                                              | (same run)                                |
-| Rust golden contract      | 3                                                                                                                              | (same run)                                |
-| Rust application crate    | 243                                                                                                                            | `cd src-tauri && cargo test --workspace`  |
-| Rust infrastructure crate | 133 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                 | (same run)                                |
-| Rust domain crate         | 15                                                                                                                             | (same run)                                |
-| Rust native-host          | 23                                                                                                                             | `cd extensions/native-host && cargo test` |
+| Module                    | Tests                                                                                                                                                                            | Command                                   |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Rust tauri-app lib        | 42                                                                                                                                                                               | `cd src-tauri && cargo test`              |
+| Rust capability contract  | 1                                                                                                                                                                                | (same run)                                |
+| Rust golden contract      | 3                                                                                                                                                                                | (same run)                                |
+| Rust application crate    | 243                                                                                                                                                                              | `cd src-tauri && cargo test --workspace`  |
+| Rust infrastructure crate | 133 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                                                                   | (same run)                                |
+| Rust domain crate         | 15                                                                                                                                                                               | (same run)                                |
+| Rust native-host          | 23                                                                                                                                                                               | `cd extensions/native-host && cargo test` |
 | Frontend + extension      | 603 (78 files; vitest collects chrome/ AND firefox/ via symlink — extension tests double-count by design; local `pnpm test` may report more if `dist/`/`releases/` copies exist) | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
