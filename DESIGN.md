@@ -11,6 +11,12 @@
 - **Decoration level:** Minimal — typography and color do all the work
 - **Mood:** Precise, trustworthy, purpose-built. Not decorative, not generic.
 - **Reference products:** 1Password (warmth), Bitwarden (open trust)
+- **Auth screens (v1.7.0, user-approved exception):** Setup / Unlock /
+  Recovery are the one sanctioned immersive surface — a navy→teal radial
+  glow backdrop with a frosted-glass card (backdrop-blur) carrying the
+  brand shield mark. Every other screen stays strictly minimal. Scoped
+  tokens: `--auth-glass`, `--auth-glass-border`, `--auth-field` (see
+  `src/styles/auth.css`, overridden per theme).
 
 ## Theme System
 
@@ -136,6 +142,7 @@ src/styles/
 ├── themes.css        ← Design tokens (shared + Light/Dark color overrides)
 ├── base.css          ← Global reset, scrollbar, selection, accessibility, .screen, .loading
 ├── components.css    ← Buttons, inputs, modals, toasts, strength meter, icons, tags
+├── auth.css          ← Auth screens (Setup/Unlock/Recovery): gradient glow, glass card, auth field/button/hint
 ├── screens.css       ← Entry/generator screen layouts, field groups, option rows
 ├── vault.css         ← Vault container, search, group tabs, entry list
 ├── groups.css        ← Group manager cards and actions

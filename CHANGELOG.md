@@ -4,6 +4,41 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.7.0] - 2026-10-29
+
+### Added
+
+- **Redesigned lock/unlock experience**: the Setup, Unlock, and Recovery
+  screens now share an immersive navy→teal gradient backdrop with a
+  frosted-glass card, the brand shield mark, the "Local-first. Your
+  passwords stay yours." tagline, show/hide password toggles, and calm
+  entrance animations (disabled under reduced-motion). Both themes are
+  token-driven; the global button/card styles are untouched.
+- **Recovery-key status on the lock screen**: the unlock screen now shows
+  whether a recovery key is configured — a muted warning with pointers to
+  Settings → Security when it is not (so you enable one *before* you need
+  it), or a quiet "Recovery key enabled" confirmation when it is. The
+  status renders only after the probe answers; if the probe fails, the
+  screen asserts nothing.
+- **Real weak-password detection**: the security dashboard now runs the
+  industry-standard zxcvbn estimator (pattern/keyboard/leet/date aware)
+  on top of a curated 9,952-entry weak-password corpus — including the
+  Chinese-context classics (`woaini520`, `1qaz2wsx`, `qq123456`, …) —
+  shared byte-identically across the desktop, the dashboard, and the
+  browser extension, with a three-way sync guard. Passwords like
+  `Test@1qaz`, `Admin@123`, and `P@ssw0rd123` satisfy every character
+  rule yet were scored "Strong" by the old character-counting heuristic;
+  they are now flagged weak everywhere.
+
+### Changed
+
+- **Dashboard weak scores use zxcvbn tiers**: the weak list now reports a
+  0–4 pattern score (rendered as Very Weak / Weak / Fair / Strong labels)
+  instead of the old 0–100 character heuristic number. Expect the weak
+  list to flag more passwords — that is the point; the dashboard copy
+  still guides you to each entry to fix it. The extension download grows
+  by ~33 KB for the embedded corpus.
+
 ## [1.6.3] - 2026-10-28
 
 ### Changed

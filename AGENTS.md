@@ -2,10 +2,10 @@
 
 A secure, local-first password manager built with Tauri + React.
 
-**Last Updated**: 2026-10-28
+**Last Updated**: 2026-10-29
 **Repository**: https://github.com/chaojimaimi/PwdVault (Public)
-**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.6.3
-**Current Version**: `v1.6.3` — 2026-10-28 tech-debt train (extension JS split under the 800-line cap — content.js 2159 → frozen domain-match block + four cohesive modules + 157-line entry riding a globalThis.PwdVaultContent namespace, background.js 1073 → native/commands modules, popup.js explicitly exempted with a tracked marker; permanent CI line-count guard; .btn global width:100% inverted to content-width default + explicit .btn-block — ends the four-crash flex-starvation trap) on top of v1.6.2 restore-duplication fix (backup restore keeps the payload's original entry/group ids and group timestamps — ends the delete+sync ×2 duplication whose root cause was re-id meeting REPLACE semantics; backup validation now rejects tombstoned groups; typed-RESTORE gate made visible with per-variant disabled dimming + live hint; restore-dialog cloud-sync advisory) on top of v1.6.1 acceptance patch (confirm-dialog error channel — save rejections were invisible behind the modal overlay; errorMessage strips the raw `CODE:` transport prefix; custom-field values lazy-load on section focus / row-reveal through the shared secret channel; spellcheck off + form-group rhythm) on top of v1.6.0 M-tier kernel batch (per-entry custom fields on a four-generation entry codec, sync container v3 + LWW conflict counter + opt-in auto-sync behind the sync_cycle leaf lock, browser-extension save/update prompt backed by a digest-only verify command, backup fidelity fix — .pvault now carries the TOTP/match-mode/custom-fields it had been silently dropping since v1.1.6/v1.5.0) + v1.5.1 UI patch + v1.5.0 M-tier product batch (security dashboard with in-process aggregation, 4-vendor CSV importers, trash auto-purge, per-entry URL match override on a three-generation codec + sync container v2, pair toast caller digest) + v1.4.1 trash-tab UI patch + v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
+**Release**: https://github.com/chaojimaimi/PwdVault/releases/tag/v1.7.0
+**Current Version**: `v1.7.0` — 2026-10-29 M-tier batch (auth screens redesigned: Setup/Unlock/Recovery share the sanctioned immersive navy→teal glow + frosted-glass card with brand shield/tagline/show-hide toggles under scoped `.auth-*` styles — the one DESIGN.md decorative exception; lock-screen recovery-key status hint with a three-state probe that asserts nothing on transport failure; real weak-password detection: zxcvbn 3.1.1 engine on the Rust dashboard (wire score now 0–4 pattern tiers) + a 9,952-entry weak-password corpus with Chinese-context classics shared byte-identically across desktop TS / extension JS / Rust under a three-way sync guard + keyboard-walk penalty — Test@1qaz / Admin@123 / P@ssw0rd123-class passwords that satisfied every character rule were scored "Strong" by the old heuristic and are now flagged weak everywhere) on top of v1.6.3 tech-debt train (extension JS split under the 800-line cap — content.js 2159 → frozen domain-match block + four cohesive modules + 157-line entry riding a globalThis.PwdVaultContent namespace, background.js 1073 → native/commands modules, popup.js explicitly exempted with a tracked marker; permanent CI line-count guard; .btn global width:100% inverted to content-width default + explicit .btn-block — ends the four-crash flex-starvation trap) on top of v1.6.2 restore-duplication fix (backup restore keeps the payload's original entry/group ids and group timestamps — ends the delete+sync ×2 duplication whose root cause was re-id meeting REPLACE semantics; backup validation now rejects tombstoned groups; typed-RESTORE gate made visible with per-variant disabled dimming + live hint; restore-dialog cloud-sync advisory) on top of v1.6.1 acceptance patch (confirm-dialog error channel — save rejections were invisible behind the modal overlay; errorMessage strips the raw `CODE:` transport prefix; custom-field values lazy-load on section focus / row-reveal through the shared secret channel; spellcheck off + form-group rhythm) on top of v1.6.0 M-tier kernel batch (per-entry custom fields on a four-generation entry codec, sync container v3 + LWW conflict counter + opt-in auto-sync behind the sync_cycle leaf lock, browser-extension save/update prompt backed by a digest-only verify command, backup fidelity fix — .pvault now carries the TOTP/match-mode/custom-fields it had been silently dropping since v1.1.6/v1.5.0) + v1.5.1 UI patch + v1.5.0 M-tier product batch (security dashboard with in-process aggregation, 4-vendor CSV importers, trash auto-purge, per-entry URL match override on a three-generation codec + sync container v2, pair toast caller digest) + v1.4.1 trash-tab UI patch + v1.4.0 S-tier product batch (eTLD+1 autofill matching with fail-closed suffix table, passphrase/PIN generator + session history, recently-used sorting + recycle bin, global shortcut) + updater stack modernization (updater 2.14.0 / tauri 2.12.5 / wry 0.57.1; zip allowlist extended to 2027-06-30 — no zip ≥9 exists upstream yet) + v1.3.2 Shadow DOM/IPC sanitization + v1.3.1 clipboard redesign + v1.3.0 bincode swap + v1.1.9/v1.2.0 hardening + Phase 0-3 features
 **Current Branch**: `main`
 
 ---
@@ -195,18 +195,18 @@ PwdVault/
 
 - Initial release: Tauri v2 + React 5 screens, AES-256-GCM + Argon2id, redb, HTTP API, Chrome extension, CI/CD
 
-**Test Suite Summary** (counts from actual test output, 2026-10-28):
+**Test Suite Summary** (counts from actual test output, 2026-10-29):
 
 | Module                    | Tests                                                                                                                                                                            | Command                                   |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | Rust tauri-app lib        | 42                                                                                                                                                                               | `cd src-tauri && cargo test`              |
 | Rust capability contract  | 1                                                                                                                                                                                | (same run)                                |
 | Rust golden contract      | 3                                                                                                                                                                                | (same run)                                |
-| Rust application crate    | 243                                                                                                                                                                              | `cd src-tauri && cargo test --workspace`  |
+| Rust application crate    | 244                                                                                                                                                                              | `cd src-tauri && cargo test --workspace`  |
 | Rust infrastructure crate | 133 (+1 ignored keychain SecItem smoke, CI 跑)                                                                                                                                   | (same run)                                |
-| Rust domain crate         | 15                                                                                                                                                                               | (same run)                                |
+| Rust domain crate         | 26                                                                                                                                                                               | (same run)                                |
 | Rust native-host          | 23                                                                                                                                                                               | `cd extensions/native-host && cargo test` |
-| Frontend + extension      | 603 (78 files; vitest collects chrome/ AND firefox/ via symlink — extension tests double-count by design; local `pnpm test` may report more if `dist/`/`releases/` copies exist) | `pnpm test`                               |
+| Frontend + extension      | 694 (82 files; vitest collects chrome/ AND firefox/ via symlink — extension tests double-count by design; local `pnpm test` may report more if `dist/`/`releases/` copies exist) | `pnpm test`                               |
 
 > **Note**: Rust tests no longer require `--test-threads=1` — the keystore is
 > now per-`AppState` (A3), so parallel test execution is safe.
@@ -337,6 +337,50 @@ git tag vX.Y.Z && git push origin main --tags
 ---
 
 ## 7. Session Log
+
+### 2026-10-29 (v1.7.0 — auth redesign + recovery-key hint + real weak-password detection)
+
+Pipeline: 高保真稿三选一（用户定稿「沉浸渐变 + 品牌极简表单」合并版）→ recon
+（发现强度打分三份实现：桌面 TS / 扩展 JS / Rust）→ plan R1 → plan-reviewer
+REVISE（1×P0：10k 行语料文件必击穿 CI 800 行守卫；4×P1：核心词算法被推演证伪
+——归一化焊段、语料主源是上游已删除的 SecLists 路径、"非弱"谓词未定义、核心词
+清单缺失）→ R2 REVISE（1×P1：Test@1qaz 走位罚分 -10×2=48 压不进弱档 → -15；
+1×P2：哨兵需 zxcvbn 冻结前实测）→ R3 **fast-pass**（评审授权）→ 主代理预钉
+语料数据（xato top-10000 @ commit c205c36 过滤 + 中文补充集 = 9952 条）→ 双
+worker 并行（WP1 Rust / WP4 认证屏）→ 顺序 WP2（TS）→ WP3（JS 同步+守卫）→
+主代理修复 WP1 测试滞后（famous-forms 锚点入语料后 corpus.rs 断言同步）→ 双域
+审查（rust **APPROVE** 0 P0-P2, 3×P3；react **APPROVE** 0 P0-P2, 3×P3）→
+P3 折叠两条（strength.rs 过时覆盖注释 10/12→11/12；锁屏提示改三态探测——探测
+失败不再断言"未设置恢复密钥"这个未经验证的事实，新增拒绝路径测试）→ 其余 P3
+记录在案（zxcvbn 双跑、corpus 双小写化、focusOnMount ref 重挂既有缺陷、
+securityScoreLabel 落点）。
+
+Shipped: 认证三屏 `.auth-*` 换壳（径向光晕 + backdrop-blur 玻璃卡 + 盾徽/标语/
+显隐眼 + 恢复密钥底部两态提示；components.css 的 .btn/.card 零改动——v1.6.3
+教训写进计划红线）。弱口令检测两层架构（§2 是本班车最重要的决定）：**zxcvbn
+3.1.1 仅落 Rust**（crate 无自定义词典 API，已 docs.rs 验证；classify_password
+= 空串→Weak ∪ 语料三查 ∪ zxcvbn≤2，fail-safe 通配臂），**语料层三端同算法**
+（exact / 元音位归一化（1/! 不映射——数字→字母会焊段）/ 核心词 72 词边界搜索
+（左邻非字母 + 右尾无字母，防 latest 内嵌 test 误伤）/ 键盘走位 30 条 ×-15），
+TS↔JS 保持逐字同步（守卫钉死），**Rust↔JS 降级为弱分类平价**（算法不同源，
+分数不承诺相等——契约诚实化，替代方案 zxcvbn-ts 全端/Rust 单引擎 IPC 均被真实
+理由拒绝）。仪表盘 wire 语义变更：weak score 0-100 → zxcvbn 0-4（实现取
+min(zxcvbn,2) 保证弱列表渲染永不出现 Strong 标签），消费点三处全改（渲染/文案/
+注释）。17 向量冻结表由 zxcvbn 实测钉死（5 哨兵全 4 分免换）。语料三份拷贝 +
+corpus-sync 守卫（解析后集合相等 + 9952 计数 + 锚点存在性 + 核心词 72 词 +
+排除集），zip 实测 +32.5KB（预算 90-130KB 内）。DESIGN.md 增认证屏 sanctioned
+exception 条款。
+
+实施期修正（均入档）：P@ssw0rd123 归一化标注不可满足（3→e 把尾数字焊成
+password12e）→ famous-forms exact 锚点入语料，三端同步；语料主源换
+xato-net-10-million-passwords-10000.txt（SecLists 原 10-million 系列已被上游
+删除，commit 4ff3ff8）；走位表实为 30 条（计划误计 28）。QA T55 appended——
+两主题认证屏 sweep、提示两态（含启用者不闪警示）、仪表盘真弱口令实测是门禁项。
+
+Tests: 694 frontend+extension CI-true (82 files; 基线 603/78 → rust-port 退役
+-18、classification/sync/parity 新增 +109) / Rust 449 (+1 ignored；基线 437，
+domain 15→26、application 243→244) / native-host 23 不变。web-ext lint 0/0/0。
+Plan: fix_impl_plan_v1.7.0.md (R3 fast-pass)。
 
 ### 2026-10-28 (v1.6.3 — tech-debt train: extension JS split + .btn width inversion + CI line-count guard)
 
