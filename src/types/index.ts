@@ -319,7 +319,9 @@ export interface ImportResult {
 
 export interface SecurityReportWeakEntry {
   id: string;
-  /** 0-100 on the shared getPasswordStrength heuristic. */
+  /** zxcvbn wire score 0-4 from the Rust classifier (v1.7.0 — semantic
+   *  change from the old 0-100 heuristic score): 0 Very Weak, 1-2 Weak,
+   *  3 Fair, 4 Strong. Render through securityScoreLabel. */
   score: number;
 }
 
@@ -327,12 +329,35 @@ export interface SecurityReport {
   generated_at: number;
   /** Live entries scanned. */
   total: number;
-  /** Entries scoring ≤ 40 ("Very Weak"/"Weak" on the strength meter). */
+  /** Entries the backend classified Weak (v1.7.0): empty password,
+   *  weak-password-corpus hit, or zxcvbn score ≤ 2 — no longer a 0-100
+   *  "scoring ≤ 40" cut. */
   weak: SecurityReportWeakEntry[];
   /** Groups of ≥ 2 entries sharing the identical password. */
   reused: string[][];
   /** Entries not modified for more than a year (updated_at-based). */
   stale: string[];
+}
+
+/**
+ * Dashboard display label for the zxcvbn wire score (0-4), mirroring the
+ * Rust classify_password mapping (fix_impl_plan_v1.7.0.md Appendix B — this
+ * replaces the old `${score}/100` rendering that died with the 0-100
+ * semantics). The classifier never produces scores outside 0-4; anything
+ * else degrades to "Weak", which stays honest for a list that only holds
+ * weak findings.
+ */
+export function securityScoreLabel(score: number): string {
+  switch (score) {
+    case 0:
+      return "Very Weak";
+    case 3:
+      return "Fair";
+    case 4:
+      return "Strong";
+    default:
+      return "Weak";
+  }
 }
 
 // Third-party CSV import (v1.5.0 WP2) — mirrors

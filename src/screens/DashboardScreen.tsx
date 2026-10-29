@@ -6,6 +6,7 @@ import { showToast } from "../utils/toast";
 import { BackHeader } from "../components/BackHeader";
 import { ShieldIcon } from "../components/Icons";
 import type { EntrySummary, SecurityReport } from "../types";
+import { securityScoreLabel } from "../types";
 
 /**
  * Security Dashboard (v1.5.0 WP1): read-only report of weak / reused /
@@ -159,11 +160,12 @@ export function DashboardScreen() {
 									Weak passwords ({report.weak.length})
 								</h3>
 								<p className="settings-hint">
-									Score 40 or below on the strength meter.
+									Flagged as weak by the leak-corpus scan or a low
+									strength score.
 								</p>
 								<ul className="dashboard-list">
 									{report.weak.map((finding) =>
-										renderRow(finding.id, `${finding.score}/100`),
+										renderRow(finding.id, securityScoreLabel(finding.score)),
 									)}
 								</ul>
 							</div>

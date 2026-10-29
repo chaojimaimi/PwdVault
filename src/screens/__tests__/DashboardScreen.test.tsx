@@ -122,7 +122,9 @@ vi.mock("../../utils/toast", () => ({ showToast: vi.fn() }));
 const REPORT: SecurityReport = {
 	generated_at: 1_800_000_000,
 	total: 4,
-	weak: [{ id: "weak-1", score: 12 }],
+	// v1.7.0: score is the zxcvbn wire value 0-4 (was 0-100); the badge
+	// renders the securityScoreLabel mapping, not `${score}/100`.
+	weak: [{ id: "weak-1", score: 2 }],
 	reused: [["reused-1", "reused-2"]],
 	stale: ["stale-1"],
 };
@@ -143,7 +145,9 @@ describe("DashboardScreen", () => {
 
 		await waitFor(() => expect(getSecurityReport).toHaveBeenCalledTimes(1));
 		expect(await screen.findByText("Old Mail")).toBeTruthy();
-		expect(screen.getByText("12/100")).toBeTruthy();
+		expect(screen.getByText("Weak")).toBeTruthy();
+		// v1.7.0 honest copy for the new weak semantics.
+		expect(screen.getByText(/leak-corpus scan/i)).toBeTruthy();
 		expect(screen.getByText("Forum A")).toBeTruthy();
 		expect(screen.getByText("Forum B")).toBeTruthy();
 		// The stale copy is "unchanged for over a year" — never "unused".

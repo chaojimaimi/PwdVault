@@ -8,6 +8,7 @@
 //! on it, never the reverse.
 
 pub mod constants;
+pub mod corpus;
 pub mod dto;
 pub mod entities;
 pub mod error;

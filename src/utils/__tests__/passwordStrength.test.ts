@@ -16,7 +16,9 @@ describe('getPasswordStrength', () => {
 
   it('should return a low score for a common password', () => {
     const result = getPasswordStrength('password');
-    expect(result.score).toBe(0);
+    // v1.7.0: 'password' is a corpus exact hit — the corpus layer clamps the
+    // heuristic score to 10 (Very Weak band) instead of the old zeroing.
+    expect(result.score).toBe(10);
   });
 
   it('should score "TestMaster123" as reasonable (Fair or above)', () => {

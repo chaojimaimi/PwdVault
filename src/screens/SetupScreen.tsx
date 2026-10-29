@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "../context/AppContext";
+import { ShieldIcon } from "../components/Icons";
+import { PasswordField } from "../components/PasswordField";
 
 export function SetupScreen() {
 	const { state, actions } = useAuth();
@@ -34,12 +36,13 @@ export function SetupScreen() {
 	const error = localError || state.error;
 
 	return (
-		<div className="screen">
-			<div className="card">
-				<div className="card-header">
-					<h1>PwdVault</h1>
-					<p>Create your master password</p>
+		<div className="auth-screen">
+			<div className="auth-card">
+				<div className="auth-badge" aria-hidden="true">
+					<ShieldIcon />
 				</div>
+				<h1 className="auth-title">PwdVault</h1>
+				<p className="auth-tagline">Create your master password</p>
 
 				{error && (
 					<div className="error-message" id="setup-error" role="alert">
@@ -47,45 +50,33 @@ export function SetupScreen() {
 					</div>
 				)}
 
-				<form onSubmit={handleSubmit}>
-					<div className="form-group">
-						<label htmlFor="password">Master password</label>
-						<input
-							id="password"
-							type="password"
-							className="form-input"
-							value={password}
-							onChange={(e) => setPassword(e.target.value)}
-							placeholder="Enter master password"
-							ref={(el) => {
-								// jsx-a11y/no-autofocus: focus at commit instead of the
-								// autoFocus prop — same UX, programmatic.
-								el?.focus();
-							}}
-							disabled={state.isLoading}
-							aria-invalid={!!error}
-							aria-describedby={error ? "setup-error" : undefined}
-						/>
-					</div>
+				<form onSubmit={handleSubmit} className="auth-form">
+					<PasswordField
+						id="password"
+						label="Master password"
+						value={password}
+						onChange={setPassword}
+						placeholder="Enter master password"
+						disabled={state.isLoading}
+						focusOnMount
+						ariaInvalid={!!error}
+						ariaDescribedBy={error ? "setup-error" : undefined}
+					/>
 
-					<div className="form-group">
-						<label htmlFor="confirmPassword">Confirm Password</label>
-						<input
-							id="confirmPassword"
-							type="password"
-							className="form-input"
-							value={confirmPassword}
-							onChange={(e) => setConfirmPassword(e.target.value)}
-							placeholder="Confirm master password"
-							disabled={state.isLoading}
-							aria-invalid={!!error}
-							aria-describedby={error ? "setup-error" : undefined}
-						/>
-					</div>
+					<PasswordField
+						id="confirmPassword"
+						label="Confirm Password"
+						value={confirmPassword}
+						onChange={setConfirmPassword}
+						placeholder="Confirm master password"
+						disabled={state.isLoading}
+						ariaInvalid={!!error}
+						ariaDescribedBy={error ? "setup-error" : undefined}
+					/>
 
 					<button
 						type="submit"
-						className="btn btn-primary btn-block"
+						className="auth-btn-primary"
 						disabled={state.isLoading || !password || !confirmPassword}
 					>
 						{state.isLoading ? (

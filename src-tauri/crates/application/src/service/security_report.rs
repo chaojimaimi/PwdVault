@@ -1,9 +1,11 @@
-//! Security dashboard aggregation (WP1, v1.5.0) — Tauri-only.
+//! Security dashboard aggregation (WP1, v1.5.0; verdict reworked v1.7.0) —
+//! Tauri-only.
 //!
 //! Scans every LIVE entry, decrypts the password in-process, and reports
 //! three findings WITHOUT any plaintext leaving the process:
-//! `weak` (id + heuristic score), `reused` (id groups sharing the identical
-//! password), `stale` (ids untouched for over a year).
+//! `weak` (id + zxcvbn grade, capped at 2 — see WeakPasswordFinding),
+//! `reused` (id groups sharing the identical password), `stale` (ids
+//! untouched for over a year).
 //!
 //! Deliberately NOT built on `get_entry_secret`: that service bumps
 //! `last_used_at` (60s-throttled write) per entry — a dashboard sweep would
@@ -27,14 +29,9 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::service::vault::get_db;
 use crate::{AppState, VaultError};
-use pwdvault_domain::strength::score_password;
+use pwdvault_domain::strength::{classify_password, zxcvbn_score, PasswordVerdict};
 use pwdvault_infrastructure::crypto::{bc_deserialize, decrypt, EncryptedData, KEY_SIZE};
 use pwdvault_infrastructure::database::{list_all_entries_bulk, PasswordEntry};
-
-/// Weak-password cut-off: score ≤ 40 corresponds to the frontend labels
-/// "Very Weak"/"Weak" (passwordStrength.ts's label ladder) — the same
-/// threshold the dashboard UI communicates.
-pub const WEAK_SCORE_THRESHOLD: u32 = 40;
 
 /// Staleness window: `updated_at` more than 365 days in the past. `updated_at`
 /// is the CONTENT MODIFICATION time — the UI copy must say "unchanged for
@@ -45,6 +42,12 @@ pub const STALE_THRESHOLD_SECS: i64 = 365 * 24 * 60 * 60;
 #[derive(Debug, Serialize)]
 pub struct WeakPasswordFinding {
     pub id: String,
+    /// zxcvbn 0-4 grade, CAPPED AT 2 (v1.7.0 semantic change: this was the
+    /// 0-100 heuristic score before). A corpus-layer hit on a password
+    /// zxcvbn grades 3-4 must still render as Weak/Very Weak on the
+    /// dashboard — without the cap the weak list would carry a "Strong"
+    /// grade (the frontend maps 4 → Strong), contradicting the row's
+    /// presence in the weak list.
     pub score: u32,
 }
 
@@ -55,7 +58,8 @@ pub struct SecurityReport {
     pub generated_at: i64,
     /// Number of live entries scanned.
     pub total: usize,
-    /// Entries scoring ≤ 40 on the shared strength heuristic.
+    /// Entries whose password classifies Weak (empty, a corpus-layer hit,
+    /// or zxcvbn ≤ 2 — pwdvault_domain::strength::classify_password).
     pub weak: Vec<WeakPasswordFinding>,
     /// Groups of ≥ 2 entries whose passwords are byte-identical.
     pub reused: Vec<Vec<String>>,
@@ -83,11 +87,12 @@ pub fn aggregate_report(now: i64, inputs: &[ReportInput]) -> SecurityReport {
     let mut digest_buckets: HashMap<[u8; 32], Vec<String>> = HashMap::new();
 
     for input in inputs {
-        let score = score_password(&input.password);
-        if score <= WEAK_SCORE_THRESHOLD {
+        // Weak verdict: empty password, corpus-layer hit, or zxcvbn ≤ 2
+        // (classify_password owns the full ladder — see strength.rs).
+        if classify_password(&input.password) == PasswordVerdict::Weak {
             weak.push(WeakPasswordFinding {
                 id: input.id.clone(),
-                score,
+                score: u32::from(zxcvbn_score(&input.password).min(2)),
             });
         }
         if now.saturating_sub(input.updated_at) > STALE_THRESHOLD_SECS {
@@ -265,18 +270,34 @@ mod tests {
     }
 
     #[test]
-    fn weak_buckets_use_the_shared_threshold() {
+    fn weak_buckets_follow_the_classification_verdict() {
         let inputs = vec![
+            // Strong (zxcvbn 4, corpus-clean) — not weak.
             input("strong", "kX9$mP2!vL5#nQ8@wR4&jF7^", NOW),
+            // Corpus exact hit (also zxcvbn 0) — weak, wire score 0.
             input("weak", "password", NOW),
-            input("medium", "hello world", NOW), // 53 — not weak
+            // zxcvbn 3 = Fair, no corpus hit — not weak under the v1.7.0
+            // ladder (it was 53/100 on the retired heuristic).
+            input("medium", "hello world", NOW),
         ];
         let report = aggregate_report(NOW, &inputs);
         assert_eq!(report.total, 3);
         assert_eq!(report.weak.len(), 1);
         assert_eq!(report.weak[0].id, "weak");
-        // "password" zeroes to 0 → weak; the finding carries the score only.
+        // "password" carries zxcvbn grade 0 on the wire (capped at 2 anyway).
         assert_eq!(report.weak[0].score, 0);
+    }
+
+    #[test]
+    fn corpus_forced_weak_rows_carry_a_capped_wire_score() {
+        // "iloveyou84920173@!" hits the core-word formula but zxcvbn grades
+        // it 4 (Strong). The verdict is Weak (corpus overrules) and the wire
+        // score is capped at 2 so the frontend never renders a "Strong"
+        // grade label inside the weak list.
+        let inputs = vec![input("forced", "iloveyou84920173@!", NOW)];
+        let report = aggregate_report(NOW, &inputs);
+        assert_eq!(report.weak.len(), 1);
+        assert_eq!(report.weak[0].score, 2);
     }
 
     #[test]

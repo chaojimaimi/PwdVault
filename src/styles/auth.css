@@ -1,0 +1,419 @@
+/* ============================================
+   PwdVault Auth Screens (v1.7.0 WP4)
+   Setup / Unlock / Recovery — immersive gradient
+   backdrop + glass card + minimal brand form.
+
+   v1.6.3 LESSON: this file deliberately does NOT
+   reuse or modify the global .btn/.card classes —
+   every selector here is .auth-* scoped so the
+   global width semantics stay untouched.
+   ============================================ */
+
+/* --- Auth tokens (alpha glass values are per-theme; tokens cannot express
+   theme-wrapped rgba, so the light defaults live on :root and dark
+   overrides below — same pattern as themes.css / pairing-toast) --- */
+:root,
+[data-theme="light"] {
+	--auth-glass: rgba(255, 255, 255, 0.66);
+	--auth-glass-border: rgba(255, 255, 255, 0.7);
+	--auth-field: rgba(255, 255, 255, 0.55);
+}
+
+[data-theme="dark"] {
+	--auth-glass: rgba(14, 16, 20, 0.62);
+	--auth-glass-border: rgba(255, 255, 255, 0.1);
+	--auth-field: rgba(255, 255, 255, 0.055);
+}
+
+/* --- Screen backdrop ---
+   Replaces the plain .screen for the three auth screens: three radial
+   glow layers over --color-bg (navy #1E3A5F / teal #0D9488 in Light,
+   teal #14B8A6 / navy in Dark). Layout mirrors base.css .screen
+   (flex-start + only-child auto margin, the v1.3.1 anti-clipping fix) —
+   centering for short content, top-aligned scroll for tall content. */
+.auth-screen {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: flex-start;
+	height: 100dvh;
+	min-height: 0;
+	overflow-y: auto;
+	padding: var(--space-xl);
+	color: var(--color-text);
+	background:
+		radial-gradient(
+			560px 420px at 14% -8%,
+			rgba(30, 58, 95, 0.12),
+			transparent 62%
+		),
+		radial-gradient(
+			520px 420px at 94% 6%,
+			rgba(13, 148, 136, 0.13),
+			transparent 64%
+		),
+		radial-gradient(
+			620px 460px at 24% 112%,
+			rgba(30, 58, 95, 0.08),
+			transparent 66%
+		),
+		var(--color-bg);
+}
+
+[data-theme="dark"] .auth-screen {
+	background:
+		radial-gradient(
+			560px 420px at 14% -8%,
+			rgba(20, 184, 166, 0.17),
+			transparent 62%
+		),
+		radial-gradient(
+			520px 420px at 94% 6%,
+			rgba(30, 58, 95, 0.3),
+			transparent 66%
+		),
+		radial-gradient(
+			620px 460px at 24% 112%,
+			rgba(20, 184, 166, 0.08),
+			transparent 66%
+		),
+		var(--color-bg);
+}
+
+/* Short content centers vertically; overflowing content starts at the top
+   and scrolls (same mechanics as .screen > :only-child in base.css). */
+.auth-screen > :only-child {
+	margin: auto;
+}
+
+/* --- Glass card --- */
+.auth-card {
+	width: 100%;
+	max-width: 336px;
+	padding: 30px 26px 24px;
+	border-radius: 20px;
+	background: var(--auth-glass);
+	border: 1px solid var(--auth-glass-border);
+	backdrop-filter: blur(18px) saturate(150%);
+	-webkit-backdrop-filter: blur(18px) saturate(150%);
+	box-shadow: 0 20px 60px rgba(2, 6, 23, 0.16);
+	text-align: center;
+	animation: auth-card-in 420ms var(--easing-out);
+}
+
+/* T55 real-device fallback: if backdrop-filter proves too slow in wry,
+   swap var(--auth-glass) for var(--color-surface) and drop the two
+   backdrop-filter lines — the layout is otherwise identical. */
+[data-theme="dark"] .auth-card {
+	box-shadow: 0 20px 60px rgba(2, 6, 23, 0.55);
+}
+
+@keyframes auth-card-in {
+	from {
+		opacity: 0;
+		transform: translateY(12px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.auth-card {
+		animation: none;
+	}
+}
+
+/* --- Card header (centered brand block) --- */
+.auth-badge {
+	width: 60px;
+	height: 60px;
+	margin: 0 auto;
+	border-radius: 17px;
+	background: var(--gradient-icon);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--color-on-primary);
+}
+
+.auth-badge svg {
+	width: 30px;
+	height: 30px;
+}
+
+.auth-title {
+	margin: 16px 0 6px;
+	font-size: 24px;
+	font-weight: 800;
+	letter-spacing: -0.02em;
+	color: var(--color-text);
+}
+
+.auth-tagline {
+	margin: 0 0 26px;
+	font-size: 13px;
+	line-height: 1.55;
+	color: var(--color-text-secondary);
+}
+
+/* --- Form (left-aligned inside the centered card) --- */
+.auth-form {
+	text-align: left;
+}
+
+.auth-group {
+	margin-bottom: var(--space-md);
+}
+
+.auth-label {
+	display: block;
+	margin-bottom: var(--space-sm);
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--color-text-muted);
+}
+
+/* Field wrapper: optional 15px lock icon on the left, optional 34px
+   show/hide eye on the right; the input's horizontal padding adapts via
+   the modifier classes the component applies. */
+.auth-field {
+	position: relative;
+	display: block;
+}
+
+.auth-input {
+	width: 100%;
+	height: 46px;
+	padding: 0 12px;
+	border: 1px solid var(--color-border-light);
+	border-radius: 12px;
+	background: var(--auth-field);
+	color: var(--color-text);
+	font-size: var(--text-body);
+	font-family: inherit;
+	transition: border-color var(--duration-fast);
+}
+
+.auth-field.auth-with-lock .auth-input {
+	padding-left: 34px;
+}
+
+.auth-field.auth-with-eye .auth-input {
+	padding-right: 44px;
+}
+
+/* Border-only focus cue, same as .form-input — the global *:focus-visible
+   outline from base.css stays active on top (never outline:none here, it
+   would out-specify the global a11y outline). */
+.auth-input:focus {
+	border-color: var(--color-primary);
+}
+
+.auth-input::placeholder {
+	color: var(--color-text-muted);
+}
+
+.auth-lock-icon {
+	position: absolute;
+	left: 12px;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 15px;
+	height: 15px;
+	color: var(--color-text-muted);
+	pointer-events: none;
+}
+
+.auth-eye {
+	position: absolute;
+	right: 5px;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 34px;
+	height: 34px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: none;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--color-text-secondary);
+	cursor: pointer;
+}
+
+.auth-eye:hover:not(:disabled) {
+	color: var(--color-text);
+}
+
+.auth-eye:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.auth-eye svg {
+	width: 16px;
+	height: 16px;
+}
+
+/* --- Primary action (gradient) ---
+   Text color follows the existing .btn-primary pattern: on-primary per
+   theme (white on navy in Light, near-black on teal in Dark) — kept for
+   consistency instead of forcing white. */
+.auth-btn-primary {
+	width: 100%;
+	height: 46px;
+	margin-top: 14px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: none;
+	border-radius: 10px;
+	background: var(--gradient-icon);
+	color: var(--color-on-primary);
+	font-size: var(--text-body);
+	font-weight: 600;
+	font-family: inherit;
+	cursor: pointer;
+	transition: filter var(--duration-fast) ease;
+}
+
+.auth-btn-primary:hover:not(:disabled) {
+	filter: brightness(1.08);
+}
+
+.auth-btn-primary:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+/* --- Divider ("or") --- */
+.auth-divider {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 18px 0;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--color-text-muted);
+}
+
+.auth-divider::before,
+.auth-divider::after {
+	content: "";
+	flex: 1;
+	height: 1px;
+	background: var(--color-border-light);
+}
+
+/* --- Soft secondary button (Touch ID) ---
+   Translucent wash over the glass card; rgba stays literal per theme for
+   the same reason as the glass tokens above. */
+.auth-btn-soft {
+	width: 100%;
+	height: 46px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-sm);
+	border: 1px solid var(--color-border-light);
+	border-radius: 10px;
+	background: rgba(255, 255, 255, 0.4);
+	color: var(--color-text-secondary);
+	font-size: var(--text-body);
+	font-family: inherit;
+	cursor: pointer;
+	transition: border-color var(--duration-fast) ease;
+}
+
+[data-theme="dark"] .auth-btn-soft {
+	background: rgba(255, 255, 255, 0.04);
+}
+
+.auth-btn-soft:hover:not(:disabled) {
+	border-color: var(--color-primary);
+}
+
+.auth-btn-soft:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.auth-btn-soft svg {
+	width: 16px;
+	height: 16px;
+	flex-shrink: 0;
+}
+
+/* --- Text link ("Forgot password?" / "Back to unlock") --- */
+.auth-link {
+	display: inline-block;
+	margin-top: 16px;
+	padding: 0;
+	border: none;
+	background: none;
+	font-size: 13px;
+	font-family: inherit;
+	color: var(--color-accent);
+	cursor: pointer;
+}
+
+.auth-link:hover:not(:disabled) {
+	text-decoration: underline;
+}
+
+.auth-link:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+/* --- Recovery-key status hint (UnlockScreen only) ---
+   Pure display: not clickable, no navigation (the lock screen has no
+   settings route). Absolutely positioned along the bottom edge; the
+   descendant svg rule sizes the 13px status icon over the .icon default. */
+.auth-hint {
+	position: absolute;
+	bottom: 16px;
+	left: 28px;
+	right: 28px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	font-size: 13px;
+	line-height: 1.55;
+	color: var(--color-text-muted);
+	text-align: left;
+}
+
+/* Compact windows drop the hint body one step (spec's 11.5px fallback). */
+@media (max-height: 560px) {
+	.auth-hint {
+		font-size: 11.5px;
+	}
+}
+
+.auth-hint svg {
+	width: 13px;
+	height: 13px;
+	flex-shrink: 0;
+}
+
+.auth-hint-icon-warning {
+	color: var(--color-warning);
+}
+
+.auth-hint-icon-accent {
+	color: var(--color-accent);
+}
+
+.auth-hint strong {
+	font-weight: 600;
+	color: var(--color-text-secondary);
+}

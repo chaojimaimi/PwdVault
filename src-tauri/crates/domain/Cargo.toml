@@ -15,3 +15,7 @@ zeroize = { version = "1", features = ["derive", "serde"] }
 thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
+# v1.7.0 WP1: pattern-entropy scoring for the dashboard weak-password verdict.
+# Exact-pinned: the classification vectors (fix_impl_plan_v1.7.0.md Appendix B)
+# are frozen against this zxcvbn version — a minor bump can silently re-score.
+zxcvbn = "=3.1.1"

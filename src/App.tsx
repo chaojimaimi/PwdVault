@@ -18,6 +18,9 @@ import { showPairingCodeToast, showToastWithType } from "./utils/toast";
 import "./styles/themes.css";
 import "./styles/base.css";
 import "./styles/components.css";
+// v1.7.0 WP4: auth screens (Setup/Unlock/Recovery) — must load after
+// components.css so the .auth-* overrides win the cascade.
+import "./styles/auth.css";
 import "./styles/screens.css";
 import "./styles/vault.css";
 import "./styles/groups.css";

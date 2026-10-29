@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AppContext";
 import { biometricStatus, recoveryStatus } from "../api/vault";
+import { FingerprintIcon, ShieldAlertIcon, ShieldCheckIcon, ShieldIcon } from "../components/Icons";
+import { PasswordField } from "../components/PasswordField";
 import type { BiometricStatus } from "../types";
 
 export function UnlockScreen() {
@@ -11,7 +13,11 @@ export function UnlockScreen() {
 	// UI, so a transport failure must degrade to the plain password form
 	// (never show an error for a missing Touch ID / recovery option).
 	const [bioStatus, setBioStatus] = useState<BiometricStatus | null>(null);
-	const [recoveryEnabled, setRecoveryEnabled] = useState(false);
+	// Three-state by design (review P3): null = probe pending or failed. The
+	// hint must not assert "no recovery key" until the probe CONFIRMS it —
+	// on a transport failure we render no hint at all, and an enabled user
+	// never sees the warning flash before the confirm flips in.
+	const [recoveryEnabled, setRecoveryEnabled] = useState<boolean | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -56,12 +62,13 @@ export function UnlockScreen() {
 	const error = state.error || localError;
 
 	return (
-		<div className="screen">
-			<div className="card">
-				<div className="card-header">
-					<h1>PwdVault</h1>
-					<p>Enter your master password to unlock</p>
+		<div className="auth-screen">
+			<div className="auth-card">
+				<div className="auth-badge" aria-hidden="true">
+					<ShieldIcon />
 				</div>
+				<h1 className="auth-title">PwdVault</h1>
+				<p className="auth-tagline">Local-first. Your passwords stay yours.</p>
 
 				{error && (
 					<div className="error-message" id="unlock-error" role="alert">
@@ -69,30 +76,22 @@ export function UnlockScreen() {
 					</div>
 				)}
 
-				<form onSubmit={handleSubmit}>
-					<div className="form-group">
-						<label htmlFor="password">Master password</label>
-						<input
-							id="password"
-							type="password"
-							className="form-input"
-							value={password}
-							onChange={(e) => setPassword(e.target.value)}
-							placeholder="Enter master password"
-							ref={(el) => {
-								// jsx-a11y/no-autofocus: focus at commit instead of the
-								// autoFocus prop — same UX, programmatic.
-								el?.focus();
-							}}
-							disabled={state.isLoading}
-							aria-invalid={!!error}
-							aria-describedby={error ? "unlock-error" : undefined}
-						/>
-					</div>
+				<form onSubmit={handleSubmit} className="auth-form">
+					<PasswordField
+						id="password"
+						label="Master password"
+						value={password}
+						onChange={setPassword}
+						placeholder="Enter master password"
+						disabled={state.isLoading}
+						focusOnMount
+						ariaInvalid={!!error}
+						ariaDescribedBy={error ? "unlock-error" : undefined}
+					/>
 
 					<button
 						type="submit"
-						className="btn btn-primary btn-block"
+						className="auth-btn-primary"
 						disabled={state.isLoading || !password}
 					>
 						{state.isLoading ? (
@@ -107,26 +106,53 @@ export function UnlockScreen() {
 				</form>
 
 				{showTouchId && (
-					<button
-						type="button"
-						className="btn btn-secondary btn-full"
-						onClick={() => void handleTouchId()}
-						disabled={state.isLoading}
-					>
-						Use Touch ID
-					</button>
+					<>
+						<div className="auth-divider" aria-hidden="true">
+							or
+						</div>
+						<button
+							type="button"
+							className="auth-btn-soft"
+							onClick={() => void handleTouchId()}
+							disabled={state.isLoading}
+						>
+							<FingerprintIcon />
+							Use Touch ID
+						</button>
+					</>
 				)}
 
 				{recoveryEnabled && (
 					<button
 						type="button"
-						className="btn btn-link btn-full"
+						className="auth-link"
 						onClick={() => actions.navigate("recovery")}
 					>
 						Forgot password?
 					</button>
 				)}
 			</div>
+
+			{/* v1.7.0 recovery-key status hint. Pure display — the lock screen
+			   has no settings route to navigate to. Rendered only after the
+			   probe RESOLVES (null renders nothing): a transport failure must
+			   not assert an unverified "no recovery key" fact, and an enabled
+			   user never sees the warning flash before the confirm flips in. */}
+			{recoveryEnabled === true && (
+				<div className="auth-hint">
+					<ShieldCheckIcon className="auth-hint-icon-accent" />
+					<span>Recovery key enabled</span>
+				</div>
+			)}
+			{recoveryEnabled === false && (
+				<div className="auth-hint">
+					<ShieldAlertIcon className="auth-hint-icon-warning" />
+					<span>
+						No recovery key set up — enable one in{" "}
+						<strong>Settings → Security</strong> before you need it.
+					</span>
+				</div>
+			)}
 		</div>
 	);
 }
