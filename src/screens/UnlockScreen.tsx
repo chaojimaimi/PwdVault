@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useAuth } from "../context/AppContext";
 import { biometricStatus, recoveryStatus } from "../api/vault";
 import {
@@ -23,6 +24,11 @@ export function UnlockScreen() {
 	// on a transport failure we render no hint at all, and an enabled user
 	// never sees the warning flash before the confirm flips in.
 	const [recoveryEnabled, setRecoveryEnabled] = useState<boolean | null>(null);
+	// v1.8.2: focus gate for the auto-prompt. Auto-lock fires while the user is
+	// AWAY (reload_window never raises the window), so the system fingerprint
+	// dialog must not float over unrelated work. null = unknown/failed → never
+	// auto-prompt (same silent-degrade philosophy as the other probes).
+	const [windowFocused, setWindowFocused] = useState<boolean | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -37,6 +43,38 @@ export function UnlockScreen() {
 			});
 		return () => {
 			cancelled = true;
+		};
+	}, []);
+
+	useEffect(() => {
+		let cancelled = false;
+		let eventSeen = false;
+		let unlisten: (() => void) | undefined;
+		void (async () => {
+			try {
+				const current = getCurrentWindow();
+				const un = await current.onFocusChanged(({ payload: focused }) => {
+					eventSeen = true;
+					if (!cancelled) setWindowFocused(focused);
+				});
+				if (cancelled) {
+					un();
+					return;
+				}
+				unlisten = un;
+				// Subscribe FIRST, then probe; apply the probe only if no event
+				// arrived meanwhile (the event is always fresher than the probe —
+				// a focus change racing between them must not be overwritten by
+				// the stale initial answer).
+				const focused = await current.isFocused();
+				if (!cancelled && !eventSeen) setWindowFocused(focused);
+			} catch {
+				/* focus unknown → auto-prompt stays off; button still works */
+			}
+		})();
+		return () => {
+			cancelled = true;
+			unlisten?.();
 		};
 	}, []);
 
@@ -73,19 +111,37 @@ export function UnlockScreen() {
 	// attempt yet (the AuthContext flag — it survives the Loading-screen
 	// unmount/remount that every attempt triggers, which a component ref
 	// cannot). Manual retries via the button never check the flag.
+	// v1.8.2: auto-lock reloads the window WITHOUT raising it (reload_window
+	// never shows/focuses), so the prompt follows attention — a fourth gate
+	// requires windowFocused === true: an idle lock firing while the user is
+	// away stays silent, and the focus event then prompts exactly once (the
+	// episode flag semantics are untouched).
 	// StrictMode note (wording per plan review): on mount showTouchId is
 	// ALWAYS false (bioStatus starts null, the probe is async), so the first
 	// double-invoked effect run exits early — the protection comes from the
 	// data-flow shape, not from a state gate; the flag carries the once-per-
-	// episode semantics across unmount/remount. Edge: a password attempt does
-	// not consume the flag — if a password submit fails before the probe
-	// returns, the auto-prompt is postponed, not cancelled.
+	// episode semantics across unmount/remount, and windowFocused starts
+	// null, which exits the first run the same way — double insurance. Edge:
+	// a password attempt does not consume the flag — if a password submit
+	// fails before the probe returns, the auto-prompt is postponed, not
+	// cancelled.
 	useEffect(() => {
-		if (!showTouchId || state.isLoading || state.biometricAutoPrompted) {
+		if (
+			!showTouchId ||
+			state.isLoading ||
+			state.biometricAutoPrompted ||
+			windowFocused !== true // null (unknown/probe failed) gates like false
+		) {
 			return;
 		}
 		void actions.unlockBiometric();
-	}, [showTouchId, state.isLoading, state.biometricAutoPrompted, actions]);
+	}, [
+		showTouchId,
+		state.isLoading,
+		state.biometricAutoPrompted,
+		windowFocused,
+		actions,
+	]);
 
 	return (
 		<div className="auth-screen">

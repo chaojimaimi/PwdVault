@@ -1,4 +1,10 @@
-import { render, fireEvent, screen, waitFor } from "@testing-library/react";
+import {
+	render,
+	fireEvent,
+	screen,
+	waitFor,
+	act,
+} from "@testing-library/react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 
 const unlock = vi.fn();
@@ -31,6 +37,17 @@ vi.mock("../../api/vault", () => ({
 	recoveryStatus: (...args: unknown[]) => recoveryStatus(...args),
 }));
 
+// v1.8.2 focus gate: UnlockScreen probes isFocused and subscribes to
+// onFocusChanged on the current Tauri window.
+const windowMock = {
+	isFocused: vi.fn(),
+	onFocusChanged: vi.fn(),
+};
+
+vi.mock("@tauri-apps/api/window", () => ({
+	getCurrentWindow: () => windowMock,
+}));
+
 beforeEach(() => {
 	vi.clearAllMocks();
 	// clearAllMocks keeps mockImplementation — reset it too, so the flag-
@@ -43,6 +60,11 @@ beforeEach(() => {
 	mockState.biometricAutoPrompted = true;
 	biometricStatus.mockResolvedValue({ available: false, enabled: false });
 	recoveryStatus.mockResolvedValue(false);
+	// Focus-gate defaults = "focused": today's behavior (prompt as soon as the
+	// window is frontmost) keeps every pre-existing case green. Each
+	// mockResolvedValue also overwrites any per-case mockImplementation.
+	windowMock.isFocused.mockResolvedValue(true);
+	windowMock.onFocusChanged.mockResolvedValue(() => {});
 });
 
 describe("UnlockScreen security affordances", () => {
@@ -137,6 +159,88 @@ describe("UnlockScreen security affordances", () => {
 			await screen.findByRole("button", { name: "Use Touch ID" }),
 		).toBeInTheDocument();
 		expect(unlockBiometric).not.toHaveBeenCalled();
+	});
+
+	it("does not auto-prompt while unfocused; the focus event prompts exactly once", async () => {
+		biometricStatus.mockResolvedValue({ available: true, enabled: true });
+		mockState.biometricAutoPrompted = false;
+		windowMock.isFocused.mockResolvedValue(false);
+		let captured: ((event: { payload: boolean }) => void) | null = null;
+		windowMock.onFocusChanged.mockImplementation(async (handler) => {
+			captured = handler;
+			return () => {};
+		});
+		const { UnlockScreen } = await import("../UnlockScreen");
+		render(<UnlockScreen />);
+
+		// Probe settles while the window is unfocused → the fourth gate holds
+		// (an idle auto-lock must not float the dialog over unrelated work).
+		await waitFor(() => expect(biometricStatus).toHaveBeenCalled());
+		await act(async () => {}); // let the focus probe settle (isFocused=false)
+		expect(unlockBiometric).not.toHaveBeenCalled();
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+		// Attention arrives via the subscription → exactly one attempt.
+		await act(async () => {
+			await captured?.({ payload: true });
+		});
+		await waitFor(() => expect(unlockBiometric).toHaveBeenCalledTimes(1));
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	it("prompts exactly once across focus flips true→false→true (episode flag)", async () => {
+		biometricStatus.mockResolvedValue({ available: true, enabled: true });
+		// Mimic the real context: the attempt marks the episode flag on entry.
+		unlockBiometric.mockImplementation(() => {
+			mockState.biometricAutoPrompted = true;
+			return Promise.resolve(false); // cancelled: silent
+		});
+		mockState.biometricAutoPrompted = false;
+		windowMock.isFocused.mockResolvedValue(false);
+		let captured: ((event: { payload: boolean }) => void) | null = null;
+		windowMock.onFocusChanged.mockImplementation(async (handler) => {
+			captured = handler;
+			return () => {};
+		});
+		const { UnlockScreen } = await import("../UnlockScreen");
+		render(<UnlockScreen />);
+
+		await act(async () => {
+			await captured?.({ payload: true });
+		});
+		await waitFor(() => expect(unlockBiometric).toHaveBeenCalledTimes(1));
+
+		// Blur + refocus inside the SAME lock episode → the flag holds at one.
+		await act(async () => {
+			await captured?.({ payload: false });
+		});
+		await act(async () => {
+			await captured?.({ payload: true });
+		});
+		await waitFor(() => expect(biometricStatus).toHaveBeenCalled());
+		expect(unlockBiometric).toHaveBeenCalledTimes(1);
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	it("degrades silently when the focus probe rejects: no prompt, button alive", async () => {
+		biometricStatus.mockResolvedValue({ available: true, enabled: true });
+		mockState.biometricAutoPrompted = false;
+		windowMock.isFocused.mockRejectedValue(new Error("probe down"));
+		const { UnlockScreen } = await import("../UnlockScreen");
+		render(<UnlockScreen />);
+
+		expect(
+			await screen.findByRole("button", { name: "Use Touch ID" }),
+		).toBeInTheDocument();
+		// Flush the rejection through the focus effect's catch — windowFocused
+		// stays null, so the auto-prompt never fires and no error surfaces.
+		await act(async () => {});
+		expect(unlockBiometric).not.toHaveBeenCalled();
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+		// Manual retry path unaffected by the focus degradation.
+		fireEvent.click(screen.getByRole("button", { name: "Use Touch ID" }));
+		await waitFor(() => expect(unlockBiometric).toHaveBeenCalledTimes(1));
 	});
 
 	it("shows the no-recovery-key warning when recovery is not enabled", async () => {
