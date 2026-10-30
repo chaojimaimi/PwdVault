@@ -60,7 +60,9 @@ beforeEach(() => {
 	setupVault.mockResolvedValue(true);
 	biometricStatus.mockResolvedValue({ available: true, enabled: true });
 	recoveryStatus.mockResolvedValue(false);
-	// Default: a dismissed prompt (no navigation, no error).
+	// Default: a RESOLVING attempt — the action ignores the resolved value,
+	// so this exercises the success path (v1.8.1 review: the old comment
+	// wrongly called it a dismissed prompt).
 	unlockBiometric.mockResolvedValue(false);
 	lockVault.mockResolvedValue(undefined);
 });
@@ -130,5 +132,21 @@ describe("biometric auto-prompt lifecycle (one attempt per lock episode)", () =>
 				"Keychain unavailable",
 			),
 		);
+	});
+
+	it("keeps the real-wire cancellation silent (public_message shape, v1.8.1)", async () => {
+		unlockBiometric.mockRejectedValue("Touch ID was cancelled");
+		render(
+			<AuthProvider>
+				<Harness />
+			</AuthProvider>,
+		);
+
+		await waitFor(() => expect(unlockBiometric).toHaveBeenCalledTimes(1));
+		// Flush the rejection through the catch before asserting absence —
+		// an early synchronous poll would pass vacuously (review P3).
+		await act(async () => {});
+		expect(screen.getByTestId("auth-error")).toHaveTextContent("");
+		expect(unlockBiometric).toHaveBeenCalledTimes(1); // flag: no re-prompt
 	});
 });

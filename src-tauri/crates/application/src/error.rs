@@ -208,6 +208,9 @@ impl VaultError {
                 Unlock with your master password and set it up again"
                     .to_string()
             }
+            // Wire shape pinned by biometric_cancelled_wire_shape_is_pinned
+            // below and by the frontend guard AuthContext.isBiometricCancelled
+            // (src/context/AuthContext.tsx) — change both sides together.
             VaultError::BiometricCancelled => "Touch ID was cancelled".to_string(),
             VaultError::BiometricLockedOut => {
                 "Biometric authentication is locked out. Unlock with your master password and try again"
@@ -271,6 +274,20 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&rate).expect("serialize RateLimited"),
             "\"Too many attempts. Retry in 42s\""
+        );
+    }
+
+    /// v1.8.1 cross-boundary contract: the dismissed-Touch-ID wire string is
+    /// matched EXACTLY by the frontend guard AuthContext.isBiometricCancelled
+    /// (src/context/AuthContext.tsx, guarded there by
+    /// biometricCancelledContract.test.ts). Changing this copy requires
+    /// updating that set in the same commit.
+    #[test]
+    fn biometric_cancelled_wire_shape_is_pinned() {
+        let err = VaultError::BiometricCancelled;
+        assert_eq!(
+            serde_json::to_string(&err).expect("serialize VaultError"),
+            "\"Touch ID was cancelled\""
         );
     }
 }

@@ -12,10 +12,21 @@ import * as api from "../api/vault";
 import { errorMessage } from "../utils/errorMessage";
 import { showToast } from "../utils/toast";
 
-// The Tauri layer rejects with the serialized VaultError enum; a dismissed
-// Touch ID prompt arrives as the plain string "BiometricCancelled".
+// The Tauri layer rejects with the serialized VaultError enum. Since v1.3.2
+// every variant serializes to its public_message() text, so a dismissed Touch
+// ID prompt arrives as "Touch ID was cancelled" (error.rs); the bare enum
+// name is kept for the pre-v1.3.2 wire shape. EXACT strings only — never
+// /cancel/i substring matching: IntegrityCheckFailed's public message
+// contains "was cancelled" and must NOT be silenced. This set ↔ error.rs
+// pairing is pinned by tests on BOTH sides (error.rs ipc test + frontend
+// biometricCancelledContract guard).
+const BIOMETRIC_CANCELLED_STRINGS: ReadonlySet<string> = new Set([
+	"BiometricCancelled",
+	"Touch ID was cancelled",
+]);
+
 function isBiometricCancelled(error: unknown): boolean {
-	return errorMessage(error, "") === "BiometricCancelled";
+	return BIOMETRIC_CANCELLED_STRINGS.has(errorMessage(error, ""));
 }
 
 // ---------------------------------------------------------------------------
