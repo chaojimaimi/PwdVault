@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.8.2] - 2026-10-30
+
+### Changed
+
+- **The Touch ID prompt now follows your attention**: the v1.8.0 auto-prompt
+  raised the fingerprint dialog at the start of every lock episode —
+  including idle auto-locks, which by definition happen while you are away,
+  so the system dialog floated over unrelated work whenever PwdVault sat in
+  the background or tray (the auto-lock path reloads the window without
+  raising it). The prompt is now gated on window focus: locked while
+  unfocused stays silent, and returning to the app (window, Dock, or tray
+  icon) raises it once per episode exactly as before. Launch and
+  tray-manual-lock behavior is unchanged — every path but the idle lock
+  already had the window raised.
+
 ## [1.8.1] - 2026-10-30
 
 ### Fixed
