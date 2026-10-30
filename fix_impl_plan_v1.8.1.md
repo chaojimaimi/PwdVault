@@ -32,12 +32,12 @@ v1.8.0 锁屏自动弹指上线后，用户取消指纹对话框会在解锁页�
 // cancelled" and must NOT be silenced. This set ↔ error.rs pairing is pinned
 // by tests on BOTH sides (error.rs ipc test + frontend contract guard).
 const BIOMETRIC_CANCELLED_STRINGS: ReadonlySet<string> = new Set([
-	"BiometricCancelled",
-	"Touch ID was cancelled",
+  "BiometricCancelled",
+  "Touch ID was cancelled",
 ]);
 
 function isBiometricCancelled(error: unknown): boolean {
-	return BIOMETRIC_CANCELLED_STRINGS.has(errorMessage(error, ""));
+  return BIOMETRIC_CANCELLED_STRINGS.has(errorMessage(error, ""));
 }
 ```
 
