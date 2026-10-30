@@ -1,5 +1,11 @@
 import { useState } from "react";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import {
+	render,
+	screen,
+	fireEvent,
+	waitFor,
+	act,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider, useAuth } from "./AuthContext";
 import { UnlockScreen } from "../screens/UnlockScreen";
