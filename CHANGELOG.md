@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.8.0] - 2026-10-30
+
+### Added
+
+- **Touch ID prompts itself on the lock screen**: when biometric unlock is
+  enabled, the unlock screen now raises the Touch ID dialog automatically —
+  no more clicking "Use Touch ID" first (matching 1Password and the system
+  apps). One attempt per lock episode: a dismissed prompt never re-prompts,
+  the button stays for manual retries, and locking/restarting re-arms the
+  auto-prompt. A late failure after another unlock path has already won is
+  kept silent instead of surfacing a stale error banner on the next lock
+  screen.
+
 ## [1.7.1] - 2026-10-30
 
 ### Fixed
