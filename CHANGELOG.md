@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.8.1] - 2026-10-30
+
+### Fixed
+
+- **Cancelling Touch ID no longer shows a false error banner**: the silence
+  guard compared the serialized error against the bare enum name
+  "BiometricCancelled" — the wire shape before v1.3.2. Since v1.3.2 every
+  error serializes to its human-readable public message, so a dismissed
+  prompt arrives as "Touch ID was cancelled", the check never matched, and
+  every cancel surfaced the red banner. v1.8.0's lock-screen auto-prompt made
+  cancels routine and exposed the dead guard on every lock episode. The guard
+  now matches exact strings for both shapes (never substring matching — the
+  integrity-failure message contains "was cancelled" and must stay loud),
+  with the Rust ↔ frontend string pairing pinned by tests on both sides so a
+  one-sided copy change can never silently break it again.
+
 ## [1.8.0] - 2026-10-30
 
 ### Added
