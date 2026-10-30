@@ -4,6 +4,7 @@ import {
 	useReducer,
 	useEffect,
 	useMemo,
+	useRef,
 	type ReactNode,
 } from "react";
 import type { AppScreen } from "../types";
@@ -28,6 +29,13 @@ export interface AuthState {
 	isLoading: boolean;
 	error: string | null;
 	bootError: string | null;
+	// v1.8.0: "one biometric attempt per lock episode". Lives in the reducer —
+	// NOT in a screen ref — because unlockBiometric's SET_LOADING swaps the
+	// whole auth screen tree for the Loading screen (App.tsx), unmounting
+	// UnlockScreen mid-prompt; a component ref would die on that remount and
+	// turn every cancel into a re-prompt loop. RESET (every lock) clears it,
+	// so the next lock episode auto-prompts again.
+	biometricAutoPrompted: boolean;
 }
 
 type AuthAction =
@@ -37,6 +45,7 @@ type AuthAction =
 	| { type: "SET_LOADING"; payload: boolean }
 	| { type: "SET_ERROR"; payload: string | null }
 	| { type: "SET_BOOT_ERROR"; payload: string | null }
+	| { type: "MARK_BIOMETRIC_AUTO_PROMPTED" }
 	| { type: "RESET" };
 
 const initialAuthState: AuthState = {
@@ -46,6 +55,7 @@ const initialAuthState: AuthState = {
 	isLoading: true,
 	error: null,
 	bootError: null,
+	biometricAutoPrompted: false,
 };
 
 function authReducer(state: AuthState, action: AuthAction): AuthState {
@@ -62,6 +72,8 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
 			return { ...state, error: action.payload };
 		case "SET_BOOT_ERROR":
 			return { ...state, bootError: action.payload };
+		case "MARK_BIOMETRIC_AUTO_PROMPTED":
+			return { ...state, biometricAutoPrompted: true };
 		case "RESET":
 			return { ...initialAuthState, isLoading: false };
 		default:
@@ -91,6 +103,17 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
 	const [state, dispatch] = useReducer(authReducer, initialAuthState);
+
+	// Latest-state mirror for the biometric late-failure guard below. Assigned
+	// in an effect (after commit) — a render-phase write could strand a state
+	// value from an interrupted concurrent render in the ref, and this guard's
+	// failure direction is "silently swallow a real error". Every read site is
+	// an async catch, which necessarily runs after commit; one beat of lag is
+	// harmless.
+	const authStateRef = useRef(initialAuthState);
+	useEffect(() => {
+		authStateRef.current = state;
+	});
 
 	const boot = async () => {
 		dispatch({ type: "SET_LOADING", payload: true });
@@ -178,7 +201,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 			// success only needs the shared post-unlock transition. A dismissed
 			// Touch ID prompt is a normal outcome — stay silent, surface every
 			// other failure through state.error.
+			//
+			// MARK on entry: auto or manual, a biometric attempt has happened in
+			// this lock episode — the auto-prompt effect in UnlockScreen reads
+			// this flag and stays quiet for the rest of the episode. RESET (on
+			// every lock) clears it.
 			unlockBiometric: async () => {
+				dispatch({ type: "MARK_BIOMETRIC_AUTO_PROMPTED" });
 				dispatch({ type: "SET_LOADING", payload: true });
 				dispatch({ type: "SET_ERROR", payload: null });
 				try {
@@ -186,7 +215,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 					postUnlock();
 					return true;
 				} catch (error) {
-					if (!isBiometricCancelled(error)) {
+					if (isBiometricCancelled(error)) {
+						// dismissed prompt: normal outcome.
+					} else if (authStateRef.current.isUnlocked) {
+						// Late failure guard (v1.8.0, defense in depth): another
+						// unlock path already won, so this stale rejection must not
+						// pollute the global error banner. UNREACHABLE in the current
+						// topology — the Loading screen swallows all interaction while
+						// the Touch ID prompt is up, so a password unlock cannot race
+						// it — but the guard becomes load-bearing the moment the
+						// loading topology changes. What a late resolution would
+						// actually do (do NOT re-derive this as "harmless"):
+						//  - success: complete_unlock_if rebuilds the whole Unlocked
+						//    state and bumps the session generation (session.rs),
+						//    invalidating in-flight D8 leases and resetting
+						//    last_remote_activity (the paired extension's 120s grace;
+						//    the wrap-key slot is cleared but restored at the biometric
+						//    step), and postUnlock's SET_SCREEN "vault" yanks the user
+						//    back from whatever screen they navigated to;
+						//  - failure (e.g. VAULT_STATE_CHANGED from an interleaved
+						//    password change): a stale error banner on the next lock
+						//    screen.
+					} else {
 						dispatch({
 							type: "SET_ERROR",
 							payload: errorMessage(error, "Touch ID unlock failed"),

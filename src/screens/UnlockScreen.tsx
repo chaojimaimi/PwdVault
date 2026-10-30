@@ -66,6 +66,27 @@ export function UnlockScreen() {
 	const showTouchId = !!bioStatus?.available && !!bioStatus?.enabled;
 	const error = state.error || localError;
 
+	// v1.8.0: auto-prompt Touch ID once per lock episode — no more clicking
+	// "Use Touch ID" first. Fires only when the probe confirmed availability
+	// AND enablement (showTouchId), no other auth op is in flight (isLoading
+	// also covers the boot window), and this episode has had no biometric
+	// attempt yet (the AuthContext flag — it survives the Loading-screen
+	// unmount/remount that every attempt triggers, which a component ref
+	// cannot). Manual retries via the button never check the flag.
+	// StrictMode note (wording per plan review): on mount showTouchId is
+	// ALWAYS false (bioStatus starts null, the probe is async), so the first
+	// double-invoked effect run exits early — the protection comes from the
+	// data-flow shape, not from a state gate; the flag carries the once-per-
+	// episode semantics across unmount/remount. Edge: a password attempt does
+	// not consume the flag — if a password submit fails before the probe
+	// returns, the auto-prompt is postponed, not cancelled.
+	useEffect(() => {
+		if (!showTouchId || state.isLoading || state.biometricAutoPrompted) {
+			return;
+		}
+		void actions.unlockBiometric();
+	}, [showTouchId, state.isLoading, state.biometricAutoPrompted, actions]);
+
 	return (
 		<div className="auth-screen">
 			<div className="auth-card">
