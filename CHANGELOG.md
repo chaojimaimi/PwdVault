@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   you being there, and a background cycle extends only the 120-second
   remote grace.
 - **A lock fired during a sync can no longer be silently undone**: the
-  sync merge window captured its lock-protection token *after* opening the
+  sync merge window captured its lock-protection token _after_ opening the
   window, so a lock that fired during the (potentially 30-second) network
   download was absorbed and the window re-unlocked the vault without a
   password — even though that protection exists precisely to prevent it.
