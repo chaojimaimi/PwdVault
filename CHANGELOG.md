@@ -4,6 +4,47 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.8.3] - 2026-11-12
+
+### Fixed
+
+- **Auto-lock works again while automatic sync is on**: background sync
+  cycles were refreshing the full auto-lock window through two separate
+  mechanisms — a full-window "activity" touch after every merge window,
+  and the session republish rebuilding the unlocked session with a fresh
+  timestamp — so a desktop with auto-sync enabled (every 5 minutes against
+  the 10-minute default lock) never locked while unattended. Sync cycles
+  are now presence-transparent: the cycle snapshots your activity state at
+  start and restores it when republishing, a manual sync still counts as
+  you being there, and a background cycle extends only the 120-second
+  remote grace.
+- **A lock fired during a sync can no longer be silently undone**: the
+  sync merge window captured its lock-protection token *after* opening the
+  window, so a lock that fired during the (potentially 30-second) network
+  download was absorbed and the window re-unlocked the vault without a
+  password — even though that protection exists precisely to prevent it.
+  The lock-epoch and presence snapshot are now taken at cycle start,
+  before any network I/O; any lock from that moment wins and the cycle
+  aborts cleanly.
+- **Autofill refuses invisible fields**: the fill target picker grabbed
+  the first password field on the page with no visibility check, so a
+  page could plant a hidden honeypot field, show a normal-looking login
+  form, and read the autofilled credentials from its own DOM. Fill (and
+  save-prompt capture) targets must now be rendered: self- or
+  ancestor-hidden, `hidden`-attribute, and zero-area fields are all
+  rejected (the KeePassXC-Browser / Firefox LoginManagerContent bar,
+  verified from source), with a fail-safe "No login form detected" when
+  nothing visible remains. Login layers that pre-render hidden and toggle
+  via style/class/aria-hidden re-trigger the scan, so the floating button
+  still appears.
+- **Sync failures are finally visible**: the "Last sync failed" line in
+  Settings → Cloud Sync was dead code — the failure slot was only ever
+  written with "ok", so an expired WebDAV password or a revoked Baidu
+  token made automatic sync fail forever, silently, while the status line
+  kept showing success and devices quietly diverged. Failures (manual and
+  automatic) now persist a sanitized message to the encrypted status row
+  and light up the existing banner.
+
 ## [1.8.2] - 2026-10-30
 
 ### Changed
