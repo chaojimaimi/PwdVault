@@ -34,7 +34,10 @@ const senderAuth = readFileSync(join(here, "sender-auth.js"), "utf8");
 
 function functionBody(source, name) {
 	const start = source.indexOf(`async function ${name}(`);
-	expect(start, `${name} found in the background modules`).toBeGreaterThanOrEqual(0);
+	expect(
+		start,
+		`${name} found in the background modules`,
+	).toBeGreaterThanOrEqual(0);
 	const bodyStart = source.indexOf("{", start);
 	// Balanced-brace scan — robust regardless of indentation/nesting.
 	let depth = 0;
@@ -82,7 +85,9 @@ describe("background auto-fill list gate (v1.4.0)", () => {
 
 describe("generator mode passthrough (v1.4.0)", () => {
 	it("generatePassword forwards the mode and passphrase fields to the app", () => {
-		const start = backgroundCommands.indexOf("async function generatePassword(");
+		const start = backgroundCommands.indexOf(
+			"async function generatePassword(",
+		);
 		expect(start).toBeGreaterThanOrEqual(0);
 		const body = backgroundCommands.slice(start, start + 1200);
 		// The dispatcher contract (#[serde(default)] GeneratorOptions.mode)
@@ -114,12 +119,12 @@ describe("AUTOFILL match_mode passthrough (v1.5.0 WP4)", () => {
 	// read is the six-file manifest-order join (v1.6.3); the background read
 	// is the three-module join.
 	const content = [
-		'domain-match.js',
-		'content-forms.js',
-		'content-ui-shadow.js',
-		'content-ui-bar.js',
-		'content-save-prompt.js',
-		'content.js',
+		"domain-match.js",
+		"content-forms.js",
+		"content-ui-shadow.js",
+		"content-ui-bar.js",
+		"content-save-prompt.js",
+		"content.js",
 	]
 		.map((name) => readFileSync(join(here, name), "utf8"))
 		.join("\n");

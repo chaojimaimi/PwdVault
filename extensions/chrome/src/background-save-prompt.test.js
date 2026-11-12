@@ -134,7 +134,9 @@ describe("save-prompt background behavior (smoke)", () => {
 			candidates: [],
 		});
 		expect(res).toEqual({ action: "save" });
-		expect(nmCalls.filter((m) => m.command === "verify_entry_password")).toHaveLength(0);
+		expect(
+			nmCalls.filter((m) => m.command === "verify_entry_password"),
+		).toHaveLength(0);
 	});
 
 	it("first non-matching candidate decides update with its title", async () => {
@@ -154,7 +156,9 @@ describe("save-prompt background behavior (smoke)", () => {
 			entry_title: "Second",
 		});
 		// Serial short-circuit: exactly 2 verify calls, in candidate order.
-		const verifies = nmCalls.filter((m) => m.command === "verify_entry_password");
+		const verifies = nmCalls.filter(
+			(m) => m.command === "verify_entry_password",
+		);
 		expect(verifies).toHaveLength(2);
 		expect(verifies[0].id_param).toBe("e1");
 		expect(verifies[1].id_param).toBe("e2");
@@ -217,8 +221,12 @@ describe("save-prompt background behavior (smoke)", () => {
 				{ id: "test-runtime-id" },
 			),
 		).rejects.toThrow(/sender is not authorized/i);
-		expect(nmCalls.filter((m) => m.command === "verify_entry_password")).toHaveLength(0);
-		expect(nmCalls.filter((m) => m.command === "list_all_entries")).toHaveLength(0);
+		expect(
+			nmCalls.filter((m) => m.command === "verify_entry_password"),
+		).toHaveLength(0);
+		expect(
+			nmCalls.filter((m) => m.command === "list_all_entries"),
+		).toHaveLength(0);
 	});
 
 	// ...and the gate function itself keeps the plan's reject-all semantics:
@@ -234,7 +242,9 @@ describe("save-prompt background behavior (smoke)", () => {
 				undefined,
 			),
 		).rejects.toThrow("Entry is not authorized for this site");
-		expect(nmCalls.filter((m) => m.command === "list_all_entries")).toHaveLength(0);
+		expect(
+			nmCalls.filter((m) => m.command === "list_all_entries"),
+		).toHaveLength(0);
 	});
 
 	it("a locked vault surfaces an error (content stays silent)", async () => {
@@ -263,7 +273,9 @@ describe("save-prompt background behavior (smoke)", () => {
 		});
 		expect(second).toEqual({ action: "none" });
 		// Degraded: no further verify round-trips at all.
-		expect(nmCalls.filter((m) => m.command === "verify_entry_password")).toHaveLength(0);
+		expect(
+			nmCalls.filter((m) => m.command === "verify_entry_password"),
+		).toHaveLength(0);
 	});
 
 	it("create-mode confirm derives the title from the URL hostname", async () => {
@@ -343,7 +355,14 @@ describe("save-prompt background behavior (smoke)", () => {
 			url: "https://example.com/login",
 			username: "u",
 			password: "p",
-			entry: { title: "T", username: "u", url: null, tags: [], group_id: null, url_match_mode: "weird" },
+			entry: {
+				title: "T",
+				username: "u",
+				url: null,
+				tags: [],
+				group_id: null,
+				url_match_mode: "weird",
+			},
 		});
 		expect(captured.url_match_mode).toBeUndefined();
 		expect(captured.url).toBeNull();

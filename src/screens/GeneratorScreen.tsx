@@ -6,10 +6,7 @@ import { errorMessage } from "../utils/errorMessage";
 import { showToast } from "../utils/toast";
 import { BackHeader } from "../components/BackHeader";
 import { StrengthMeter } from "../components/StrengthMeter";
-import type {
-	GeneratorMode,
-	PasswordGeneratorOptions,
-} from "../types";
+import type { GeneratorMode, PasswordGeneratorOptions } from "../types";
 
 /** Session-only generation history entry (v1.4.0): value + wall-clock time. */
 interface HistoryItem {
@@ -247,11 +244,15 @@ export function GeneratorScreen() {
 				</div>
 
 				<div className="password-preview">{password || "Generating..."}</div>
-				<StrengthMeter password={password} mode={mode} generatorParams={{
-					words: passphrase.words,
-					appendNumber: passphrase.appendNumber,
-					length: mode === "pin" ? pinLength : options.length,
-				}} />
+				<StrengthMeter
+					password={password}
+					mode={mode}
+					generatorParams={{
+						words: passphrase.words,
+						appendNumber: passphrase.appendNumber,
+						length: mode === "pin" ? pinLength : options.length,
+					}}
+				/>
 
 				{mode === "password" && (
 					<>
@@ -421,9 +422,7 @@ export function GeneratorScreen() {
 				{mode === "pin" && (
 					<div className="option-group">
 						<div className="option-row">
-							<label htmlFor="gen-pin-length">
-								PIN length: {pinLength}
-							</label>
+							<label htmlFor="gen-pin-length">PIN length: {pinLength}</label>
 						</div>
 						<div className="length-control">
 							<input

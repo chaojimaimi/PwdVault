@@ -347,25 +347,26 @@ roadmap had labeled it v1.9.0 but every item is a fix/hardening, zero features �
 核实含 entryCount write-only）→ mini-plan → plan-reviewer R1 **REVISE**（**1×P0：P3-12
 的 domain-match.js 删除前提为假**——content.js:45 裸标识符调用 entryMatchesPageUrl 是
 AUTOFILL 域门，删除即 ReferenceError 全灭 autofill，且击穿 sender-auth.test.js 字节守卫
-+ content-namespace.test.js FROZEN_NAMES 双断言；recon 的 grep 漏了裸调用形态。撤回改
-文件头 eslint-disable。**1×P1：P2-1 门会打红 background-save-prompt.test.js 四用例**——
-chrome stub 缺 list_all_entries 分支，fail-closed 在校验层全拒。2×P2：wire 名措辞
-（GET_ENTRIES_FOR_URL 是内部消息类型≠桌面命令 list_all_entries）+ 候选门语义/null
-senderUrl 未指定）→ 折叠 → R2 **PASS**（唯一遗留：行级 eslint-disable 会落冻结区破字节
-守卫的严格子串包含 → 文件级 disable 置于 BEGIN 标记外）→ 三 ds-worker 并行（WP-A Rust
-/ WP-B 前端 / WP-C 扩展，文件零交集全量核对，全部一次通过零停工）→ 三域评审（rust
-**APPROVE** 0 P0-P2 + 1×P3 接线层无守卫建议 include_str! 契约测试；extension **APPROVE**
-0 P0-P2 + 5×P3；react **REQUEST CHANGES**：**1×P1 typecheck 门是红的**——worker 只跑了
-主 tsconfig，CI 的 pnpm typecheck 跑全三份，两个新测试文件类型错误 + 4×P3）→ 主代理
-折叠 9 处（include_str! 接线契约测试 scoped 到 pre-#[cfg(test)] 区——测试自身断言字符串
-会撞 matches 计数（3 非 2），v1.8.1 自碰撞教训重演；check-path 域外 skip 行为用例 +
-null-senderUrl 拒绝前移（authorizeMessage 在信任边界就拒无 URL sender，监听器路径打不
-到门内部 → 拆双用例：外层守卫 + 直接模块调用）；'disconnected port' 短语；pressed 断言
-×4；role=group；beforeEach 恢复；tab 缩进；P3-7 context 级用例（waitFor——dispatch 落
-在 throw 前，probe 的 ctx 对象下次 commit 才换））→ react 聚焦复审 **APPROVE**（变异
-重跑双红：删 dispatch 的 error 载荷/删 aria-pressed 均红）+ extension **CONFIRM**（重
-排变异证明零既有用例变语义；一处已接受 fail-closed 输入类差异：空候选+缺 digest 现在
-抛错而非静默 save）→ 干净 worktree 门禁（CI-true 数字钉定）→ release.
+
+- content-namespace.test.js FROZEN_NAMES 双断言；recon 的 grep 漏了裸调用形态。撤回改
+  文件头 eslint-disable。**1×P1：P2-1 门会打红 background-save-prompt.test.js 四用例**——
+  chrome stub 缺 list_all_entries 分支，fail-closed 在校验层全拒。2×P2：wire 名措辞
+  （GET_ENTRIES_FOR_URL 是内部消息类型≠桌面命令 list_all_entries）+ 候选门语义/null
+  senderUrl 未指定）→ 折叠 → R2 **PASS**（唯一遗留：行级 eslint-disable 会落冻结区破字节
+  守卫的严格子串包含 → 文件级 disable 置于 BEGIN 标记外）→ 三 ds-worker 并行（WP-A Rust
+  / WP-B 前端 / WP-C 扩展，文件零交集全量核对，全部一次通过零停工）→ 三域评审（rust
+  **APPROVE** 0 P0-P2 + 1×P3 接线层无守卫建议 include_str! 契约测试；extension **APPROVE**
+  0 P0-P2 + 5×P3；react **REQUEST CHANGES**：**1×P1 typecheck 门是红的**——worker 只跑了
+  主 tsconfig，CI 的 pnpm typecheck 跑全三份，两个新测试文件类型错误 + 4×P3）→ 主代理
+  折叠 9 处（include_str! 接线契约测试 scoped 到 pre-#[cfg(test)] 区——测试自身断言字符串
+  会撞 matches 计数（3 非 2），v1.8.1 自碰撞教训重演；check-path 域外 skip 行为用例 +
+  null-senderUrl 拒绝前移（authorizeMessage 在信任边界就拒无 URL sender，监听器路径打不
+  到门内部 → 拆双用例：外层守卫 + 直接模块调用）；'disconnected port' 短语；pressed 断言
+  ×4；role=group；beforeEach 恢复；tab 缩进；P3-7 context 级用例（waitFor——dispatch 落
+  在 throw 前，probe 的 ctx 对象下次 commit 才换））→ react 聚焦复审 **APPROVE**（变异
+  重跑双红：删 dispatch 的 error 载荷/删 aria-pressed 均红）+ extension **CONFIRM**（重
+  排变异证明零既有用例变语义；一处已接受 fail-closed 输入类差异：空候选+缺 digest 现在
+  抛错而非静默 save）→ 干净 worktree 门禁（CI-true 数字钉定）→ release.
 
 Shipped: P2-1 updateEntryFromPrompt/checkSaveCredentials 域重校验（getEntriesForUrl
 senderUrl 重推导，fail-closed，update 拒/check 静默 skip，null 全拒）；P2-2 sendToApp

@@ -107,9 +107,7 @@ describe("VaultContext loadDeletedEntries error payload (v1.8.4 P3-7)", () => {
 		// The dispatch lands just before the throw — the probe's context
 		// object is swapped on the NEXT React commit, so wait for it instead
 		// of asserting against the pre-dispatch snapshot.
-		await waitFor(() =>
-			expect(latestCtx!.state.deletedStatus).toBe("error"),
-		);
+		await waitFor(() => expect(latestCtx!.state.deletedStatus).toBe("error"));
 		expect(latestCtx!.state.deletedError).toBe("db down");
 	});
 });
