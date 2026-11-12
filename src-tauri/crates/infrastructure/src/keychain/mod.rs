@@ -201,6 +201,33 @@ mod macos;
 pub use macos::{MacSecretStore, MacSyncSecretStore};
 
 // ---------------------------------------------------------------------------
+// Window-lifecycle cancel hook for an in-flight Touch ID prompt (v1.8.5)
+// ---------------------------------------------------------------------------
+
+/// Ask the in-flight Touch ID dialog (the legacy-gate `LAContext`
+/// evaluation) to dismiss itself: the dialog is a system panel that does
+/// not follow the app window, so the main window's minimize/hide event
+/// handlers call this to drop the pending evaluation's context
+/// (drop = invalidate = the panel goes away). No-op when no prompt is
+/// pending — the flag is reset unconditionally at the next gate entry.
+///
+/// The cfg PAIR here is load-bearing (v1.8.5 R1): the naive alternative —
+/// re-exporting a macOS-only symbol — would compile on a macOS
+/// `cargo check` yet break the Windows release CI, because the tauri
+/// `on_window_event` closure in `src-tauri/src/lib.rs` compiles on every
+/// platform. Keeping both arms same-named keeps that call site cfg-free.
+#[cfg(target_os = "macos")]
+pub fn cancel_pending_biometric_prompt() {
+    biometric_gate::request_cancel();
+}
+
+/// No-op stub: this platform has no biometric gate (D7), so there is
+/// never an in-flight prompt to cancel. Same name as the macOS
+/// implementation so the window-event call site needs zero `#[cfg]`.
+#[cfg(not(target_os = "macos"))]
+pub fn cancel_pending_biometric_prompt() {}
+
+// ---------------------------------------------------------------------------
 // Non-macOS stub (D7)
 // ---------------------------------------------------------------------------
 

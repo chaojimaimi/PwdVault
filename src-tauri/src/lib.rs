@@ -34,7 +34,7 @@ use tauri::{
 };
 
 use pwdvault_domain::constants;
-use pwdvault_infrastructure::{database, native_host_setup, paths};
+use pwdvault_infrastructure::{database, keychain, native_host_setup, paths};
 
 // ---------------------------------------------------------------------------
 // Auto-Lock background thread
@@ -384,10 +384,47 @@ pub fn run() {
                 let tray_handle = tray.clone();
                 let win = window.clone();
                 window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = win.hide();
-                        let _ = &tray_handle;
+                    match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => {
+                            api.prevent_close();
+                            // v1.8.5: an in-flight Touch ID dialog must not
+                            // survive the hide-to-tray.
+                            keychain::cancel_pending_biometric_prompt();
+                            let _ = win.hide();
+                            let _ = &tray_handle;
+                        }
+                        // v1.8.5: the legacy-gate Touch ID dialog is a system
+                        // panel that does not follow the app window — cancel
+                        // it when the window is minimized/hidden. Two arms
+                        // because they cannot share one invalidation
+                        // predicate: tao's macOS delegate has no
+                        // windowDidMiniaturize, so `is_minimized()` is NOT
+                        // guaranteed to have flipped yet when either event
+                        // fires.
+                        //  - Focused(false) rides windowDidResignKey; the
+                        //    is_minimized check deliberately excludes a bare
+                        //    focus loss — including the unverified "system
+                        //    fingerprint panel steals focus" self-kill face
+                        //    and the Alt-Tab hover (known limitation, QA T62
+                        //    observation item).
+                        //  - Resized rides windowDidResize; the 0x0 size is
+                        //    the reliable macOS minimize signal (wry #490) —
+                        //    independent of the isMiniaturized flip timing,
+                        //    so the primary minimize scenario always hits.
+                        tauri::WindowEvent::Focused(false)
+                            // `matches!` not `== Ok(true)`: tauri::Error has
+                            // no PartialEq.
+                            if matches!(win.is_minimized(), Ok(true)) =>
+                        {
+                            keychain::cancel_pending_biometric_prompt();
+                        }
+                        tauri::WindowEvent::Resized(size)
+                            if matches!(win.is_minimized(), Ok(true))
+                                || (size.width == 0 && size.height == 0) =>
+                        {
+                            keychain::cancel_pending_biometric_prompt();
+                        }
+                        _ => {}
                     }
                 });
             }
