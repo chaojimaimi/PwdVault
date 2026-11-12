@@ -165,6 +165,7 @@ export function UnlockScreen() {
 						value={password}
 						onChange={setPassword}
 						placeholder="Enter master password"
+						autoComplete="current-password"
 						disabled={state.isLoading}
 						focusOnMount
 						ariaInvalid={!!error}

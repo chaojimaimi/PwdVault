@@ -65,4 +65,19 @@ describe("SetupScreen", () => {
 		).toBeInTheDocument();
 		expect(initialize).not.toHaveBeenCalled();
 	});
+
+	// v1.8.4 (P2-5): both setup fields are credential creation inputs —
+	// "new-password" keeps the browser from offering saved logins here.
+	it("marks both password fields as new-password for autocomplete", async () => {
+		await renderScreen();
+
+		expect(screen.getByLabelText("Master password")).toHaveAttribute(
+			"autocomplete",
+			"new-password",
+		);
+		expect(screen.getByLabelText("Confirm Password")).toHaveAttribute(
+			"autocomplete",
+			"new-password",
+		);
+	});
 });

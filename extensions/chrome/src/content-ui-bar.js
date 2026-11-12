@@ -420,10 +420,9 @@
 
 	// floatingButton rides the shared namespace: the entry file's
 	// MutationObserver reads it across the split. The shadow-root handle
-	// and the badge count stay file-local.
+	// stays file-local.
 	globalThis.PwdVaultContent.floatingButton = null;
 	let floatingButtonShadow = null;
-	let entryCount = 0;
 
 	function createFloatingButton(entries = null) {
 		if (globalThis.PwdVaultContent.floatingButton) {
@@ -439,8 +438,6 @@
 		// actions (popup fill, overlay, context menu) are unaffected.
 		if (loginForm.formType === globalThis.PwdVaultContent.FORM_TYPES.REGISTER)
 			return;
-
-		entryCount = entries ? entries.length : 0;
 
 		const { host, shadowRoot } = globalThis.PwdVaultContent.mountShadowHost(
 			"position: fixed; z-index: 2147483646;",
@@ -464,6 +461,9 @@
 		host.style.right = "20px";
 
 		host.addEventListener("click", (e) => {
+			// Synthetic events dispatched by page scripts must never open the
+			// overlay (isTrusted is false for script-made events).
+			if (!e.isTrusted) return;
 			e.preventDefault();
 			showOverlay();
 		});
@@ -491,7 +491,6 @@
 		if (!badge) return;
 
 		const count = entries ? entries.length : 0;
-		entryCount = count;
 
 		if (count > 1) {
 			badge.textContent = count;

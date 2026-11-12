@@ -57,6 +57,7 @@ export function SetupScreen() {
 						value={password}
 						onChange={setPassword}
 						placeholder="Enter master password"
+						autoComplete="new-password"
 						disabled={state.isLoading}
 						focusOnMount
 						ariaInvalid={!!error}
@@ -69,6 +70,7 @@ export function SetupScreen() {
 						value={confirmPassword}
 						onChange={setConfirmPassword}
 						placeholder="Confirm master password"
+						autoComplete="new-password"
 						disabled={state.isLoading}
 						ariaInvalid={!!error}
 						ariaDescribedBy={error ? "setup-error" : undefined}

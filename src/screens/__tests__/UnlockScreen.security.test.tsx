@@ -316,4 +316,16 @@ describe("UnlockScreen security affordances", () => {
 			"Failed to unlock vault",
 		);
 	});
+
+	// v1.8.4 (P2-5): the unlock field signals "existing credential" so the
+	// browser's password manager treats it as a login form, not a signup.
+	it("passes current-password autocomplete to the master-password field", async () => {
+		const { UnlockScreen } = await import("../UnlockScreen");
+		render(<UnlockScreen />);
+
+		expect(screen.getByLabelText("Master password")).toHaveAttribute(
+			"autocomplete",
+			"current-password",
+		);
+	});
 });

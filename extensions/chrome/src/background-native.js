@@ -10,6 +10,7 @@ import { createPairNonceStorage } from "./pair-nonce-storage.js";
 import {
 	friendlyConnectionError,
 	isAuthenticationError,
+	isConnectionError,
 } from "./connection-errors.js";
 
 // The native messaging host name; must match the "name" field in the manifest
@@ -79,7 +80,7 @@ export async function restoreToken() {
 			apiToken = token;
 			return true;
 		}
-	} catch (e) {
+	} catch {
 		// ignore
 	}
 	return false;
@@ -287,18 +288,37 @@ export async function sendToApp(command, params = {}) {
 			lastConnectionError = null;
 			return data.data;
 		} else {
-			throw new Error(
+			// v1.8.4 P2-2: keep the host/desktop's structured error_code on
+			// the thrown error so the classifier below can tell a business
+			// rejection (COMMAND_FAILED / REQUEST_REJECTED) from a pure
+			// transport failure (HOST_TRANSPORT_ERROR) by the code instead of
+			// by message substrings. The message text is unchanged.
+			const failure = new Error(
 				(data && (data.error_message || data.error)) || "Unknown error",
 			);
+			if (data && typeof data.error_code === "string") {
+				failure.code = data.error_code;
+			}
+			throw failure;
 		}
 	} catch (error) {
-		const msg = error.message || "";
-		if (
-			msg.includes("native messaging") ||
-			msg.includes("not found") ||
-			msg.includes("timed out") ||
-			msg.includes("connect")
-		) {
+		// Structured failure body: ONLY a pure transport failure breaks the
+		// connection. Business errors rethrow verbatim — connectionStatus is
+		// untouched, so "Entry not found" no longer reads as "the desktop
+		// app is unreachable" (the bare-substring misclassification this
+		// two-level catch replaces).
+		if (typeof error?.code === "string") {
+			if (error.code === "HOST_TRANSPORT_ERROR") {
+				connectionStatus = "disconnected";
+				throw new Error(friendlyConnectionError(error), { cause: error });
+			}
+			throw error;
+		}
+		// No structured code — a browser-runtime native-messaging failure
+		// with no response body. Classify through the shared phrase list in
+		// connection-errors.js (the single classifier exit; it is a superset
+		// of the bare substrings that used to live here).
+		if (isConnectionError(error.message || "")) {
 			connectionStatus = "disconnected";
 			throw new Error(friendlyConnectionError(error), { cause: error });
 		}

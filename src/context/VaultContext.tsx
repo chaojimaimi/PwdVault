@@ -17,6 +17,8 @@ import type {
 } from "../types";
 import * as api from "../api/vault";
 import { errorMessage } from "../utils/errorMessage";
+import { clearSearchCache } from "../utils/search";
+import { showToast } from "../utils/toast";
 import { useAuth } from "./AuthContext";
 
 // ---------------------------------------------------------------------------
@@ -29,6 +31,8 @@ export interface VaultState {
 	 * sorted — a simple list the trash view owns. */
 	deletedEntries: EntrySummary[];
 	deletedStatus: ResourceStatus;
+	/** v1.8.4 (P3-7): why the last trash load failed, for the banner. */
+	deletedError: string | null;
 	groups: Group[];
 	selectedGroupId: string | null;
 	selectedEntry: EntrySummary | null;
@@ -44,7 +48,7 @@ type VaultAction =
 	| { type: "SET_DELETED_ENTRIES"; payload: EntrySummary[] }
 	| {
 			type: "SET_DELETED_RESOURCE";
-			payload: { status: ResourceStatus };
+			payload: { status: ResourceStatus; error?: string | null };
 	  }
 	| { type: "SET_GROUPS"; payload: Group[] }
 	| { type: "SET_SELECTED_GROUP"; payload: string | null }
@@ -67,6 +71,7 @@ const initialVaultState: VaultState = {
 	entries: [],
 	deletedEntries: [],
 	deletedStatus: "idle",
+	deletedError: null,
 	groups: [],
 	selectedGroupId: null,
 	selectedEntry: null,
@@ -84,7 +89,11 @@ function vaultReducer(state: VaultState, action: VaultAction): VaultState {
 		case "SET_DELETED_ENTRIES":
 			return { ...state, deletedEntries: action.payload };
 		case "SET_DELETED_RESOURCE":
-			return { ...state, deletedStatus: action.payload.status };
+			return {
+				...state,
+				deletedStatus: action.payload.status,
+				deletedError: action.payload.error ?? null,
+			};
 		case "SET_GROUPS":
 			return { ...state, groups: action.payload };
 		case "SET_SELECTED_GROUP":
@@ -169,6 +178,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 	useEffect(() => {
 		if (wasUnlocked.current && !authState.isUnlocked) {
 			dispatch({ type: "RESET" });
+			// v1.8.4 (P3-2): drop the fuse index cached by array identity — no
+			// entry data from the previous session may survive the lock.
+			clearSearchCache();
 		}
 		wasUnlocked.current = authState.isUnlocked;
 	}, [authState.isUnlocked]);
@@ -218,37 +230,25 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 			},
 
 			createGroup: async (name: string) => {
-				try {
-					const created = await api.createGroup(name);
-					await actions.loadGroups();
-					return created;
-				} catch (error) {
-					throw error;
-				}
+				const created = await api.createGroup(name);
+				await actions.loadGroups();
+				return created;
 			},
 
 			updateGroup: async (id: string, name: string) => {
-				try {
-					await api.updateGroup(id, name);
-					await actions.loadGroups();
-				} catch (error) {
-					throw error;
-				}
+				await api.updateGroup(id, name);
+				await actions.loadGroups();
 			},
 
 			deleteGroup: async (id: string) => {
-				try {
-					await api.removeGroup(id);
-					// Selection clearing is decided inside the reducer (DELETE_GROUP)
-					// — this action must not close over `state`, otherwise `actions`
-					// would need state-dependent memo deps and a fresh identity per
-					// group switch (the H4 churn the latestRef workarounds fought).
-					dispatch({ type: "DELETE_GROUP", payload: id });
-					await actions.loadGroups();
-					await actions.loadEntries();
-				} catch (error) {
-					throw error;
-				}
+				await api.removeGroup(id);
+				// Selection clearing is decided inside the reducer (DELETE_GROUP)
+				// — this action must not close over `state`, otherwise `actions`
+				// would need state-dependent memo deps and a fresh identity per
+				// group switch (the H4 churn the latestRef workarounds fought).
+				dispatch({ type: "DELETE_GROUP", payload: id });
+				await actions.loadGroups();
+				await actions.loadEntries();
 			},
 
 			selectGroup: (id: string | null) => {
@@ -260,12 +260,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 					dispatch({ type: "SET_SELECTED_ENTRY", payload: null });
 					return;
 				}
-				try {
-					const entry = await api.getEntryMeta(id);
-					dispatch({ type: "SET_SELECTED_ENTRY", payload: entry });
-				} catch (error) {
-					throw error;
-				}
+				const entry = await api.getEntryMeta(id);
+				dispatch({ type: "SET_SELECTED_ENTRY", payload: entry });
 			},
 
 			getEntrySecret: async (id: string) => {
@@ -308,7 +304,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 				} catch (error) {
 					dispatch({
 						type: "SET_DELETED_RESOURCE",
-						payload: { status: "error" },
+						// v1.8.4 (P3-7): the banner renders the reason next to Retry.
+						payload: {
+							status: "error",
+							error: errorMessage(error, "Failed to load trash"),
+						},
 					});
 					throw error;
 				}
@@ -317,12 +317,24 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 			restoreEntry: async (id: string) => {
 				await api.restoreEntry(id);
 				// Both lists change: the row leaves the trash and re-enters the
-				// live list (with its updated_at bump). The live reload failure
-				// must not mask the successful restore.
-				await Promise.all([
-					actions.loadEntries().catch(() => {}),
-					actions.loadDeletedEntries(),
-				]);
+				// live list (with its updated_at bump). The restore itself
+				// succeeded, so a refresh failure must neither mask that fact
+				// (v1.8.4 P2-3, handleSyncNow refreshed-flag pattern) nor let it
+				// pass silently — each list refresh is caught independently and
+				// any failure surfaces as a toast while restoreEntry still
+				// resolves.
+				let refreshed = true;
+				try {
+					await Promise.all([
+						actions.loadEntries(),
+						actions.loadDeletedEntries(),
+					]);
+				} catch {
+					refreshed = false;
+				}
+				if (!refreshed) {
+					showToast("Restored, but refreshing the list failed");
+				}
 			},
 
 			purgeEntry: async (id: string) => {

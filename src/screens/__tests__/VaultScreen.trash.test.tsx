@@ -1,7 +1,7 @@
 import type React from "react";
 import { render, fireEvent, screen, waitFor } from "@testing-library/react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
-import type { EntrySummary, Group } from "../../types";
+import type { EntrySummary, Group, ResourceStatus } from "../../types";
 
 // v1.4.0 (WP4): trash view on the VaultScreen — open/list/restore/purge/
 // empty flow, plus the sort-select wiring. VaultScreen pulls three contexts
@@ -61,7 +61,10 @@ const DEFAULT_STATE = {
 		},
 	],
 	deletedEntries: [] as EntrySummary[],
-	deletedStatus: "success" as const,
+	// Widened (ResourceStatus): the P3-7 banner case injects an "error"
+	// status through a shallow copy of this holder.
+	deletedStatus: "success" as ResourceStatus,
+	deletedError: null as string | null,
 	// Widened (SettingsScreen.updates precedent): the v1.4.1 tests inject
 	// groups / a groupsStatus variant through shallow copies of this holder.
 	groups: [] as Group[],
@@ -96,7 +99,9 @@ const settingsHolder = {
 		update: null,
 		updatePhase: "available" as const,
 		downloadProgress: 0,
-		status: "success" as const,
+		// Widened to string (SettingsScreen.updates precedent): the P2-4 case
+		// injects a "loading" status through this holder.
+		status: "success" as string,
 		error: null,
 	},
 	actions: {
@@ -153,6 +158,10 @@ beforeEach(() => {
 	// re-stub it here so that behavior cannot leak into later tests.
 	actions.selectGroup.mockImplementation(() => {});
 	vaultHolder.state = { ...DEFAULT_STATE, deletedEntries };
+	// The P2-4 case mutates this module-scoped holder; restore it HERE so an
+	// assertion failure above can never leak "loading" into later tests
+	// (the holder-leak lesson this file's header documents).
+	settingsHolder.state.status = "success";
 });
 
 describe("VaultScreen trash (v1.4.0)", () => {
@@ -350,5 +359,43 @@ describe("VaultScreen sort control (v1.4.0)", () => {
 				expect.objectContaining({ sort_mode: "alpha" }),
 			),
 		);
+	});
+
+	// v1.8.4 (P2-4): persisting while settings are still loading would spread
+	// DEFAULT_SETTINGS into the write and clobber the user's real settings —
+	// the guard must refuse the change and the control must read as disabled
+	// (SettingsScreen.handleSave mirror).
+	it("refuses to persist and disables the select while settings are loading", async () => {
+		settingsHolder.state.status = "loading";
+		const { VaultScreen } = await import("../VaultScreen");
+		render(<VaultScreen />);
+
+		const sortSelect = screen.getByLabelText(
+			"Sort passwords",
+		) as HTMLSelectElement;
+		expect(sortSelect.disabled).toBe(true);
+
+		fireEvent.change(sortSelect, { target: { value: "alpha" } });
+		expect(settingsHolder.actions.updateSettings).not.toHaveBeenCalled();
+	});
+});
+
+// v1.8.4 (P3-7): the trash error banner carries the failure reason from the
+// SET_DELETED_RESOURCE payload, not just a static "Could not load".
+describe("VaultScreen trash error payload (v1.8.4)", () => {
+	it("renders the error message next to Retry when the trash load fails", async () => {
+		vaultHolder.state = {
+			...vaultHolder.state,
+			deletedEntries: [],
+			deletedStatus: "error",
+			deletedError: "database unavailable",
+		};
+		const { VaultScreen } = await import("../VaultScreen");
+		render(<VaultScreen />);
+
+		fireEvent.click(screen.getByRole("button", { name: "Trash" }));
+		expect(screen.getByText("Could not load the trash.")).toBeTruthy();
+		expect(screen.getByText("database unavailable")).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
 	});
 });

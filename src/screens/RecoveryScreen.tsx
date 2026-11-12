@@ -29,7 +29,16 @@ export function RecoveryScreen() {
 
 		// Backend validation is authoritative for password strength; on
 		// success recover_vault has already published the new session keys.
-		await actions.recover(recoveryKey.trim(), newPassword);
+		const recovered = await actions.recover(recoveryKey.trim(), newPassword);
+		if (!recovered) {
+			// v1.8.4 (P3-5): a rejected attempt means the one-time 256-bit
+			// recovery key did not authenticate — it must not linger in the
+			// input (any shoulder-surf / screenshot exposure of a spent key is
+			// pure downside). The password fields are kept: a mismatch or weak
+			// password is the likely retry cause, and retyping both fields is
+			// exactly the friction recovery does not need.
+			setRecoveryKey("");
+		}
 	};
 
 	const error = localError || state.error;

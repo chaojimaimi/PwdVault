@@ -99,12 +99,12 @@ function setupContextMenu() {
 					title: "Generate Password",
 					contexts: ["editable"],
 				});
-			} catch (e) {
+			} catch {
 				// contextMenus.create can throw if an entry already exists or if
 				// the API is temporarily unavailable — non-fatal.
 			}
 		});
-	} catch (e) {
+	} catch {
 		// contextMenus API unavailable — non-fatal; the popup still works.
 	}
 }
@@ -266,8 +266,10 @@ async function handleMessage(message, sender) {
 		case "CHECK_SAVE_CREDENTIALS":
 			// v1.6.0 save prompt: digest-only desktop verification. The
 			// whitelist (sender-auth.js) gates content senders; this case
-			// never sees plaintext.
-			return checkSaveCredentials(message);
+			// never sees plaintext. v1.8.4 P2-1: the handler re-derives the
+			// candidates' domain authorization from this sender URL (fail
+			// closed when absent).
+			return checkSaveCredentials(message, authorization.senderUrl);
 
 		case "SAVE_LOGIN_CONFIRMED": {
 			// v1.6.0 save prompt: the user clicked Save/Update on the in-page
@@ -275,7 +277,9 @@ async function handleMessage(message, sender) {
 			// with the entry's own metadata echoed. Errors surface through the
 			// listener's {error: message} catch (SF-P1 pattern).
 			if (message.mode === "update") {
-				await updateEntryFromPrompt(message);
+				// v1.8.4 P2-1: the echoed entry_id is re-authorized against
+				// this sender URL inside updateEntryFromPrompt (fail closed).
+				await updateEntryFromPrompt(message, authorization.senderUrl);
 				return { ok: true };
 			}
 			await createEntry({

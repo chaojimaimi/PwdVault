@@ -441,6 +441,15 @@ class PopupApp {
 			if (!url.startsWith("http://") && !url.startsWith("https://")) {
 				finalUrl = "https://" + url;
 			}
+			// v1.8.4 P3-11: refuse anything the URL parser rejects (e.g.
+			// "javascript:alert(1)" turns into an https:// URL with an invalid
+			// port) BEFORE opening a tab or closing the popup — a malformed or
+			// malicious entry URL must neither navigate nor kill the window.
+			try {
+				new URL(finalUrl);
+			} catch {
+				return;
+			}
 			chrome.tabs.create({ url: finalUrl });
 			window.close();
 		}

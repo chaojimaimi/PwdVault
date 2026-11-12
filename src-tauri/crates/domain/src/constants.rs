@@ -21,8 +21,13 @@ pub const MAX_NOTES_LENGTH: usize = 65536;
 /// URI, which runs a few hundred bytes.
 pub const MAX_TOTP_SECRET_LENGTH: usize = 512;
 
-/// Maximum HTTP request body size (10 MB).
-pub const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
+/// Maximum HTTP request body size (14 MiB).
+///
+/// Kept in parity with `MAX_BACKUP_FILE_BYTES` (14 MiB,
+/// `application/src/service/backup.rs`) so an encrypted-backup import
+/// forwarded over the native-host transport is never rejected by a smaller
+/// HTTP cap — the two limits must move together.
+pub const MAX_BODY_SIZE: usize = 14 * 1024 * 1024;
 
 /// Browser extension ↔ native host ↔ desktop protocol version.
 ///

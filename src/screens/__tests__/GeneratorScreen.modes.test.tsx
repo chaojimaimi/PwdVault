@@ -53,7 +53,13 @@ describe("GeneratorScreen modes", () => {
 		render(<GeneratorScreen />);
 
 		await waitFor(() => expect(generatePassword).toHaveBeenCalledTimes(1));
-		fireEvent.click(screen.getByRole("tab", { name: "Passphrase" }));
+		fireEvent.click(screen.getByRole("button", { name: "Passphrase" }));
+
+		// v1.8.4 (P3-6, review fold): the toggle state itself is pinned —
+		// deleting aria-pressed must fail here, not only in the source text.
+		expect(
+			screen.getByRole("button", { name: "Passphrase", pressed: true }),
+		).toBeTruthy();
 
 		await waitFor(() => expect(generatePassword).toHaveBeenCalledTimes(2));
 		expect(generatePassword).toHaveBeenLastCalledWith(
@@ -72,7 +78,10 @@ describe("GeneratorScreen modes", () => {
 		render(<GeneratorScreen />);
 
 		await waitFor(() => expect(generatePassword).toHaveBeenCalledTimes(1));
-		fireEvent.click(screen.getByRole("tab", { name: "PIN" }));
+		fireEvent.click(screen.getByRole("button", { name: "PIN" }));
+		expect(
+			screen.getByRole("button", { name: "PIN", pressed: true }),
+		).toBeTruthy();
 
 		await waitFor(() => expect(generatePassword).toHaveBeenCalledTimes(2));
 		expect(generatePassword).toHaveBeenLastCalledWith(
@@ -83,7 +92,10 @@ describe("GeneratorScreen modes", () => {
 	it("respects passphrase option edits on the next generation", async () => {
 		const { GeneratorScreen } = await import("../GeneratorScreen");
 		render(<GeneratorScreen />);
-		fireEvent.click(screen.getByRole("tab", { name: "Passphrase" }));
+		fireEvent.click(screen.getByRole("button", { name: "Passphrase" }));
+		expect(
+			screen.getByRole("button", { name: "Passphrase", pressed: true }),
+		).toBeTruthy();
 		await waitFor(() => expect(generatePassword).toHaveBeenCalledTimes(2));
 
 		// Option edits alone do NOT auto-regenerate (same discipline as the
@@ -122,7 +134,10 @@ describe("GeneratorScreen modes", () => {
 		render(<GeneratorScreen />);
 
 		await waitFor(() => expect(generatePassword).toHaveBeenCalledTimes(1));
-		fireEvent.click(screen.getByRole("tab", { name: "Passphrase" }));
+		fireEvent.click(screen.getByRole("button", { name: "Passphrase" }));
+		expect(
+			screen.getByRole("button", { name: "Passphrase", pressed: true }),
+		).toBeTruthy();
 		await waitFor(() => expect(generatePassword).toHaveBeenCalledTimes(2));
 
 		const history = screen.getByText("Session history");

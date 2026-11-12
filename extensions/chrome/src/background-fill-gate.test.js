@@ -161,3 +161,31 @@ describe("AUTOFILL match_mode passthrough (v1.5.0 WP4)", () => {
 		expect(content).toContain('typeof message.entryUrl !== "string"');
 	});
 });
+
+describe("save/update authorization gate (v1.8.4 P2-1)", () => {
+	it("updateEntryFromPrompt re-verifies the echoed entry_id against the sender-scoped listing", () => {
+		const body = functionBody(backgroundCommands, "updateEntryFromPrompt");
+		// The membership data source is the exported getEntriesForUrl helper
+		// (its wire command is list_all_entries) — never a literal
+		// "GET_ENTRIES_FOR_URL" runtime message name sent to the desktop.
+		expect(body).toContain("getEntriesForUrl(senderUrl)");
+		expect(body).toContain('"Entry is not authorized for this site"');
+		// Both dispatch arms pass the sender URL; the old no-senderUrl call
+		// shapes must be gone from background.js.
+		expect(background).toContain(
+			"updateEntryFromPrompt(message, authorization.senderUrl)",
+		);
+		expect(background).not.toContain("updateEntryFromPrompt(message)");
+	});
+
+	it("checkSaveCredentials filters candidates through the same gate and its arm passes senderUrl", () => {
+		const body = functionBody(backgroundCommands, "checkSaveCredentials");
+		expect(body).toContain("getEntriesForUrl(senderUrl)");
+		// Refusal wording for the absent-senderUrl fail-closed arm.
+		expect(body).toContain('"Entry is not authorized for this site"');
+		expect(background).toContain(
+			"checkSaveCredentials(message, authorization.senderUrl)",
+		);
+		expect(background).not.toContain("checkSaveCredentials(message)");
+	});
+});

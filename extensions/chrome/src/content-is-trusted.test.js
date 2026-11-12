@@ -51,6 +51,14 @@ const GUARDED_SITES = [
 		"copyEntryPassword(",
 	],
 	[
+		// v1.8.4 P3-10: the floating button is the overlay's entry point — a
+		// synthetic click must not open the entry overlay on a hostile page.
+		"floating button click (overlay entry point)",
+		'host.addEventListener("click", (e) => {',
+		"globalThis.PwdVaultContent.floatingButton = host;",
+		"showOverlay(",
+	],
+	[
 		"Ctrl+Shift+L keydown (showOverlay)",
 		'document.addEventListener("keydown", (e) => {',
 		"Message Handling",
@@ -86,10 +94,10 @@ const GUARDED_SITES = [
 ];
 
 describe("content.js isTrusted source guard", () => {
-	it("carries exactly the eight credential-triggering guards", () => {
+	it("carries exactly the nine isTrusted guards (credential triggers + overlay entry point)", () => {
 		// Exact count: a new secret-touching handler must add its guard AND
 		// register it here — silent additions fail this assertion.
-		expect(content.split(GUARD).length - 1).toBe(8);
+		expect(content.split(GUARD).length - 1).toBe(9);
 	});
 
 	for (const [label, startAnchor, endAnchor, secretCall] of GUARDED_SITES) {

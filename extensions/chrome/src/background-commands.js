@@ -160,21 +160,43 @@ async function verifyEntryPassword(id, passwordSha256) {
 // in the content script's username-match order; the FIRST candidate whose
 // stored password does NOT match decides "update" (its title names the
 // prompt). No plaintext crosses this boundary — digest + ids/titles only.
-export async function checkSaveCredentials(message) {
+// v1.8.4 P2-1: candidates name stored entries, so every candidate is
+// re-authorized against the submitting tab's domain (the same strict
+// entryMatchesSenderUrl gate the fill list uses) before its stored
+// credential is probed; out-of-domain candidates are silently skipped, and
+// an absent senderUrl refuses the whole request.
+export async function checkSaveCredentials(message, senderUrl) {
 	if (verifyUnsupported) return { action: "none" };
 	const candidates = Array.isArray(message.candidates)
 		? message.candidates
 		: [];
-	if (candidates.length === 0) return { action: "save" };
 	if (typeof message.password_sha256 !== "string") {
 		throw new Error("CHECK_SAVE_CREDENTIALS requires password_sha256");
 	}
+	// The sender gate precedes EVERY short-circuit below (v1.8.4 review
+	// fold): a zero-candidate request with no senderUrl must refuse, not
+	// return the fixed "save" shape — the plan's null-senderUrl = reject-all
+	// semantics leaves no exception for the empty case.
+	if (typeof senderUrl !== "string" || !senderUrl) {
+		throw new Error("Entry is not authorized for this site");
+	}
+	if (candidates.length === 0) return { action: "save" };
+	// This fetch sits OUTSIDE the try below on purpose: a listing failure
+	// (including "Unknown command") must refuse the whole request — never
+	// degrade into the session-sticky verifyUnsupported path, which would
+	// silently disable the gate itself.
+	const authorizedIds = new Set(
+		(await getEntriesForUrl(senderUrl)).map((entry) => entry.id),
+	);
 	try {
 		// Serial on purpose: short-circuit on the first non-match keeps the
 		// common "one candidate" and "all match" cases at ≤ candidate-count
 		// verify round-trips.
 		for (const candidate of candidates) {
 			if (!candidate || typeof candidate.id !== "string") continue;
+			// Out-of-domain candidate: silently skipped (it never reaches
+			// verify), matching the fill-list semantics — not a global throw.
+			if (!authorizedIds.has(candidate.id)) continue;
 			const matches = await verifyEntryPassword(
 				candidate.id,
 				message.password_sha256,
@@ -205,7 +227,7 @@ export async function checkSaveCredentials(message) {
 // echoed from the candidate summary captured at submit time; only the
 // password is new. notes/custom_fields are omitted (tri-state = unchanged)
 // and TOTP is desktop-only for the extension (the dispatcher pins None).
-export async function updateEntryFromPrompt(message) {
+export async function updateEntryFromPrompt(message, senderUrl) {
 	// Fail closed on a malformed payload (v1.6.0 review follow-up): this
 	// command whole-replaces the entry metadata, so an absent metadata
 	// object (undefined title/username on the wire) would blank the stored
@@ -222,6 +244,18 @@ export async function updateEntryFromPrompt(message) {
 	}
 	if (typeof message.entry_id !== "string" || !message.entry_id) {
 		throw new Error("SAVE_LOGIN_CONFIRMED update is missing entry_id");
+	}
+	// v1.8.4 P2-1 background re-verification: entry_id is page-controlled
+	// echo, and this command whole-replaces the entry — a compromised page
+	// could otherwise point the update at another site's entry. Re-derive the
+	// sender-scoped listing (the same strict entryMatchesSenderUrl gate the
+	// fill list uses) and refuse any id outside it, with getEntryForSender's
+	// exact wording. An absent senderUrl matches nothing (the strict gate
+	// rejects it wholesale), so this fails closed too; a listing failure
+	// propagates — there is never a fallback that lets the update through.
+	const siteEntries = await getEntriesForUrl(senderUrl);
+	if (!siteEntries.some((entry) => entry.id === message.entry_id)) {
+		throw new Error("Entry is not authorized for this site");
 	}
 	const meta = message.entry;
 	const matchMode = meta.url_match_mode;

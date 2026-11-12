@@ -25,7 +25,10 @@ use std::time::Duration;
 const SERVER_HOST: &str = "127.0.0.1";
 const SERVER_PORT: u16 = 17429;
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_MESSAGE_SIZE: u32 = 10 * 1024 * 1024; // 10 MB, matches server limit
+// 14 MiB, matches the server's MAX_BODY_SIZE (domain/constants.rs), which is
+// kept in parity with the 14 MiB backup-import cap (MAX_BACKUP_FILE_BYTES) —
+// the two limits must move together.
+const MAX_MESSAGE_SIZE: u32 = 14 * 1024 * 1024;
 const MAX_RESPONSE_SIZE: usize = 1024 * 1024;
 const MAX_HTTP_HEADER_SIZE: usize = 64 * 1024;
 const FIREFOX_ADDON_ID: &str = "pwdvault@pwdvault.app";

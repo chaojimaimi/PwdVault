@@ -79,4 +79,41 @@ describe("RecoveryScreen", () => {
 		fireEvent.click(screen.getByText("Back to unlock"));
 		expect(navigate).toHaveBeenCalledWith("unlock");
 	});
+
+	// v1.8.4 (P3-5): a rejected attempt must not leave the one-time 256-bit
+	// recovery key lingering in the input — but the password fields are kept
+	// (a mismatch/weak password is the likely retry cause).
+	it("clears only the recovery key when recovery returns false", async () => {
+		recover.mockResolvedValue(false);
+		await renderScreen();
+
+		const keyInput = screen.getByLabelText(
+			"Recovery Key",
+		) as HTMLInputElement;
+		const newPasswordInput = screen.getByLabelText(
+			"New Master password",
+		) as HTMLInputElement;
+		const confirmInput = screen.getByLabelText(
+			"Confirm New Password",
+		) as HTMLInputElement;
+
+		fireEvent.change(keyInput, { target: { value: "wrong-key" } });
+		fireEvent.change(newPasswordInput, {
+			target: { value: "new master password" },
+		});
+		fireEvent.change(confirmInput, {
+			target: { value: "new master password" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Recover Vault" }));
+
+		await waitFor(() =>
+			expect(recover).toHaveBeenCalledWith(
+				"wrong-key",
+				"new master password",
+			),
+		);
+		await waitFor(() => expect(keyInput.value).toBe(""));
+		expect(newPasswordInput.value).toBe("new master password");
+		expect(confirmInput.value).toBe("new master password");
+	});
 });

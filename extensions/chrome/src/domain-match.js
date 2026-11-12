@@ -6,6 +6,18 @@
 // content files, exactly as they were inside the pre-split single content.js.
 // Never edit inside the markers without the sender-auth.js side in lockstep —
 // sender-auth.test.js enforces byte equality.
+//
+// The two gate functions in the frozen block are "unused" only from this
+// module's point of view: the later content files call them as bare
+// identifiers through the isolated world's shared scope (content.js's
+// AUTOFILL domain gate), which no import graph can express. The block is
+// byte-frozen, so the declarations cannot carry inline disables — hence a
+// file-level one:
+/* eslint-disable @typescript-eslint/no-unused-vars --
+   entryMatchesSenderUrl/entryMatchesPageUrl are reached as bare identifiers
+   from the later content files' shared isolated-world scope (content.js);
+   the verbatim block is byte-frozen (sender-auth.test.js guard), so inline
+   per-declaration disables are not an option. */
 // === BEGIN VERBATIM DOMAIN-MATCH BLOCK ===
 // Everything between the BEGIN/END markers is carried as a byte-identical
 // copy in domain-match.js (classic content scripts cannot import ES modules; a

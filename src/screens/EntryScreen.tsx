@@ -346,7 +346,14 @@ export function EntryScreen() {
 			}
 		}
 		if (!password) return;
-		await copyWithTimeout(password);
+		try {
+			await copyWithTimeout(password);
+		} catch (e) {
+			// v1.8.4 (P3-3): a clipboard failure must not pass silently (the
+			// user believes the secret was copied when it was not).
+			showToast(errorMessage(e, "Failed to copy password"));
+			return;
+		}
 		showToast("Password copied (auto-clears in 30s)");
 	};
 
@@ -506,6 +513,10 @@ export function EntryScreen() {
 							setFormData({ ...formData, username: e.target.value })
 						}
 						placeholder="email@example.com"
+						// v1.8.4 (P2-5): usernames are not prose — no spellcheck
+						// squiggles, and no browser autofill on a credential field.
+						spellCheck={false}
+						autoComplete="off"
 						aria-required="true"
 						aria-invalid={!!error && !formData.username}
 						aria-describedby={
@@ -525,6 +536,11 @@ export function EntryScreen() {
 								setFormData({ ...formData, password: e.target.value });
 								setPasswordChanged(true);
 							}}
+							// v1.8.4 (P2-5): never spellcheck a secret, and signal
+							// "new credential" so the browser's password manager does
+							// not offer saved logins inside our own vault form.
+							spellCheck={false}
+							autoComplete="new-password"
 							placeholder={isEditing && !passwordChanged ? "Unchanged" : ""}
 							aria-required={isNew}
 							aria-invalid={!!error && isNew && !formData.password}

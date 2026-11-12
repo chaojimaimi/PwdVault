@@ -14,7 +14,6 @@
 	// Form Detection
 	// ============================================================================
 
-	const PASSWORD_INPUT_TYPES = ["password", "text", "email"];
 	const USERNAME_INPUT_TYPES = ["text", "email", "tel"];
 	const USERNAME_PATTERNS = [
 		/user/i,
@@ -28,7 +27,6 @@
 		/^log$/i,
 		/auth/i,
 	];
-	const PASSWORD_PATTERNS = [/pass/i, /pwd/i, /secret/i, /credential/i];
 	const SUBMIT_PATTERNS = [
 		/login/i,
 		/sign.?in/i,

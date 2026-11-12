@@ -87,7 +87,14 @@ export function TotpCode({ entryId }: TotpCodeProps) {
 
 	const handleCopy = async () => {
 		if (!totp) return;
-		await copyWithTimeout(totp.code);
+		try {
+			await copyWithTimeout(totp.code);
+		} catch {
+			// v1.8.4 (P3-3): a clipboard failure must not pass silently — the
+			// user would trust a code that never reached the clipboard.
+			showToast("Failed to copy TOTP code");
+			return;
+		}
 		showToast("TOTP code copied (auto-clears in 30s)");
 	};
 

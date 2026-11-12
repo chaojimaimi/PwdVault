@@ -40,7 +40,25 @@ describe("useNativeEventToasts", () => {
 	it("shows a trash purge toast with the emitted count", async () => {
 		await mountHook();
 		listeners.get("trash-auto-purged")?.({ payload: 12 });
-		expect(document.body.textContent).toContain("回收站自动清理了 12 条");
+		expect(document.body.textContent).toContain(
+			"Trash auto-purged 12 item(s)",
+		);
+	});
+
+	// v1.8.4 (P2-6): the sweep can fail (locked session, backend error) —
+	// the Rust side emits the sanitized public message; the frontend renders
+	// it as a long-lived error toast so device divergence stays visible.
+	it("shows an error toast when the trash auto-purge fails", async () => {
+		await mountHook();
+		listeners.get("trash-purge-failed")?.({
+			payload: "Vault is locked",
+		});
+		const toast = document.querySelector(".toast-error");
+		expect(toast).not.toBeNull();
+		expect(toast?.getAttribute("role")).toBe("alert");
+		expect(document.body.textContent).toContain(
+			"Trash auto-purge failed: Vault is locked",
+		);
 	});
 
 	it("shows the pairing toast with the caller digest row", async () => {

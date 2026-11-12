@@ -51,6 +51,15 @@ export function GeneratorScreen() {
 	});
 	const [pinLength, setPinLength] = useState(6);
 	const [copied, setCopied] = useState(false);
+	// v1.8.4 (P3-4): the "Copied!" flip-back timer — ref-held so a rapid
+	// re-copy clears the pending flip before re-arming, and unmount cannot
+	// fire a setState-after-unmount.
+	const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useEffect(() => {
+		return () => {
+			if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current);
+		};
+	}, []);
 	const [pending, setPending] = useState(false);
 	// v1.4.0: last 10 generated values, SESSION-ONLY by design — persisting
 	// generated secrets to disk would widen the attack surface (a new
@@ -176,14 +185,27 @@ export function GeneratorScreen() {
 	};
 
 	const handleCopy = async () => {
-		await copyWithTimeout(password);
+		try {
+			await copyWithTimeout(password);
+		} catch (e) {
+			// v1.8.4 (P3-3): clipboard failure must be visible, not silent.
+			showToast(errorMessage(e, "Failed to copy password"));
+			return;
+		}
 		setCopied(true);
 		showToast("Password copied (auto-clears in 30s)");
-		setTimeout(() => setCopied(false), 2000);
+		if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current);
+		copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
 	};
 
 	const handleHistoryCopy = async (value: string) => {
-		await copyWithTimeout(value);
+		try {
+			await copyWithTimeout(value);
+		} catch (e) {
+			// v1.8.4 (P3-3): same visibility rule for history-row copies.
+			showToast(errorMessage(e, "Failed to copy password"));
+			return;
+		}
 		showToast("Password copied (auto-clears in 30s)");
 	};
 
@@ -204,13 +226,18 @@ export function GeneratorScreen() {
 			<BackHeader title="Password Generator" onBack={handleBack} />
 
 			<div className="generator-content screen-scroll-region">
-				<div className="mode-tabs" role="tablist" aria-label="Generator mode">
+				{/* v1.8.4 (P3-6): these buttons toggle a mode, they are not tabs of
+				    a tabbed interface — aria-pressed (the VaultScreen group-tabs
+				    aria-current precedent) instead of the tablist roles that imply
+				    arrow-key roving focus we never implemented. role="group" keeps
+				    the container's accessible name (aria-label is inert on a
+				    generic element — review fold). */}
+				<div className="mode-tabs" role="group" aria-label="Generator mode">
 					{GENERATOR_MODES.map((m) => (
 						<button
 							key={m.id}
 							type="button"
-							role="tab"
-							aria-selected={mode === m.id}
+							aria-pressed={mode === m.id}
 							className={`mode-tab ${mode === m.id ? "active" : ""}`}
 							onClick={() => handleModeChange(m.id)}
 						>

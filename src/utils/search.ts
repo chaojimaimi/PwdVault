@@ -39,6 +39,17 @@ export function buildFuseIndex(entries: EntrySummary[]): Fuse<EntrySummary> {
 }
 
 /**
+ * Drop the cached index (v1.8.4 P3-2): the cache keys on array identity, so
+ * a new vault session could reuse a stale index if the unlocked vault ever
+ * handed out an identical array reference. Called on the lock transition so
+ * no entry data from the previous session survives in module state.
+ */
+export function clearSearchCache(): void {
+	cachedEntries = null;
+	cachedIndex = null;
+}
+
+/**
  * Fast case-insensitive substring match across the searchable fields.
  * O(N · fields) per query with no index build — this is what handles the
  * common case (user types a prefix of the title) in single-digit ms even

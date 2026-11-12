@@ -161,7 +161,8 @@ function AppContent() {
 
 /**
  * Native-event toasts (v1.5.0): the pairing-code toast, the trash
- * auto-purged notice, and the native-server-error warning. Extracted from
+ * auto-purged notice + its failure twin (v1.8.4), and the
+ * native-server-error warning. Extracted from
  * App's inline effect so tests can mount the hook against a mocked `listen`
  * (same pattern as useAutoLockActivity above). The listeners are global and
  * lifetime-of-app — they must not depend on auth state, because pairing and
@@ -187,8 +188,24 @@ export function useNativeEventToasts() {
 		// recycle-bin entries; the count arrives as the event payload
 		// (never emitted for 0).
 		const unlistenTrashPurge = listen<number>("trash-auto-purged", (event) => {
-			showToastWithType(`回收站自动清理了 ${event.payload} 条`, "info");
+			showToastWithType(`Trash auto-purged ${event.payload} item(s)`, "info");
 		});
+
+		// v1.8.4 (P2-6): the sweep can also FAIL (locked session, backend
+		// error) — the Rust side best-effort emits the sanitized public
+		// message; render it as a long-lived error toast so divergence
+		// between devices is visible instead of log-only. Best-effort on both
+		// ends: this never blocks or fails the unlock path.
+		const unlistenTrashPurgeFailed = listen<string>(
+			"trash-purge-failed",
+			(event) => {
+				showToastWithType(
+					`Trash auto-purge failed: ${event.payload}`,
+					"error",
+					10000,
+				);
+			},
+		);
 
 		// B3: warn loudly when the extension HTTP server could not start.
 		// Long-lived toast (10s) — the user must restart the app after
@@ -206,6 +223,7 @@ export function useNativeEventToasts() {
 		return () => {
 			unlistenPair.then((u) => u());
 			unlistenTrashPurge.then((u) => u());
+			unlistenTrashPurgeFailed.then((u) => u());
 			unlistenServerError.then((u) => u());
 		};
 	}, []);

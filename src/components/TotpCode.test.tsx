@@ -36,6 +36,28 @@ describe("TotpCode", () => {
 		);
 	});
 
+	// v1.8.4 (P3-3): a clipboard failure must be visible — toast the failure,
+	// never claim the copy succeeded, and no unhandled rejection escapes the
+	// void-ed onClick (vitest fails the run on unhandled rejections, so this
+	// case doubles as the no-rejection pin).
+	it("toasts a failure instead of claiming success when the clipboard write fails", async () => {
+		totpCode.mockResolvedValue({ code: "123456", seconds_remaining: 18 });
+		vi.mocked(copyWithTimeout).mockRejectedValue(
+			new Error("clipboard blocked"),
+		);
+		render(<TotpCode entryId="entry-1" />);
+		await screen.findByText("123456");
+
+		fireEvent.click(screen.getByRole("button", { name: "Copy TOTP code" }));
+
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith("Failed to copy TOTP code"),
+		);
+		expect(showToast).not.toHaveBeenCalledWith(
+			expect.stringContaining("copied"),
+		);
+	});
+
 	it("renders nothing while the entry has no configured secret", async () => {
 		// v1.3.2: VaultError reaches the UI as its public-message string
 		// ("CODE: message") — same shape the HTTP path always had.

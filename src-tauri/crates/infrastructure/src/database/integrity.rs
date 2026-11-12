@@ -6,6 +6,7 @@
 use hmac::{Hmac, Mac};
 use redb::{Database, ReadableTable, TableDefinition};
 use sha2::Sha256;
+use subtle::ConstantTimeEq;
 
 use super::{DatabaseError, ENTRIES_TABLE, GROUPS_TABLE, SETTINGS_TABLE, VAULT_TABLE};
 
@@ -151,7 +152,9 @@ pub fn verify_integrity(db: &Database, mac_key: &[u8; 32]) -> Result<bool, Datab
     drop(txn);
 
     let actual = compute_db_digest(db, mac_key)?;
-    Ok(stored == actual)
+    // Constant-time comparison (P3-8): the digest gates tamper detection, so
+    // even a timing side channel on the byte comparison is kept off the table.
+    Ok(stored.ct_eq(&actual).into())
 }
 
 /// Recompute and store the db_digest after writes.
@@ -313,7 +316,8 @@ pub fn verify_digest_in_txn(
         return Ok(());
     }
     let actual = compute_digest_from_txn(txn, mac_key)?;
-    if stored_digest != actual {
+    // Constant-time comparison (P3-8) — same rationale as verify_integrity.
+    if !bool::from(stored_digest.ct_eq(&actual)) {
         return Err(DatabaseError::IntegrityMismatch);
     }
     Ok(())

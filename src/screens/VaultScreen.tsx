@@ -3,6 +3,7 @@ import {
 	useEffect,
 	useDeferredValue,
 	useMemo,
+	useRef,
 	useState,
 } from "react";
 import { Virtuoso } from "react-virtuoso";
@@ -41,6 +42,15 @@ export function VaultScreen() {
 	const { state: settingsState, actions: settingsActions } = useSettings();
 	const { toggleTheme } = useTheme();
 	const [copiedId, setCopiedId] = useState<string | null>(null);
+	// v1.8.4 (P3-4): the "Copied" highlight timer. Ref-held so a rapid second
+	// copy clears the pending flip before re-arming, and unmount cannot fire a
+	// setState-after-unmount.
+	const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useEffect(() => {
+		return () => {
+			if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current);
+		};
+	}, []);
 	// v1.4.0: trash view state (simple local toggle — the trash is a separate
 	// list, not a filter of the live list).
 	const [trashOpen, setTrashOpen] = useState(false);
@@ -95,13 +105,18 @@ export function VaultScreen() {
 
 	const handleSortChange = useCallback(
 		(mode: SortMode) => {
+			// v1.8.4 (P2-4): mirror of SettingsScreen.handleSave — persisting
+			// while settings are still loading would spread DEFAULT_SETTINGS
+			// into the write and clobber the user's real settings (auto-lock,
+			// auto-sync, ...). Refuse until the load lands.
+			if (settingsState.status !== "success") return;
 			void settingsActions
 				.updateSettings({ ...settingsState.settings, sort_mode: mode })
 				.catch((e) => {
 					showToast(errorMessage(e, "Failed to save sort preference"));
 				});
 		},
-		[settingsActions, settingsState.settings],
+		[settingsActions, settingsState.settings, settingsState.status],
 	);
 
 	const handleEntryClick = useCallback(
@@ -133,7 +148,9 @@ export function VaultScreen() {
 					await copyWithTimeout(secret.password);
 					setCopiedId(entry.id);
 					showToast("Password copied (auto-clears in 30s)");
-					setTimeout(() => setCopiedId(null), 2000);
+					if (copiedTimerRef.current !== null)
+						clearTimeout(copiedTimerRef.current);
+					copiedTimerRef.current = setTimeout(() => setCopiedId(null), 2000);
 				}
 			} catch (e) {
 				showToast(errorMessage(e, "Failed to copy password"));
@@ -271,11 +288,20 @@ export function VaultScreen() {
 							onChange={(e) => actions.setSearchQuery(e.target.value)}
 						/>
 					</div>
-					{/* v1.4.0: persisted sort control — applies after filter+search. */}
+					{/* v1.4.0: persisted sort control — applies after filter+search.
+					    v1.8.4 (P2-4): disabled until settings load (SettingsScreen
+					    fieldset precedent) — a change before that would persist
+					    DEFAULT_SETTINGS over the user's real settings. */}
 					<select
 						className="sort-select"
 						aria-label="Sort passwords"
 						value={sortMode}
+						disabled={settingsState.status !== "success"}
+						title={
+							settingsState.status !== "success"
+								? "Sort is disabled until settings finish loading"
+								: undefined
+						}
 						onChange={(e) => handleSortChange(e.target.value as SortMode)}
 					>
 						{SORT_OPTIONS.map((opt) => (
@@ -408,6 +434,9 @@ export function VaultScreen() {
 						) : state.deletedStatus === "error" ? (
 							<div className="resource-error" role="alert">
 								<p>Could not load the trash.</p>
+								{/* v1.8.4 (P3-7): surface the failure reason, mirroring
+								    the live-list error branch's entriesError hint. */}
+								<p className="text-muted-hint">{state.deletedError}</p>
 								<button
 									className="btn btn-secondary btn-block"
 									onClick={() =>

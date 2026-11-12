@@ -137,3 +137,19 @@ test("clicking Delete does not submit the form", async () => {
 		vaultState.selectedEntry = null;
 	}
 });
+
+test("secret inputs carry spellCheck=false and credential autoComplete (v1.8.4 P2-5)", async () => {
+	render(<EntryScreen />);
+
+	// Username: not prose — no spellcheck squiggles, no browser autofill.
+	const username = screen.getByLabelText("Username *");
+	expect(username).toHaveAttribute("spellcheck", "false");
+	expect(username).toHaveAttribute("autocomplete", "off");
+
+	// Password: never spellcheck a secret; "new-password" keeps the
+	// browser's own password manager from offering saved logins inside the
+	// vault's own form.
+	const password = screen.getByLabelText("Password *");
+	expect(password).toHaveAttribute("spellcheck", "false");
+	expect(password).toHaveAttribute("autocomplete", "new-password");
+});

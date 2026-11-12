@@ -40,6 +40,33 @@ globalThis.chrome = {
 				cb({ id: 0, success: true, data: { matches: next.matches } });
 				return;
 			}
+			// v1.8.4 P2-1: the save/update authorization gate re-lists the
+			// sender-scoped entries (the wire command is list_all_entries;
+			// GET_ENTRIES_FOR_URL is the internal runtime message, never a
+			// wire name). Both fixture ids live on the content sender's
+			// example.com domain so the existing verdict/degradation cases
+			// stay authorized at the gate.
+			if (msg.command === "list_all_entries") {
+				cb({
+					id: 0,
+					success: true,
+					data: [
+						{
+							id: "e1",
+							title: "First",
+							username: "u",
+							url: "https://example.com/one",
+						},
+						{
+							id: "e2",
+							title: "Second",
+							username: "u",
+							url: "https://example.com/two",
+						},
+					],
+				});
+				return;
+			}
 			if (nmScript && nmScript[msg.command]) {
 				cb({ id: 0, success: true, data: nmScript[msg.command](msg) });
 				return;
@@ -145,6 +172,69 @@ describe("save-prompt background behavior (smoke)", () => {
 			],
 		});
 		expect(res).toEqual({ action: "none" });
+	});
+
+	// v1.8.4 P2-1 (review fold): the update path's refusal has a behavior
+	// case below; this pins the check path's other half — an out-of-domain
+	// candidate is silently skipped and NEVER probed, while the in-domain
+	// one continues through the normal verdict flow.
+	it("an out-of-domain CHECK candidate is skipped without a verify probe", async () => {
+		nmCalls.length = 0;
+		verifyResponses = [{ matches: false }];
+		const res = await send({
+			type: "CHECK_SAVE_CREDENTIALS",
+			password_sha256: "a".repeat(64),
+			candidates: [
+				{ id: "elsewhere-1", title: "Foreign", username: "u" },
+				{ id: "e1", title: "First", username: "u" },
+			],
+		});
+		const verifies = nmCalls.filter(
+			(m) => m.command === "verify_entry_password",
+		);
+		expect(verifies).toHaveLength(1);
+		expect(verifies[0].id_param).toBe("e1");
+		expect(res).toEqual({
+			action: "update",
+			entry_id: "e1",
+			entry_title: "First",
+		});
+	});
+
+	// v1.8.4 P2-1 (review fold): a sender carrying no URL at all is refused
+	// even earlier — at the authorizeMessage trust boundary — before any
+	// command arm runs.
+	it("a CHECK from a sender with no URL is refused at the authorization layer", async () => {
+		nmCalls.length = 0;
+		await expect(
+			send(
+				{
+					type: "CHECK_SAVE_CREDENTIALS",
+					password_sha256: "a".repeat(64),
+					candidates: [],
+				},
+				// No url and no tab.url → no senderUrl at all.
+				{ id: "test-runtime-id" },
+			),
+		).rejects.toThrow(/sender is not authorized/i);
+		expect(nmCalls.filter((m) => m.command === "verify_entry_password")).toHaveLength(0);
+		expect(nmCalls.filter((m) => m.command === "list_all_entries")).toHaveLength(0);
+	});
+
+	// ...and the gate function itself keeps the plan's reject-all semantics:
+	// the sender check sits AHEAD of the zero-candidate "save" short-circuit.
+	// Direct module call — the listener path can never produce this shape
+	// because authorizeMessage refuses it first (previous case).
+	it("checkSaveCredentials refuses a null senderUrl even with zero candidates", async () => {
+		const { checkSaveCredentials } = await import("./background-commands.js");
+		nmCalls.length = 0;
+		await expect(
+			checkSaveCredentials(
+				{ password_sha256: "a".repeat(64), candidates: [] },
+				undefined,
+			),
+		).rejects.toThrow("Entry is not authorized for this site");
+		expect(nmCalls.filter((m) => m.command === "list_all_entries")).toHaveLength(0);
 	});
 
 	it("a locked vault surfaces an error (content stays silent)", async () => {
@@ -313,6 +403,38 @@ describe("save-prompt background behavior (smoke)", () => {
 			password: "p",
 		});
 		expect(noId.error).toMatch(/entry_id/i);
+		expect(captured).toBeNull();
+	});
+
+	it("an update pointing at an entry outside the sender's domain is refused", async () => {
+		// v1.8.4 P2-1: the echoed entry_id is page-controlled — an id that
+		// does not come back from the sender-scoped listing (the stub fixture
+		// only carries example.com ids e1/e2) must never reach update_entry,
+		// whatever metadata the page echoes with it.
+		let captured = null;
+		nmScript = {
+			update_entry: (msg) => {
+				captured = msg;
+				return { id: msg.id_param };
+			},
+		};
+		const res = await sendSoft({
+			type: "SAVE_LOGIN_CONFIRMED",
+			mode: "update",
+			entry_id: "other-site-entry",
+			url: "https://example.com/login",
+			username: "u",
+			password: "p",
+			entry: {
+				title: "T",
+				username: "u",
+				url: "https://other.example.net/x",
+				tags: [],
+				group_id: null,
+				url_match_mode: "domain",
+			},
+		});
+		expect(res.error).toBe("Entry is not authorized for this site");
 		expect(captured).toBeNull();
 	});
 });

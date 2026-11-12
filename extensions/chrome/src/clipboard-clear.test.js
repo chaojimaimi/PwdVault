@@ -42,7 +42,7 @@ function makeDeps({
 		clear: vi.fn().mockResolvedValue(true),
 	};
 	const runtime = {
-		sendMessage: vi.fn(async (message) => {
+		sendMessage: vi.fn(async (_message) => {
 			if (pingError) throw pingError;
 			return pingResponse;
 		}),
@@ -205,7 +205,7 @@ describe("handleClipboardClearAlarm — Chrome offscreen path", () => {
 		const storage = await createClipboardArmStorage({
 			session: sessionArea(),
 		});
-		const { deps, runtime } = makeDeps({
+		const { deps } = makeDeps({
 			pingResponse: { cleared: false, reason: "digest-mismatch" },
 		});
 		deps.storage = storage;
