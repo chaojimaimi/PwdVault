@@ -9,7 +9,10 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 use super::backend::MockCloudBackend;
-use super::engine::{auto_sync_due, run_sync_cycle_if_due, sync_connect_with_backend, sync_now};
+use super::engine::{
+    auto_sync_due, run_sync_cycle_if_due, sync_connect_with_backend, sync_now,
+    sync_now_with_backend, sync_now_with_backend_and_trigger, SyncTrigger,
+};
 use super::tests_engine::{test_config, test_state};
 
 fn instant_ago(secs: u64) -> Option<Instant> {
@@ -28,6 +31,25 @@ fn last_finished(state: &Arc<crate::AppState>) -> Option<Instant> {
         .last_sync_finished
         .lock()
         .expect("last sync finished lock poisoned")
+}
+
+/// One connected, unlocked device primed for an immediate scheduler tick:
+/// the connect primes `last_sync_finished`, so the tests reset it here.
+fn connected_and_due(state: &Arc<crate::AppState>) -> MockCloudBackend {
+    let cloud = MockCloudBackend::new();
+    // The WebDAV password must be in the non-interactive store for the
+    // tick's `open_backend` to construct the real WebDAV backend.
+    sync_connect_with_backend(
+        state,
+        &cloud.handle(),
+        test_config(),
+        Zeroizing::new("container-passphrase".to_string()),
+        Some(Zeroizing::new("webdav-pass".to_string())),
+    )
+    .unwrap();
+    set_interval(state, 5);
+    *state.last_sync_finished.lock().unwrap() = instant_ago(600);
+    cloud
 }
 
 // ---------------------------------------------------------------------------
@@ -124,15 +146,21 @@ fn failed_cycle_still_consumes_the_scheduler_slot() {
     assert!(!run_sync_cycle_if_due(&state));
 }
 
-/// Full SUCCESS path over the mock backend: connect, arm the scheduler with
-/// a stale marker, tick → cycle runs, "ok" lands in the status, count 0,
-/// marker refreshed.
+/// A due tick over a CONFIGURED vault: connect, arm the scheduler with a
+/// stale marker, tick → the cycle runs and the marker refreshes on the
+/// outcome (success or failure), so the immediately-following tick skips.
+/// The cycle itself FAILS offline — the tick resolves its backend through
+/// `open_backend`, which builds the real WebDAV client against the config
+/// URL (`dav.example.com` never resolves) — and v1.8.3 F4 makes that
+/// visible: the failure is persisted onto the status line instead of
+/// silently leaving the connect-era "ok" (the exact-message pin lives in
+/// tests_sync_failure; the network error text is platform-dependent here).
 #[test]
-fn due_tick_runs_a_full_sync_cycle() {
+fn due_tick_runs_a_cycle_and_refreshes_the_marker() {
     let (state, _dir) = test_state();
     let cloud = MockCloudBackend::new();
     // The WebDAV password must be in the non-interactive store for the
-    // tick's `open_backend` to construct the (mock-routed) backend.
+    // tick's `open_backend` to construct the real WebDAV backend.
     sync_connect_with_backend(
         &state,
         &cloud.handle(),
@@ -146,14 +174,100 @@ fn due_tick_runs_a_full_sync_cycle() {
     *state.last_sync_finished.lock().unwrap() = instant_ago(600);
 
     assert!(run_sync_cycle_if_due(&state));
-    let status = crate::sync_status(&state).unwrap();
-    assert_eq!(status.last_result.as_deref(), Some("ok"));
-    assert_eq!(status.conflict_count, 0);
-    let ran_at = last_finished(&state).expect("marker refreshed after success");
+    let ran_at = last_finished(&state).expect("marker refreshed after the cycle");
     assert!(ran_at.elapsed() < Duration::from_secs(5));
+    // F4: the failed cycle is no longer invisible on the status line.
+    let status = crate::sync_status(&state).unwrap();
+    assert_ne!(
+        status.last_result.as_deref(),
+        Some("ok"),
+        "the offline cycle failure must surface on the status line"
+    );
 
     // Immediately after: not due anymore.
     assert!(!run_sync_cycle_if_due(&state));
+}
+
+// ---------------------------------------------------------------------------
+// v1.8.3 F1/R3: presence semantics of a cycle's merge-window touch
+// ---------------------------------------------------------------------------
+
+/// A background auto-sync cycle is NOT user presence: it must leave the
+/// auto-lock state EXACTLY as it found it (snapshot-restore republish), so
+/// an unattended desktop still locks on schedule while auto-sync keeps
+/// succeeding. Probed through the public session API (`should_auto_lock` /
+/// `auto_lock_deadline`), the cross-module equivalent of session.rs's
+/// `remote_touch_grants_only_grace`; the cycle runs over the injected mock
+/// backend via the `pub(super)` trigger seam because the scheduler path
+/// resolves its backend through `open_backend` (a real WebDAV client
+/// against the config URL) and cannot succeed offline.
+#[test]
+fn auto_sync_cycle_extends_only_remote_grace() {
+    let (state, _dir) = test_state();
+    let cloud = connected_and_due(&state);
+
+    // Timeout 0 = the local window has expired: before the fix the cycle's
+    // full presence refresh kept auto-lock alive forever.
+    assert!(state.session.should_auto_lock(0));
+
+    // Settle the connect-era activity so the deadline comparisons below
+    // have a measurable gap to work with.
+    std::thread::sleep(Duration::from_millis(10));
+    let deadline_before = state.session.auto_lock_deadline(600).unwrap();
+
+    assert!(sync_now_with_backend_and_trigger(
+        &state,
+        &cloud.handle(),
+        SyncTrigger::AutoCycle
+    )
+    .is_ok());
+
+    // The cycle itself is presence-transparent: the full-window deadline
+    // (timeout 600) is untouched — the snapshot-restore republish undid the
+    // drain, and the AutoCycle touch only took the remote grace slot.
+    assert_eq!(
+        state.session.auto_lock_deadline(600).unwrap(),
+        deadline_before,
+        "an auto-sync cycle must not refresh the full auto-lock window"
+    );
+
+    // The grace slot is taken: right after the cycle auto-lock is deferred
+    // by the BOUNDED remote grace (not suppressed — it lapses ≤120s later).
+    assert!(
+        !state.session.should_auto_lock(0),
+        "an auto-sync cycle must take the remote grace, not act as user presence"
+    );
+    let now = Instant::now();
+    let grace_deadline = state.session.auto_lock_deadline(0).unwrap();
+    assert!(
+        grace_deadline > now + Duration::from_secs(115),
+        "the AutoCycle touch must yield the ~120s grace deadline"
+    );
+    assert!(
+        grace_deadline <= now + Duration::from_secs(121),
+        "the AutoCycle touch must not exceed one grace window"
+    );
+}
+
+/// Anti-regression twin: a MANUAL cycle is in-person desktop activity and
+/// refreshes the full auto-lock window (the republish restored the
+/// cycle-start presence; the Manual touch then moves `last_activity` to
+/// now, exactly like the pre-F1 behavior for user-initiated syncs).
+#[test]
+fn manual_sync_extends_full_window() {
+    let (state, _dir) = test_state();
+    let cloud = connected_and_due(&state);
+
+    std::thread::sleep(Duration::from_millis(10));
+    let deadline_before = state.session.auto_lock_deadline(600).unwrap();
+    std::thread::sleep(Duration::from_millis(10));
+
+    sync_now_with_backend(&state, &cloud.handle()).unwrap();
+
+    assert!(
+        state.session.auto_lock_deadline(600).unwrap() > deadline_before,
+        "a manual sync is user presence — it must extend the full auto-lock window"
+    );
 }
 
 /// The MANUAL contract (D6 lock split): `sync_now` BLOCKS on the cycle

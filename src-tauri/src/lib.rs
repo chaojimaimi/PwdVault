@@ -88,8 +88,9 @@ fn start_auto_lock_thread(state: Arc<AppState>) {
 /// context: the cycle runs blocking right here (D6) — no extra
 /// spawn_blocking indirection.
 ///
-/// SILENT BY DESIGN: successes and failures alike are recorded in
-/// `SyncState` (visible on the settings status line) but NEVER emitted as
+/// SILENT BY DESIGN: a success writes "ok" to `SyncState` and a failure
+/// best-effort writes the sanitized public message (locked-session failures
+/// are log-only) — visible on the settings status line but NEVER emitted as
 /// events or toasts — transient network jitter from a background timer must
 /// not interrupt the user (the deliberate opposite of the SF-P* position on
 /// user-initiated actions).

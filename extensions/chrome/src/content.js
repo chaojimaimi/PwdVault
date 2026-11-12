@@ -138,11 +138,17 @@
 		}, 250);
 	});
 
-	// Start observing when body is available
+	// Start observing when body is available. F3 (v1.8.3): attribute
+	// watching is load-bearing now that findLoginForm skips unrendered
+	// fields — login layers that pre-render display:none and toggle
+	// visibility via style/class mutate NO nodes, so without it the floating
+	// button would never appear on those pages (QA T60).
 	if (document.body) {
 		observer.observe(document.body, {
 			childList: true,
 			subtree: true,
+			attributes: true,
+			attributeFilter: ["style", "class", "hidden", "aria-hidden"],
 		});
 		init();
 	} else {
@@ -150,6 +156,8 @@
 			observer.observe(document.body, {
 				childList: true,
 				subtree: true,
+				attributes: true,
+				attributeFilter: ["style", "class", "hidden", "aria-hidden"],
 			});
 			init();
 		});

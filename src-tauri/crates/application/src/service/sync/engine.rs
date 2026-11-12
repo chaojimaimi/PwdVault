@@ -25,7 +25,10 @@
 //!
 //! D8 windows (fix plan A) serialize on `AppState::exclusive_window` and
 //! capture `AppState::lock_epoch` before their drain so a mid-window manual
-//! or auto lock is never silently revoked by the window's republish. Lock
+//! or auto lock is never silently revoked by the window's republish (the
+//! sync cycle captures at CYCLE START, before its network phase — v1.8.3
+//! F2, and its republish RESTORES the cycle-start presence instead of
+//! refreshing it, v1.8.3 F1/R3). Lock
 //! order: `exclusive_window` -> session internals; see also the D8 block in
 //! `service/security/mod.rs`. v1.6.0 (D6) adds a coarser leaf: whole sync
 //! cycles (manual `sync_now`/`sync_connect`, the auto-sync tick) serialize
@@ -43,7 +46,6 @@ pub use super::state_io::{
 };
 
 use std::mem;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -68,12 +70,23 @@ use super::publish::{
 use super::state_io::{
     container_error, content_hash, load_config, load_sync_state, new_device_id, not_configured,
     now, open_backend, read_local_rows, remote_paths, save_sync_rows, sync_secret_error,
-    validate_config, write_merged_back, SessionKeys,
+    validate_config, write_merged_back, CycleStartPresence, SessionKeys,
 };
 
 // ---------------------------------------------------------------------------
 // D8 window (P3.1 precise sequence)
 // ---------------------------------------------------------------------------
+
+/// Who started this sync cycle — decides which auto-lock window a
+/// successful merge window may refresh (SEC-L5: background cycles are
+/// NOT user presence).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SyncTrigger {
+    /// User-initiated (sync_now command / connect) — full window applies.
+    Manual,
+    /// Background 30s scheduler tick — extends only the 120s remote grace.
+    AutoCycle,
+}
 
 /// The P3.1 exclusive window: drain leases, assert Locked, full local read +
 /// merge + single-transaction write-back, then republish the copied keys.
@@ -86,20 +99,29 @@ use super::state_io::{
 /// password, recovery re-seal). Lock order: `exclusive_window` -> session
 /// internals; this function never enters holding a lease and `lock_vault`
 /// never takes the guard — no deadlock (reviewed, see security/mod.rs D8).
+///
+/// `presence` is the cycle-start snapshot (lock epoch + presence
+/// timestamps) captured by the caller — NOT inside this window: the cycle's
+/// pre-window phase includes network I/O (fetch/stat/download) that holds
+/// no lease, so a lock firing there must still win over our republish
+/// (v1.8.3 F2; the change-password window has no network phase and keeps
+/// its capture-before-the-drain form — see password.rs), and the drain
+/// below destroys the presence timestamps the republish must restore
+/// (v1.8.3 F1/R3 — see [`CycleStartPresence`]).
 fn run_merge_window(
     state: &Arc<AppState>,
     keys: &mut SessionKeys,
     remote: Option<&SyncSnapshot>,
+    presence: &CycleStartPresence,
+    trigger: SyncTrigger,
 ) -> Result<MergedSnapshot, VaultError> {
     let _window_guard = state
         .exclusive_window
         .lock()
         .expect("exclusive window lock poisoned");
-    // Capture the lock epoch BEFORE the drain: any lock from this point on
-    // must win over our republish (fix plan A §2.3). Reading it after the
-    // drain could absorb a lock that fired in between and republish right
-    // over the user's lock.
-    let epoch_at_window = state.lock_epoch.load(Ordering::Acquire);
+    // The epoch and presence were captured at cycle start by the caller —
+    // any lock from cycle start on wins, covering the pre-window network
+    // phase (fix plan A §2.3; the window itself has no capture point left).
     // Drain every in-flight lease and refuse new ones.
     state.session.exclusive_lock_and_clear();
     // Test seam (one-shot, instance-scoped): park after the drain.
@@ -140,11 +162,18 @@ fn run_merge_window(
     // over a lock that fired mid-window: a skipped publish leaves the vault
     // Locked, and the window outcome is then reported as VaultLocked
     // (retriable; the in-window outcome error, if any, is logged).
-    let published = keys.republish_if(state, epoch_at_window);
-    // local touch: in-person desktop path (v1.2.0 SEC-L5 remote-grace
-    // policy) — the sync window (merge/re-seal republish) is Tauri-only and
-    // driven by the desktop user, so the full window applies.
-    state.touch_activity();
+    let published = keys.republish_if(state, presence);
+    // SEC-L5 presence policy: a Manual cycle is in-person desktop activity
+    // and keeps the full auto-lock window; an AutoCycle is a background
+    // timer (lib.rs) — it extends only the 120s remote grace, exactly like
+    // sync_disconnect's lease touch below. The republish above restored the
+    // cycle-start presence, so this dispatch is the ONLY thing a cycle
+    // changes about auto-lock: an unattended desktop must lock even while
+    // auto-sync keeps succeeding (v1.8.3).
+    match trigger {
+        SyncTrigger::Manual => state.touch_activity(),
+        SyncTrigger::AutoCycle => state.session.touch_remote_activity(),
+    }
     match (outcome, published) {
         (Ok(merged), true) => Ok(merged),
         (Ok(_), false) => {
@@ -237,6 +266,12 @@ pub fn sync_connect_with_backend(
     state.lease()?;
     validate_config(&config)?;
     let paths = remote_paths(&config);
+    // Cycle-start snapshot FIRST (same ordering argument as
+    // `sync_now_with_backend`, v1.8.3 F2/F1): `pull_or_bootstrap` below is
+    // network I/O with no lease held, so a lock firing there must win over
+    // the window's republish, and the window's drain must not cost the user
+    // their presence timestamps.
+    let presence = CycleStartPresence::capture(state);
     let mut keys = SessionKeys::copy(state)?;
 
     // ALL credential-store interaction happens before any window (D8 rule 1).
@@ -251,7 +286,14 @@ pub fn sync_connect_with_backend(
     let pull = pull_or_bootstrap(state, backend, &paths, &container_password, &keys)?;
 
     // --- D8 exclusive window: merge remote into local. ---
-    let mut merged = run_merge_window(state, &mut keys, Some(&pull.snapshot))?;
+    // Connect is always a user action → Manual (no trigger threading needed).
+    let mut merged = run_merge_window(
+        state,
+        &mut keys,
+        Some(&pull.snapshot),
+        &presence,
+        SyncTrigger::Manual,
+    )?;
 
     // --- Push when the merge added local content; then persist rows. ---
     let device_id = new_device_id();
@@ -321,12 +363,20 @@ pub fn sync_connect_with_backend(
 /// scheduler keys off.
 pub fn sync_now(state: &Arc<AppState>) -> Result<SyncStatusResponse, VaultError> {
     let _cycle = state.sync_cycle.lock().expect("sync cycle lock poisoned");
-    let result = sync_now_inner(state);
+    let result = sync_now_inner(state, SyncTrigger::Manual);
     mark_cycle_finished(state);
+    // Best-effort persistence (v1.8.3 F4): the failure must survive past the
+    // inline error report so the settings status line reflects it too.
+    if let Err(err) = &result {
+        persist_sync_failure(state, err);
+    }
     result
 }
 
-fn sync_now_inner(state: &Arc<AppState>) -> Result<SyncStatusResponse, VaultError> {
+fn sync_now_inner(
+    state: &Arc<AppState>,
+    trigger: SyncTrigger,
+) -> Result<SyncStatusResponse, VaultError> {
     let lease = state.lease()?;
     // SEC-L2: the config row is sealed — decrypt under the lease's enc key
     // (a legacy v1.1.x plaintext row migrates to sealed on this read; the
@@ -335,7 +385,7 @@ fn sync_now_inner(state: &Arc<AppState>) -> Result<SyncStatusResponse, VaultErro
         .ok_or_else(not_configured)?;
     drop(lease);
     let backend = open_backend(state, &config)?;
-    sync_now_with_backend(state, backend.as_ref())
+    sync_now_with_backend_and_trigger(state, backend.as_ref(), trigger)
 }
 
 /// v1.6.0 (D6): in-memory marker for the auto-sync scheduler — refreshed by
@@ -378,12 +428,13 @@ pub(super) fn auto_sync_due(
 /// - **try_lock**: a cycle (manual OR automatic) already running means this
 ///   tick is skipped silently — a background timer must never queue up
 ///   behind the user's foreground action.
-/// - **silent failure**: errors are logged (tracing) and reflected in the
-///   usual places (`SyncState.last_result` keeps the engine's semantics —
-///   success writes "ok", failures leave the previous status), but NO event
-///   is emitted and no toast is shown: transient network jitter must not
-///   interrupt the user from a background timer. This is the deliberate
-///   opposite of the SF-P* position on user-initiated actions.
+/// - **silent failure**: errors are logged (tracing) and persisted
+///   best-effort into `SyncState.last_result` (the sanitized public
+///   message — success writes "ok", a locked-session failure stays
+///   log-only; v1.8.3 F4), but NO event is emitted and no toast is shown:
+///   transient network jitter must not interrupt the user from a background
+///   timer. This is the deliberate opposite of the SF-P* position on
+///   user-initiated actions.
 pub fn run_sync_cycle_if_due(state: &Arc<AppState>) -> bool {
     let interval_min = *state
         .auto_sync_interval_min
@@ -407,28 +458,91 @@ pub fn run_sync_cycle_if_due(state: &Arc<AppState>) -> bool {
         return false;
     };
 
-    let result = sync_now_inner(state);
+    let result = sync_now_inner(state, SyncTrigger::AutoCycle);
     // Refresh on BOTH outcomes: a failed attempt still consumed this
     // scheduler slot; retrying every 30s tick on a persistent error would
     // hammer the cloud backend.
     mark_cycle_finished(state);
     if let Err(err) = result {
         tracing::warn!("auto-sync cycle failed: {err}");
+        persist_sync_failure(state, &err);
     }
     true
 }
 
-/// [`sync_now`] with an injected backend (test seam).
+/// Best-effort: persist a sync failure into `SyncState` so the settings
+/// status line reflects reality (the "Last sync failed" banner was dead
+/// code — `last_result` was only ever written as "ok"). Runs ONLY while the
+/// session is still unlocked (the sealed rows decrypt under the session
+/// key); a locked session (e.g. a lock that fired mid-cycle) skips, and the
+/// next successful cycle naturally refreshes the status. This function must
+/// never produce a new failure path.
+fn persist_sync_failure(state: &Arc<AppState>, error: &VaultError) {
+    let keys = match SessionKeys::copy(state) {
+        Ok(keys) => keys,
+        Err(_) => return,
+    };
+    let Ok(db) = get_db(state) else {
+        return;
+    };
+    // `save_sync_rows` seals BOTH rows and must carry a `&SyncConfig`; an
+    // unconfigured vault has no status row to update on its first day (the
+    // not-configured cycle failures never reach `last_result`).
+    let config = match load_config(&db, keys.enc_bytes(), keys.mac_bytes()) {
+        Ok(Some(config)) => config,
+        _ => return,
+    };
+    let Ok(mut sync_state) = load_sync_state(&db, keys.enc_bytes(), keys.mac_bytes()) else {
+        return;
+    };
+    // `public_message` is the sanitized wire string (no internal paths);
+    // cap the length so a pathological message cannot bloat the row.
+    sync_state.last_result = Some(error.public_message().chars().take(160).collect());
+    if let Err(save_error) = save_sync_rows(state, &keys, &config, &sync_state, None) {
+        // Best-effort stays best-effort, but never silently (SF policy, cf.
+        // sync_disconnect's credential-delete loop).
+        tracing::warn!("could not persist the sync failure to SyncState: {save_error}");
+    }
+}
+
+/// [`sync_now`] with an injected backend (test seam). Manual by definition:
+/// the only direct callers are tests — production threading (manual and
+/// auto cycles alike) goes through `sync_now_with_backend_and_trigger`.
 pub fn sync_now_with_backend(
     state: &Arc<AppState>,
     backend: &dyn CloudBackend,
 ) -> Result<SyncStatusResponse, VaultError> {
+    sync_now_with_backend_and_trigger(state, backend, SyncTrigger::Manual)
+}
+
+/// The cycle body with the trigger threaded through to the merge window's
+/// presence touch. `pub(super)` so the sibling test modules can pin the
+/// AutoCycle touch semantics over an injected mock backend (the scheduler
+/// path resolves its backend via `open_backend` and cannot be driven
+/// deterministically in tests — same rationale as `auto_sync_due` below).
+pub(super) fn sync_now_with_backend_and_trigger(
+    state: &Arc<AppState>,
+    backend: &dyn CloudBackend,
+    trigger: SyncTrigger,
+) -> Result<SyncStatusResponse, VaultError> {
     let db = get_db(state)?;
-    // SEC-L2: copy the session keys FIRST — the sealed config/state rows
+    // Cycle-start snapshot FIRST (v1.8.3 review fold): any lock from this
+    // point on must win — a lock before the copy fails the copy with
+    // VaultLocked, a lock after the capture fails the epoch equality at
+    // republish. Capturing after the copy would leave a microscopic
+    // absorption window between the copy's lease drop and the epoch load.
+    let presence = CycleStartPresence::capture(state);
+    // SEC-L2: copy the session keys next — the sealed config/state rows
     // decrypt under the copied enc key, and a legacy plaintext row migrates
     // with the copied mac (the copy's generation is still current here, so
-    // the digest pre-check accepts the migration write).
+    // the digest pre-check accepts the migration write). The network phase
+    // below holds no lease and no window; the window's drain must not cost
+    // the user their presence timestamps (restored at republish).
     let mut keys = SessionKeys::copy(state)?;
+    // Test seam (one-shot, instance-scoped): park in the cycle's pre-window
+    // network phase (before any remote I/O).
+    #[cfg(test)]
+    state.network_phase_gate.wait_if_armed();
     let config =
         load_config(&db, keys.enc_bytes(), keys.mac_bytes())?.ok_or_else(not_configured)?;
     let mut sync_state = load_sync_state(&db, keys.enc_bytes(), keys.mac_bytes())?;
@@ -483,14 +597,15 @@ pub fn sync_now_with_backend(
     // --- D8 exclusive window: pull + merge + write-back + republish. ---
     let (base_rev, etag, mut merged, need_upload) = match &basis {
         RemoteBasis::Fresh { snapshot, etag } => {
-            let merged = run_merge_window(state, &mut keys, Some(snapshot))?;
+            let merged =
+                run_merge_window(state, &mut keys, Some(snapshot), &presence, trigger)?;
             {
                 let changed = merged.changed;
                 (snapshot.rev, etag.clone(), merged, changed)
             }
         }
         RemoteBasis::UpToDate { etag, rev } => {
-            let merged = run_merge_window(state, &mut keys, None)?;
+            let merged = run_merge_window(state, &mut keys, None, &presence, trigger)?;
             let changed = sync_state
                 .last_snapshot_hash
                 .as_deref()
@@ -499,7 +614,7 @@ pub fn sync_now_with_backend(
             (*rev, etag.clone(), merged, changed)
         }
         RemoteBasis::Missing => {
-            let merged = run_merge_window(state, &mut keys, None)?;
+            let merged = run_merge_window(state, &mut keys, None, &presence, trigger)?;
             (0, None, merged, true)
         }
     };

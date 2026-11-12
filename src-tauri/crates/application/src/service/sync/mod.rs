@@ -48,6 +48,8 @@ mod tests_merge;
 #[cfg(test)]
 mod tests_state_io;
 #[cfg(test)]
+mod tests_sync_failure;
+#[cfg(test)]
 mod tests_webdav;
 #[cfg(test)]
 mod tests_window;

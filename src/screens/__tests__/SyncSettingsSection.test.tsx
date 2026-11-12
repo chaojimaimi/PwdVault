@@ -306,6 +306,28 @@ describe("SyncSettingsSection connected state", () => {
 		expect(loadGroups).not.toHaveBeenCalled();
 	});
 
+	it("renders the failure banner once the status carries a failure", async () => {
+		// v1.8.3 F4: the desktop now persists a failed cycle's sanitized
+		// public message into SyncState.last_result — until that landed the
+		// banner below was dead code (last_result was only ever written as
+		// "ok", so a stale cloud credential stayed invisible across restarts).
+		syncStatus.mockResolvedValue({
+			...CONNECTED,
+			last_result: "Cloud unreachable",
+		});
+		const withFailure = await renderSection();
+
+		const banner = await screen.findByRole("alert");
+		expect(banner).toHaveTextContent("Last sync failed:");
+		expect(banner).toHaveTextContent("Cloud unreachable");
+		withFailure.unmount();
+
+		// The healthy status renders no banner at all.
+		syncStatus.mockResolvedValue({ ...CONNECTED });
+		await renderSection();
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
 	it("refreshes the vault lists after a successful sync", async () => {
 		syncNow.mockResolvedValue({ ...CONNECTED, remote_rev: 9 });
 		await renderSection();

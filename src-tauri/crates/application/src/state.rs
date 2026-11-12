@@ -179,6 +179,12 @@ pub struct AppState {
     pub(crate) merge_window_gate: WindowGate,
     #[cfg(test)]
     pub(crate) reseal_window_gate: WindowGate,
+    /// Test seam (cfg(test)): one-shot park in the sync cycle's pre-window
+    /// network phase (after the key copy, before the remote fetch) — the
+    /// v1.8.3 F2 lock-vs-republish regression covers the phase the drain
+    /// gates above cannot see.
+    #[cfg(test)]
+    pub(crate) network_phase_gate: WindowGate,
 }
 
 impl AppState {
@@ -279,6 +285,8 @@ impl Default for AppState {
             merge_window_gate: WindowGate::default(),
             #[cfg(test)]
             reseal_window_gate: WindowGate::default(),
+            #[cfg(test)]
+            network_phase_gate: WindowGate::default(),
         }
     }
 }

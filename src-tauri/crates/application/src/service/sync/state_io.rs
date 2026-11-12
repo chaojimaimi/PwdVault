@@ -10,6 +10,7 @@
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Instant;
 
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -531,6 +532,37 @@ pub(super) use super::sealed_rows::{load_config, load_sync_state, save_sync_rows
 // D8 window key copies
 // ---------------------------------------------------------------------------
 
+/// v1.8.3 F1/R3: presence + lock-epoch state captured at SYNC-CYCLE start,
+/// threaded through the merge window into its republish. Two reasons live
+/// in one snapshot: the epoch so a lock firing anywhere from cycle start on
+/// wins over the republish (v1.8.3 F2 — the pre-window phase is network
+/// I/O with no lease held), and the presence timestamps because the
+/// window's drain destroys them while a plain republish would rebuild them
+/// as `now`/`None` — refreshing the full auto-lock window on every
+/// successful background cycle (the unattended desktop would never lock).
+/// Restoring through `unlock_if_restoring` makes the cycle itself
+/// transparent to presence; the cycle's touch dispatch afterwards decides
+/// what the cycle means (Manual refreshes, AutoCycle grants only the
+/// remote grace).
+pub(super) struct CycleStartPresence {
+    epoch_at_capture: u64,
+    last_activity: Instant,
+    last_remote_activity: Option<Instant>,
+}
+
+impl CycleStartPresence {
+    /// Snapshot right after the cycle's key copy (the session is unlocked
+    /// there by construction — the copy leases it).
+    pub(super) fn capture(state: &Arc<AppState>) -> Self {
+        let (last_activity, last_remote_activity) = state.session.activity_snapshot();
+        Self {
+            epoch_at_capture: state.lock_epoch.load(Ordering::Acquire),
+            last_activity,
+            last_remote_activity,
+        }
+    }
+}
+
 /// Session key copies taken from a lease, kept alive past the exclusive
 /// window and republished afterwards. `SecretKey` zeroizes on drop.
 ///
@@ -574,29 +606,40 @@ impl SessionKeys {
 
     /// Republish the COPIED keys — sync never rotates them (review P3) —
     /// but ONLY while the window still owns the session (fix plan A §2.3):
-    /// the lock epoch captured before the window's drain must be unchanged
-    /// (a manual/auto lock during the window is never silently revoked) and
-    /// the live generation must equal our copy's generation (review P1-1:
-    /// a moved generation proves a concurrent re-seal published NEW keys —
-    /// our stale material must not overwrite them; the digest pre-check in
+    /// the lock epoch captured at cycle start must be unchanged (a manual/
+    /// auto lock during the cycle is never silently revoked) and the live
+    /// generation must equal our copy's generation (review P1-1: a moved
+    /// generation proves a concurrent re-seal published NEW keys — our
+    /// stale material must not overwrite them; the digest pre-check in
     /// `VaultStore::write` already rejected our stale writes).
+    ///
+    /// The publish goes through `unlock_if_restoring` (v1.8.3 F1/R3): the
+    /// drain destroyed the cycle-start presence, and republishing it as
+    /// `now`/`None` would refresh the full auto-lock window on every
+    /// successful background cycle.
     ///
     /// Returns whether the publish happened. On `false` the copied keys are
     /// dropped (zeroized) and the session is left exactly as it was.
-    pub(super) fn republish_if(&mut self, state: &Arc<AppState>, epoch_at_window: u64) -> bool {
+    pub(super) fn republish_if(
+        &mut self,
+        state: &Arc<AppState>,
+        presence: &CycleStartPresence,
+    ) -> bool {
         let expected_generation = self.generation;
-        let published = state.session.unlock_if(
+        let published = state.session.unlock_if_restoring(
             SecretKey::new(*self.enc.as_ref()),
             SecretKey::new(*self.mac.as_ref()),
             |live_generation| {
-                state.lock_epoch.load(Ordering::Acquire) == epoch_at_window
+                state.lock_epoch.load(Ordering::Acquire) == presence.epoch_at_capture
                     && live_generation == expected_generation
             },
+            presence.last_activity,
+            presence.last_remote_activity,
         );
         if published {
-            // `unlock_if` bumps the live generation by exactly one; tracking
-            // it keeps `generation` equal to the session our keys own after
-            // the window.
+            // `unlock_if_restoring` bumps the live generation by exactly one
+            // (same rule as `unlock_if`); tracking it keeps `generation`
+            // equal to the session our keys own after the window.
             self.generation += 1;
         }
         published

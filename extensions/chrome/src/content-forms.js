@@ -95,6 +95,43 @@
 		return FORM_TYPES.LOGIN;
 	}
 
+	// Visibility gate for auto-fill targets (v1.8.3 F3): a credential must
+	// never land in a field the page does not render — honeypot pages place
+	// display:none password fields first and read whatever automation pours
+	// into them. Chromium 105+ / Firefox 122+ expose checkVisibility, which
+	// covers display:none (self and ancestors), visibility:hidden, the
+	// hidden attribute and content-visibility-hidden ancestors; the
+	// computed-style double-check is the fallback for engines without it —
+	// and for the jsdom test environment. No rect/offsetParent probing:
+	// those are all-zero in jsdom and would reject everything.
+	//
+	// Deliberate limits: checkOpacity stays false (opacity:0 is a common
+	// animation state — rejecting it would break transitional forms), and
+	// rendering-level traps (covered/overlapped fields) stay out of scope.
+	// KeePassXC-Browser and Firefox LoginManagerContent (both verified from
+	// source) additionally reject zero/sub-minimum dimensions — we gate the
+	// same bar on the checkVisibility branch only (clientWidth is always 0
+	// in jsdom, so the fallback cannot carry it). Same fail-closed direction
+	// as the eTLD+1 suffix table.
+	function isViewableField(input) {
+		if (typeof input.checkVisibility === "function") {
+			if (
+				!input.checkVisibility({
+					checkVisibilityCSS: true,
+					checkOpacity: false,
+				})
+			) {
+				return false;
+			}
+			// Zero-area rendered honeypots (a width/height:0 field passes
+			// checkVisibility — verified on real Chrome): reject them here,
+			// never in the shared tail below.
+			return input.clientWidth > 0 && input.clientHeight > 0;
+		}
+		const style = window.getComputedStyle(input);
+		return style.display !== "none" && style.visibility !== "hidden";
+	}
+
 	// Pick the login password field from every password input on the page:
 	// 1. autocomplete="current-password" wins outright;
 	// 2. a single password field is unambiguous — take it;
@@ -102,18 +139,25 @@
 	//    back to the first, with the formType gate deciding whether any
 	//    automatic fill is allowed.
 	function selectPasswordField(passwordInputs) {
-		const explicit = passwordInputs.find(
+		// F3 defense in depth: findLoginForm already filtered, but the
+		// save-prompt path hands over an unfiltered array — the visibility
+		// gate must hold at the point of selection too.
+		const viewable = passwordInputs.filter(isViewableField);
+		const explicit = viewable.find(
 			(input) =>
 				(input.getAttribute("autocomplete") || "").toLowerCase() ===
 				"current-password",
 		);
-		return explicit || passwordInputs[0];
+		return explicit || viewable[0];
 	}
 
 	function findLoginForm() {
+		// F3: filter BEFORE selection — a hidden honeypot field must never
+		// become the fill target, and an all-hidden page reports "No login
+		// form detected" instead of filling anything unrendered.
 		const passwordInputs = Array.from(
 			document.querySelectorAll('input[type="password"]'),
-		);
+		).filter(isViewableField);
 
 		if (passwordInputs.length === 0) {
 			return null;
@@ -148,10 +192,13 @@
 	// container the user actually submitted). The chosen password field
 	// carries the autocomplete hard signal into the classifier.
 	function inspectLoginForm(container, passwordInput) {
-		// Look for username field
+		// Look for username field (F3: hidden inputs are not candidates —
+		// they are honeypot bait just like hidden password fields)
 		const textInputs = Array.from(container.querySelectorAll("input")).filter(
 			(input) =>
-				USERNAME_INPUT_TYPES.includes(input.type) && input !== passwordInput,
+				USERNAME_INPUT_TYPES.includes(input.type) &&
+				input !== passwordInput &&
+				isViewableField(input),
 		);
 
 		// Sort by position (above the password field)
@@ -446,6 +493,7 @@
 	globalThis.PwdVaultContent.findLoginForm = findLoginForm;
 	globalThis.PwdVaultContent.selectPasswordField = selectPasswordField;
 	globalThis.PwdVaultContent.inspectLoginForm = inspectLoginForm;
+	globalThis.PwdVaultContent.isViewableField = isViewableField;
 	globalThis.PwdVaultContent.SUBMIT_PATTERNS = SUBMIT_PATTERNS;
 	globalThis.PwdVaultContent.FORM_TYPES = FORM_TYPES;
 	globalThis.PwdVaultContent.autofillLogin = autofillLogin;

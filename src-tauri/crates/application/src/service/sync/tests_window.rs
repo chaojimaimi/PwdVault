@@ -222,6 +222,49 @@ fn lock_during_sync_window_is_not_silently_revoked() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Case 4b (v1.8.3 F2): lock during the PRE-WINDOW network phase
+// ---------------------------------------------------------------------------
+
+/// Locking while the cycle is parked in its pre-window network phase (the
+/// fetch/stat/download stretch — no lease held, no window open) must stand
+/// too: the epoch is captured at CYCLE START, so the lock's bump makes the
+/// window's republish skip instead of silently re-unlocking the vault.
+/// The old post-drain capture missed this phase entirely — the window read
+/// the post-bump epoch and resurrected the session (v1.8.3 F2).
+#[test]
+fn lock_during_network_phase_is_not_silently_revoked() {
+    let (device_a, cloud, _dir) = connected_pair_with_remote_entry();
+
+    device_a.network_phase_gate.arm();
+    let syncer = {
+        let state = Arc::clone(&device_a);
+        let cloud = cloud.handle();
+        thread::spawn(move || sync_now_with_backend(&state, &cloud))
+    };
+    device_a.network_phase_gate.wait_until_arrived();
+
+    // The user (or auto-lock) locks before the window even opens.
+    device_a.lock_vault();
+    device_a.network_phase_gate.open();
+
+    let result = syncer.join().unwrap();
+    assert!(
+        matches!(result, Err(VaultError::VaultLocked)),
+        "unexpected result: {result:?}"
+    );
+    assert!(!device_a.is_unlocked());
+
+    // The lock stands; the vault still opens with the OLD password and the
+    // merge that committed inside the window is consistent on disk.
+    assert!(crate::unlock_vault(&device_a, Zeroizing::new(TEST_PASSWORD.to_string())).unwrap());
+    let db = crate::service::vault::get_db(&device_a).unwrap();
+    assert!(
+        database::integrity::verify_integrity(&db, &device_a.session.get_mac_key().unwrap())
+            .unwrap()
+    );
+}
+
 /// Locking while the change-password window runs: the re-seal commits (Ok)
 /// but the publish is skipped — the session stays Locked and the observable
 /// "password was changed" semantics are exact: the old password no longer

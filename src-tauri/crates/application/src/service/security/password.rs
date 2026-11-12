@@ -90,7 +90,10 @@ pub fn change_password(
     // --- D8 step 2: exclusive window. Capture the lock epoch BEFORE the
     // drain (any lock from now on must win over our republish), take the
     // window mutex (held to the END of this function — all republish
-    // paths), then drain every in-flight lease and refuse new ones. ---
+    // paths), then drain every in-flight lease and refuse new ones.
+    // (The sync merge window instead captures at cycle start — earlier than
+    // its window — because its pre-window phase includes network I/O; see
+    // sync/engine.rs.) ---
     let epoch_at_window = state.lock_epoch.load(Ordering::Acquire);
     let _window = state
         .exclusive_window
