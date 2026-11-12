@@ -26,4 +26,9 @@ ignore = [
     "RUSTSEC-2026-0367",
     "RUSTSEC-2026-0368",
     "RUSTSEC-2026-0369",
+    # v1.8.3: ZipArchive::extract sizes the symlink-target buffer from the
+    # declared uncompressed size before reading data — process abort on a
+    # malicious archive (DoS). Same zip >= 9 family and premise as the three
+    # above; surfaced 2026-11-12 via the release gate's advisory DB refresh.
+    "RUSTSEC-2026-0429",
 ]
