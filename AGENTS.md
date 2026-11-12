@@ -354,7 +354,8 @@ matches!；+3 helper 测试 + -9 并入既有 pin；Windows-target cargo check �
 实锤 cfg 对）→ rust-reviewer **APPROVE** 0 P0-P2 + 2×P3 信息项（Cmd+H 隐藏不取消
 → T62 观察项；测试①时延上界限 1000ms 为 CI 排程权衡）→ 三处变异全红 → 门禁 →
 release. 实施前先收掉 v1.8.4 收尾的 formatter 残留（12d2e44，9 文件纯重排，758/91
-+ lint 0/0 复验）。
+
+- lint 0/0 复验）。
 
 Shipped: biometric_gate 取消通道（static AtomicBool + recv_reply_with_cancel 纯
 helper，200ms tick，入口复位+焦点门闭合论证注释）；lib.rs on_window_event 三取消
