@@ -597,8 +597,7 @@ pub(super) fn sync_now_with_backend_and_trigger(
     // --- D8 exclusive window: pull + merge + write-back + republish. ---
     let (base_rev, etag, mut merged, need_upload) = match &basis {
         RemoteBasis::Fresh { snapshot, etag } => {
-            let merged =
-                run_merge_window(state, &mut keys, Some(snapshot), &presence, trigger)?;
+            let merged = run_merge_window(state, &mut keys, Some(snapshot), &presence, trigger)?;
             {
                 let changed = merged.changed;
                 (snapshot.rev, etag.clone(), merged, changed)

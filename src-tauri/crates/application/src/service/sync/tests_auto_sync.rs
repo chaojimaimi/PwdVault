@@ -215,12 +215,9 @@ fn auto_sync_cycle_extends_only_remote_grace() {
     std::thread::sleep(Duration::from_millis(10));
     let deadline_before = state.session.auto_lock_deadline(600).unwrap();
 
-    assert!(sync_now_with_backend_and_trigger(
-        &state,
-        &cloud.handle(),
-        SyncTrigger::AutoCycle
-    )
-    .is_ok());
+    assert!(
+        sync_now_with_backend_and_trigger(&state, &cloud.handle(), SyncTrigger::AutoCycle).is_ok()
+    );
 
     // The cycle itself is presence-transparent: the full-window deadline
     // (timeout 600) is untouched — the snapshot-restore republish undid the

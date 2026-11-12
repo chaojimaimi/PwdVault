@@ -502,7 +502,6 @@ impl<'a> SessionLease<'a> {
     }
 }
 
-
 #[cfg(test)]
 #[path = "session_tests.rs"]
 mod tests;

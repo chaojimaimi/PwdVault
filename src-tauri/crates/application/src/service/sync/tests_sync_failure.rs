@@ -15,9 +15,7 @@ use super::engine::{
 };
 use super::tests_engine::{test_config, test_state, TEST_PASSWORD};
 use crate::{AppState, VaultError};
-use pwdvault_infrastructure::keychain::{
-    SecretStoreError, SYNC_WEBDAV_PASSWORD_ACCOUNT,
-};
+use pwdvault_infrastructure::keychain::{SecretStoreError, SYNC_WEBDAV_PASSWORD_ACCOUNT};
 
 fn instant_ago(secs: u64) -> Option<Instant> {
     Instant::now().checked_sub(Duration::from_secs(secs))
