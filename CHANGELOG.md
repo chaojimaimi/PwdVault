@@ -4,7 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [1.8.4] - 2026-11-12
+## [1.8.5] - 2026-11-12
+
+### Fixed
+
+- **The Touch ID prompt no longer outlives the app**: the system
+  fingerprint dialog raised for biometric unlock used to float over other
+  applications forever if you minimized or closed PwdVault instead of
+  answering it. The prompt is now cancelled automatically — and the dialog
+  dismissed — the moment the window is minimized or hidden to the tray.
+  Returning to the app shows a silent unlock screen (no error banner) with
+  the Touch ID button available for a manual retry, same as a normal cancel.
 
 ## [1.8.4] - 2026-11-12
 
