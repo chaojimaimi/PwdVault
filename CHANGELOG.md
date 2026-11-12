@@ -4,6 +4,55 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.8.4] - 2026-11-12
+
+### Fixed
+
+- **Browser-extension save/update prompts now re-check the entry's domain**:
+  the update path trusted the entry id echoed back from the page, so a
+  compromised page could point an update at an entry belonging to another
+  site. Both save/update handlers now re-derive the sender-scoped entry list
+  from the browser-supplied tab URL and refuse (or silently skip) anything
+  outside it — the same strict gate the fill list has always used.
+- **"Entry not found" no longer looks like a disconnected app**: the
+  extension classified desktop errors by substring matching, so that
+  business error matched "not found" and surfaced as "make sure PwdVault is
+  running". The structured error code the desktop already sends is now read:
+  business errors pass through verbatim, and only real transport failures
+  report a disconnect.
+- **A restore that succeeds but fails to refresh the list says so**: the
+  refresh failure after restoring a trash entry was swallowed; it now toasts
+  "Restored, but refreshing the list failed" instead of a misleading error.
+- **The vault list no longer persists settings while they are still
+  loading**: changing the sort order during startup would write the default
+  settings over the user's real ones (including auto-lock and sync); the
+  control is now inert until settings finish loading.
+- **Trash auto-purge failures become visible on the second consecutive
+  failure**: a purge that keeps failing after unlock was log-only; it now
+  surfaces once (and re-arms after a success) while the unlock itself stays
+  untouched.
+- **Generator mode toggles announce themselves correctly**: the fake
+  tablist pattern promised arrow-key roving focus that never existed; the
+  modes are now plain toggle buttons with `aria-pressed`.
+
+### Hardened
+
+- Integrity digests compare in constant time (the last two plain `==` sites;
+  `subtle` was already in the dependency tree — no new dependency).
+- The extension's 10 MiB transport cap is raised to 14 MiB to match the
+  backup file cap, so a max-size backup can actually transit a
+  native-messaging import/export (the desktop side already accepted 14 MiB).
+- Entry/unlock/setup inputs gain proper `autocomplete` tokens and
+  `spellcheck="false"`; the recovery-key input is cleared after a failed
+  reset (a one-time key should not linger).
+- The floating autofill button ignores synthetic (script-dispatched) clicks,
+  matching the rest of the credential surfaces.
+- The extension popup refuses to open URLs that do not resolve as
+  http(s) after normalization; the in-page copy actions report failure
+  instead of a silent "copied" toast; the search cache is cleared on lock;
+  "Copied" timers can no longer stack; the trash error banner carries the
+  actual failure reason; README status no longer describes v1.1.9.
+
 ## [1.8.3] - 2026-11-12
 
 ### Fixed

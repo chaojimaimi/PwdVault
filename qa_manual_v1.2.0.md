@@ -470,3 +470,22 @@
 5. **样式显隐登录层**：预渲染 display:none、点击后经 style/class（或 aria-hidden）
    切换显示的登录层 → 悬浮按钮出现（观察器 attributes 折叠的验收项）。
 6. **手动同步语义不变**：解锁后手动 sync → 窗口内不自动锁（Manual 触碰保持完整窗口）。
+
+## T61 v1.8.4 真机（批次② 加固 + 速赢：输入属性 / 合成事件 / URL 校验 / 排序守卫）
+
+1. **秘密输入属性（DevTools）**：EntryScreen 密码框 `autocomplete="new-password"`
+   + 两侧均 `spellcheck="false"`；Unlock 框 `autocomplete="current-password"`；
+   Setup 两框 `new-password`。同时确认浏览器自身密码管理器不再对这些框弹保存/
+   自动填充提示（new-password/current-password 语义的实际落地）。
+2. **悬浮按钮合成事件防御（Chrome）**：登录页控制台
+   `document.querySelector` 定位悬浮按钮 host 后
+   `dispatchEvent(new MouseEvent("click", {bubbles: true}))` → overlay **不得**
+   打开；真实鼠标点击正常打开（isTrusted 门控的验收项）。
+3. **popup go-to-url 校验**：条目 URL 填畸形值（如 `javascript:alert(1)`、纯空格、
+   `http://`）→ 点 Go 不开新 tab、popup 不关闭；正常 URL（`example.com` /
+   `https://…`）直开。
+4. **排序守卫**：冷启动即进 Vault 列表页 → 设置尚未加载完成的瞬间排序下拉应置灰
+   （title 提示）；加载完成后恢复可点。jsdom 抓不到真实加载时序，本项是唯一
+   真机观察点。
+5. **回归快测**：T60 第 1/2 项（蜜罐过滤——本班 P2-1 在后台加了域重校验，填充
+   路径本身未动但同文件）；保存提示在正常站点的 update/save 判定照旧。

@@ -148,7 +148,7 @@ cd extensions/native-host && cargo test --locked
 ### Version Bump
 
 ```bash
-./scripts/bump-version.sh 1.1.7 --changelog
+./scripts/bump-version.sh 1.8.4 --changelog
 ```
 
 ## Tech Stack
@@ -165,15 +165,16 @@ cd extensions/native-host && cargo test --locked
 
 ## Project Status
 
-v1.1.9. See [CHANGELOG.md](CHANGELOG.md) for details.
+v1.8.4. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ### Roadmap
 
 - macOS code signing & notarization (enables the data-protection Keychain)
 - Windows Hello biometric unlock
-- Secure notes & attachments
-- Breach monitoring (HIBP)
-- Scheduled background sync (today: manual + on-unlock)
+- Passkey support (feasibility spike first — browser provider APIs are still
+  a spec discussion)
+- Secure notes & attachments (on hold pending a privacy/priority decision)
+- Breach monitoring (HIBP) — on hold pending a privacy decision
 
 ## Data Files
 
