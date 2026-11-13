@@ -1,10 +1,12 @@
 //! v1.8.6 source-contract test for the Touch ID prompt cancel wiring.
 //!
-//! The v1.8.5 window-event cancel arms were empirically falsified (the auth
-//! dialog steals key status at raise time and tao's macOS delegate has no
-//! windowDidMiniaturize), so the cancel REQUEST must now come from the AppKit
-//! occlusion-state observer in `src/lib.rs`. This test pins the wiring in the
-//! lib.rs SOURCE (include_str! — the capability_contract.rs:25 precedent):
+//! The v1.8.5 window-event cancel arms were empirically falsified (tao's
+//! macOS delegate has no windowDidMiniaturize, and measured on-device
+//! 2026-11-13 the app stays active while the prompt is up — the arms'
+//! focus-loss premise never fires), so the cancel REQUEST must now come
+//! from the AppKit occlusion-state observer in `src/lib.rs`. This test pins
+//! the wiring in the lib.rs SOURCE (include_str! — the
+//! capability_contract.rs:25 precedent):
 //!
 //! ① the occlusion observer registration exists, anchored on the
 //!    `addObserverForName` CALL SHAPE — never on the notification-name
@@ -24,8 +26,10 @@
 //!
 //! The test's own assertion strings live in THIS file while the scanned
 //! source lives in lib.rs — no self-collision is possible (the v1.8.4 #18③
-//! lesson is why this is a separate integration-test file at all). One test
-//! function on purpose: the plan's test budget is exactly +1 (464 → 465).
+//! lesson is why this is a separate integration-test file at all). Two test
+//! functions: this one (v1.8.6 occlusion wiring, budget 464 → 465) and
+//! `resign_active_observer_cancels_pending_prompt` below (v1.8.7
+//! resign-active wiring, budget 465 → 466).
 
 const LIB_SRC: &str = include_str!("../src/lib.rs");
 
@@ -103,5 +107,89 @@ fn occlusion_cancel_wiring_contract() {
         LIB_SRC[arm..arm + hide].contains("cancel_pending_biometric_prompt"),
         "an in-flight Touch ID dialog must still be cancelled before the \
          hide-to-tray (v1.8.5 behavior kept by v1.8.6 F2)"
+    );
+}
+
+/// v1.8.7: the resign-active observer — the app-level complement to the
+/// window-level occlusion observer (Stage Manager's shrunken tile keeps the
+/// window "visible" on screen, so occlusion never fires on a plain app
+/// switch). The assertions mirror the occlusion contract:
+///
+/// ⑤ the notification-name literal exists in its QUOTED form, exactly once
+///    (lib.rs is forbidden from carrying the full name in comments —
+///    "resign-active" prose only — so the quoted literal is a
+///    non-tautological registration anchor);
+/// ⑥ the registration call shape occurs exactly TWICE, occlusion first in
+///    file order (the v1.8.6 first-occurrence anchors in
+///    `occlusion_cancel_wiring_contract` must keep pointing at it) and the
+///    resign registration second;
+/// ⑦ the resign segment — from the name literal to the SECOND registration
+///    call (`match_indices().nth(1)`, never a bare find, which would hit the
+///    occlusion registration and invert the bounds) — produces the cancel
+///    request.
+#[test]
+fn resign_active_observer_cancels_pending_prompt() {
+    // --- ⑤ quoted name literal, exactly once -------------------------------
+    let name_literal = "\"NSApplicationDidResignActiveNotification\"";
+    assert_eq!(
+        LIB_SRC.matches(name_literal).count(),
+        1,
+        "the resign-active notification must be registered through its \
+         quoted string literal exactly once — lib.rs comments may not carry \
+         the full name (resign-active prose only), so this anchor cannot be \
+         satisfied by prose"
+    );
+
+    // --- ⑥ exactly two registration calls, occlusion first -----------------
+    let registration_call = "addObserverForName_object_queue_usingBlock(";
+    let call_sites: Vec<usize> = LIB_SRC
+        .match_indices(registration_call)
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(
+        call_sites.len(),
+        2,
+        "lib.rs must register exactly two AppKit observers (occlusion + \
+         resign-active) through the same call shape"
+    );
+    assert!(
+        call_sites[0] < call_sites[1],
+        "file order is pinned: the occlusion registration must stay FIRST so \
+         the v1.8.6 first-occurrence anchors keep pointing at it"
+    );
+    // Identity + order chain (v1.8.7 review fold): `call_sites[0] < call_sites[1]`
+    // is vacuously true under `len == 2` (match_indices positions are strictly
+    // increasing), so a plain swap of the two observers would pass it. Pin the
+    // occlusion registration's IDENTITY via its own quoted name literal —
+    // unique in lib.rs in quoted form (prose mentions use backticks) — so the
+    // chain "occlusion literal < first registration < second registration"
+    // turns an observer swap (and a swap-combined cancel removal, which the
+    // count alone cannot see) red.
+    let occlusion_literal = "\"NSWindowDidChangeOcclusionStateNotification\"";
+    let occlusion_name_at = LIB_SRC
+        .find(occlusion_literal)
+        .expect("occlusion quoted name literal (unique in lib.rs)");
+    assert!(
+        occlusion_name_at < call_sites[0],
+        "identity + order chain: the occlusion registration is FIRST and the \
+         resign registration SECOND — the v1.8.6 first-occurrence anchors \
+         depend on this order"
+    );
+
+    // --- ⑦ the resign segment produces the cancel request ------------------
+    let start = LIB_SRC
+        .find(name_literal)
+        .expect("resign-active name literal position (asserted present above)");
+    let end = call_sites[1];
+    assert!(
+        start < end,
+        "segment bounds must be monotonic — the resign name literal precedes \
+         its registration call (second in file order)"
+    );
+    assert!(
+        LIB_SRC[start..end].contains("cancel_pending_biometric_prompt"),
+        "the resign-active block must produce the cancel request — the \
+         polling cancel loop in infrastructure has no other trigger for \
+         app-switch episodes"
     );
 }

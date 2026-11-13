@@ -387,16 +387,20 @@ pub fn run() {
                     // v1.8.6: minimize/hide cancellation of an in-flight
                     // Touch ID prompt moved out of the window-event terrain
                     // entirely — the v1.8.5 event arms here were empirically
-                    // falsified (the auth dialog steals key status at raise
-                    // time, and tao's macOS delegate has no
-                    // windowDidMiniaturize), so the cancel request is now
-                    // produced by the AppKit occlusion-state observer
-                    // registered right below.
+                    // falsified (measured 2026-11-13: the app stays active
+                    // while the prompt is up, so the arms' focus-loss premise
+                    // never fires on the real defect — the earlier "steals
+                    // key status" reading was an unmeasured inference — while
+                    // tao's macOS delegate having no windowDidMiniaturize
+                    // remains fact), so the cancel request is now produced by
+                    // the AppKit occlusion-state observer registered right
+                    // below.
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                         // v1.8.5: an in-flight Touch ID dialog must not
                         // survive the hide-to-tray.
                         keychain::cancel_pending_biometric_prompt();
+                        tracing::info!("biometric prompt cancelled: close-to-tray");
                         let _ = win.hide();
                         let _ = &tray_handle;
                     }
@@ -422,6 +426,12 @@ pub fn run() {
                     /// of the window is visible".
                     const NSWINDOW_OCCLUSION_STATE_VISIBLE: usize = 1 << 1;
 
+                    // Shared registration plumbing for both AppKit observers
+                    // below (occlusion + resign-active): one defaultCenter,
+                    // one mainQueue.
+                    let center = NSNotificationCenter::defaultCenter();
+                    let queue = NSOperationQueue::mainQueue();
+
                     match window.ns_window() {
                         Ok(handle) => {
                             // Pointer lifetime: the window is never destroyed
@@ -431,8 +441,6 @@ pub fn run() {
                             // block (AppHandle capture was the fallback; not
                             // needed).
                             let win_ptr = handle as *mut AnyObject;
-                            let center = NSNotificationCenter::defaultCenter();
-                            let queue = NSOperationQueue::mainQueue();
                             // AppKit convention: external notification
                             // constant values equal their symbol names, so
                             // the string literal below is the real
@@ -470,6 +478,7 @@ pub fn run() {
                                     // next gate entry.
                                     if state & NSWINDOW_OCCLUSION_STATE_VISIBLE == 0 {
                                         keychain::cancel_pending_biometric_prompt();
+                                        tracing::info!("biometric prompt cancelled: occlusion");
                                     }
                                 });
                             // SAFETY: standard ObjC call; `obj` is nil (the
@@ -498,6 +507,62 @@ pub fn run() {
                             );
                         }
                     }
+
+                    // v1.8.7: the occlusion observer above is structurally
+                    // blind to app-switch cancellation under Stage Manager —
+                    // a shrunken tile still renders on-screen, the window's
+                    // Visible bit never drops, and no notification fires (the
+                    // 2026-11-13 unified-log autopsy of four live prompt
+                    // episodes found zero AppCancel (-9) end codes). The
+                    // missing signal is app-level: OUR app losing the
+                    // foreground. This observer produces the cancel request
+                    // on resign-active — the app-side complement to the
+                    // window-side occlusion path above.
+                    //
+                    // Self-cancel safety (measured 2026-11-13): while the
+                    // prompt is up this app STAYS active — the auto-prompt
+                    // only raises behind its windowFocused gate, and the
+                    // user's real switch to another app is what resigns — so
+                    // this observer cannot cancel the very dialog it watches
+                    // at raise time.
+                    let resign_name =
+                        NSString::from_str("NSApplicationDidResignActiveNotification");
+                    // Explicitly typed so the &RcBlock -> &DynBlock deref
+                    // coercion fires at the registration call (same shape as
+                    // the occlusion block above).
+                    let resign_block: RcBlock<dyn Fn(NonNull<NSNotification>)> =
+                        RcBlock::new(move |_notification| {
+                            // Unconditional on purpose: setting the flag
+                            // while no evaluation is in flight is harmless —
+                            // the gate entry resets the flag before every
+                            // episode, and the microsecond window between
+                            // that reset and evaluatePolicy is fail-closed
+                            // benign (the dialog flashes away silently,
+                            // rate-limit exempt, key never published).
+                            keychain::cancel_pending_biometric_prompt();
+                            tracing::info!("biometric prompt cancelled: resign-active");
+                        });
+                    // SAFETY: standard ObjC call; `obj` is nil — this is an
+                    // app-level notification, no window pointer is involved,
+                    // so this producer is immune to the ns_window() handle
+                    // failure the occlusion path warns about. The shared
+                    // mainQueue keeps both observers' delivery semantics
+                    // identical (the block touches no UI).
+                    let resign_observer = unsafe {
+                        center.addObserverForName_object_queue_usingBlock(
+                            Some(&resign_name),
+                            None,
+                            Some(&queue),
+                            &resign_block,
+                        )
+                    };
+                    // Intentional leak: app-lifetime observer, same
+                    // registration semantics as the occlusion observer
+                    // (NSNotificationCenter copies the block at registration,
+                    // so the local RcBlock is droppable — forgetting the
+                    // token just skips an unregister this app never
+                    // performs).
+                    std::mem::forget(resign_observer);
                 }
             }
 
