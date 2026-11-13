@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.8.6] - 2026-11-13
+
+### Fixed
+
+- **The Touch ID prompt now actually dismisses when the window disappears**:
+  v1.8.5's cancellation relied on window focus/resize events, but on the
+  real defect scenario those never fire — the authentication dialog takes
+  key status the moment it appears, so minimizing the already-background
+  window produces no focus change, and the toolkit never reports the
+  miniaturize at all. The prompt is now cancelled through the window's
+  **occlusion state** — the operating system's own "is any part of this
+  window visible" signal — which covers Cmd+M minimize, Cmd+H hide,
+  close-to-tray, and the window being fully covered by another window,
+  uniformly. Raising the dialog cannot self-cancel (partial occlusion keeps
+  a window "visible", and the vault window's minimum size cannot be fully
+  covered by the small Touch ID panel). Everything else from v1.8.5 is
+  unchanged: silent unlock screen on return, manual Touch ID button,
+  no rate-limit impact.
+
 ## [1.8.5] - 2026-11-12
 
 ### Fixed
