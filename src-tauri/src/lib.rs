@@ -384,49 +384,121 @@ pub fn run() {
                 let tray_handle = tray.clone();
                 let win = window.clone();
                 window.on_window_event(move |event| {
-                    match event {
-                        tauri::WindowEvent::CloseRequested { api, .. } => {
-                            api.prevent_close();
-                            // v1.8.5: an in-flight Touch ID dialog must not
-                            // survive the hide-to-tray.
-                            keychain::cancel_pending_biometric_prompt();
-                            let _ = win.hide();
-                            let _ = &tray_handle;
-                        }
-                        // v1.8.5: the legacy-gate Touch ID dialog is a system
-                        // panel that does not follow the app window — cancel
-                        // it when the window is minimized/hidden. Two arms
-                        // because they cannot share one invalidation
-                        // predicate: tao's macOS delegate has no
-                        // windowDidMiniaturize, so `is_minimized()` is NOT
-                        // guaranteed to have flipped yet when either event
-                        // fires.
-                        //  - Focused(false) rides windowDidResignKey; the
-                        //    is_minimized check deliberately excludes a bare
-                        //    focus loss — including the unverified "system
-                        //    fingerprint panel steals focus" self-kill face
-                        //    and the Alt-Tab hover (known limitation, QA T62
-                        //    observation item).
-                        //  - Resized rides windowDidResize; the 0x0 size is
-                        //    the reliable macOS minimize signal (wry #490) —
-                        //    independent of the isMiniaturized flip timing,
-                        //    so the primary minimize scenario always hits.
-                        tauri::WindowEvent::Focused(false)
-                            // `matches!` not `== Ok(true)`: tauri::Error has
-                            // no PartialEq.
-                            if matches!(win.is_minimized(), Ok(true)) =>
-                        {
-                            keychain::cancel_pending_biometric_prompt();
-                        }
-                        tauri::WindowEvent::Resized(size)
-                            if matches!(win.is_minimized(), Ok(true))
-                                || (size.width == 0 && size.height == 0) =>
-                        {
-                            keychain::cancel_pending_biometric_prompt();
-                        }
-                        _ => {}
+                    // v1.8.6: minimize/hide cancellation of an in-flight
+                    // Touch ID prompt moved out of the window-event terrain
+                    // entirely — the v1.8.5 event arms here were empirically
+                    // falsified (the auth dialog steals key status at raise
+                    // time, and tao's macOS delegate has no
+                    // windowDidMiniaturize), so the cancel request is now
+                    // produced by the AppKit occlusion-state observer
+                    // registered right below.
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        // v1.8.5: an in-flight Touch ID dialog must not
+                        // survive the hide-to-tray.
+                        keychain::cancel_pending_biometric_prompt();
+                        let _ = win.hide();
+                        let _ = &tray_handle;
                     }
                 });
+
+                // v1.8.6: the Touch ID prompt's cancel REQUEST producer — the
+                // AppKit occlusion-state notification (macOS only; `ns_window`
+                // is a macOS-cfg tauri API and the objc2 stack does not exist
+                // on non-Apple targets, hence the cfg gate — the Windows
+                // release CI compiles this file).
+                #[cfg(target_os = "macos")]
+                {
+                    use block2::RcBlock;
+                    use objc2::msg_send;
+                    use objc2::runtime::AnyObject;
+                    use objc2_foundation::{
+                        NSNotification, NSNotificationCenter, NSOperationQueue, NSString,
+                    };
+                    use std::ptr::NonNull;
+
+                    /// NSWindowOcclusionStateVisible (NSWindow.h, macOS 10.9+):
+                    /// `1UL << 1` — the SDK's own semantics are "at least part
+                    /// of the window is visible".
+                    const NSWINDOW_OCCLUSION_STATE_VISIBLE: usize = 1 << 1;
+
+                    match window.ns_window() {
+                        Ok(handle) => {
+                            // Pointer lifetime: the window is never destroyed
+                            // (close = hide-to-tray with prevent_close), so
+                            // the raw NSWindow pointer stays valid for the
+                            // whole app lifetime — safe to copy into the
+                            // block (AppHandle capture was the fallback; not
+                            // needed).
+                            let win_ptr = handle as *mut AnyObject;
+                            let center = NSNotificationCenter::defaultCenter();
+                            let queue = NSOperationQueue::mainQueue();
+                            // AppKit convention: external notification
+                            // constant values equal their symbol names, so
+                            // the string literal below is the real
+                            // `NSWindowDidChangeOcclusionStateNotification`
+                            // constant (macOS 10.9+). QA T63-1 (Cmd+M →
+                            // dialog disappears) is this convention's ground
+                            // truth on the real device.
+                            let occlusion_name =
+                                NSString::from_str("NSWindowDidChangeOcclusionStateNotification");
+                            // Explicitly typed so the `&RcBlock` -> `&DynBlock`
+                            // deref coercion fires at the registration call
+                            // (same shape as the evaluate reply block in
+                            // infrastructure's biometric_gate.rs).
+                            let block: RcBlock<dyn Fn(NonNull<NSNotification>)> =
+                                RcBlock::new(move |_notification| {
+                                    // SAFETY: `win_ptr` is the live NSWindow
+                                    // (see lifetime note above) and
+                                    // `occlusionState` returns the
+                                    // NSUInteger-typed occlusion state mask.
+                                    let state: usize =
+                                        unsafe { msg_send![win_ptr, occlusionState] };
+                                    // Fully occluded (window invisible) → the
+                                    // user cannot see the prompt → cancel.
+                                    // Self-cancel safety: the Visible bit
+                                    // means "at least part of the window is
+                                    // visible", and the host window's enforced
+                                    // minimum size 350×500 (tauri.conf.json
+                                    // minWidth/minHeight) makes full coverage
+                                    // by the Touch ID panel geometrically
+                                    // impossible; the SDK additionally counts
+                                    // an odd-shaped window as visible when its
+                                    // bounding box overlaps a visible area.
+                                    // Restoring visibility does NOT revoke a
+                                    // cancel — stale flags are reset at the
+                                    // next gate entry.
+                                    if state & NSWINDOW_OCCLUSION_STATE_VISIBLE == 0 {
+                                        keychain::cancel_pending_biometric_prompt();
+                                    }
+                                });
+                            // SAFETY: standard ObjC call; `obj` is nil (the
+                            // block queries OUR retained window pointer, never
+                            // the notification), and the queue is the main
+                            // queue so NSWindow is touched on the main thread.
+                            let observer = unsafe {
+                                center.addObserverForName_object_queue_usingBlock(
+                                    Some(&occlusion_name),
+                                    None,
+                                    Some(&queue),
+                                    &block,
+                                )
+                            };
+                            // Intentional leak: app-lifetime observer.
+                            // NSNotificationCenter COPIES the block at
+                            // registration, so the local RcBlock (and the
+                            // token) are droppable afterwards — forgetting the
+                            // token just skips an unregister this app never
+                            // performs.
+                            std::mem::forget(observer);
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                "occlusion observer: ns_window handle unavailable: {error}"
+                            );
+                        }
+                    }
+                }
             }
 
             Ok(())

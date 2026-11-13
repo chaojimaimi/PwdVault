@@ -60,6 +60,27 @@ tauri-plugin-process = "2.3.1"
 # only allow-register/unregister/is-registered.
 tauri-plugin-global-shortcut = "2"
 
+# v1.8.6: AppKit occlusion-state observer for the Touch ID prompt cancel
+# (registration block in lib.rs). Target-scoped like the infrastructure objc2
+# stack so Windows/Linux builds never pull them: `ns_window()` is a
+# macOS-cfg tauri API and objc2 `compile_error!`s on non-Apple targets, so an
+# ungated dependency here would break the Windows release CI (v1.8.5 R1-P1).
+# Feature names are the REAL objc2-foundation gate names — NSNotificationCenter
+# lives under "NSNotification" and NSOperationQueue under "NSOperation"; there
+# is no control-named feature. All three crates are already in the lockfile
+# transitively (objc2 0.6.4 / objc2-foundation 0.3.2 / block2 0.6.2), so this
+# adds zero new packages — only the pwdvault entry's dependency list grows.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSString",
+    "NSNotification",
+    "NSOperation",
+    "block2",
+] }
+
 [dev-dependencies]
 tempfile = "3"
 redb = "2"

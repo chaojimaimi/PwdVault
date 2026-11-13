@@ -3136,7 +3136,10 @@ dependencies = [
 name = "pwdvault"
 version = "1.8.5"
 dependencies = [
+ "block2",
  "criterion",
+ "objc2",
+ "objc2-foundation",
  "pwdvault-application",
  "pwdvault-domain",
  "pwdvault-infrastructure",
