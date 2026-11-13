@@ -367,9 +367,10 @@ cancel/重加 Resized 臂各红于精确断言）→ 门禁 → release.
 Shipped: NSWindowDidChangeOcclusionStateNotification 观察者（setup 注册、mainQueue
 block、查询自有 ns_window 的 occlusionState、Visible 位 1UL<<1 丢失即
 cancel_pending_biometric_prompt；统一覆盖 Cmd+M/Cmd+H/托盘/整盖四类；部分遮挡保位
-+ 350×500 几何论证 → 弹窗不自取消）；被证伪两臂 + rationale 块删除（CloseRequested
-保留作通知前置 belt）；biometric_occlusion_wiring 契约测试（call-shape 锚点防自碰
-撞）；pwdvault crate target-cfg 依赖段（零新 lockfile 包）。
+
+- 350×500 几何论证 → 弹窗不自取消）；被证伪两臂 + rationale 块删除（CloseRequested
+  保留作通知前置 belt）；biometric_occlusion_wiring 契约测试（call-shape 锚点防自碰
+  撞）；pwdvault crate target-cfg 依赖段（零新 lockfile 包）。
 
 Tests: Rust **465(+1 ignored)**（+1 契约测试；infrastructure 136/application
 253/domain 26 不变）/ 前端+扩展 758/91 不变 / native-host 23 不变；clippy + fmt
