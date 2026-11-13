@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.8.7] - 2026-11-13
+
+### Fixed
+
+- **The Touch ID prompt now dismisses when you switch to another app**: the
+  v1.8.6 fix keyed off the window's occlusion state, but a window tucked
+  into a Stage Manager tile still renders on screen, so the "is it visible"
+  signal never changes and the prompt survived every app switch (verified
+  on-device across four live dialog episodes). The prompt is now also
+  cancelled the moment PwdVault **loses foreground** (app-level resign
+  active) — the exact signal an app switch produces. Dock minimize, hide,
+  and close-to-tray keep their existing triggers; everything else from
+  v1.8.5/v1.8.6 (silent return, manual button, no rate-limit impact) is
+  unchanged. Raising the dialog does not strip the app's foreground status,
+  so the prompt cannot dismiss itself.
+
 ## [1.8.6] - 2026-11-13
 
 ### Fixed

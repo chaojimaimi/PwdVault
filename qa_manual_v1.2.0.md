@@ -525,3 +525,28 @@
    bonus；用户看不见提示时取消是正确行为——记录真机表现）。
 6. **回归**：T62 各项（含第 5 观察项：对话框在场时 PwdVault 焦点归属——现在仅
    影响未来方案不再影响取消）、T57/T59 自动弹与静默语义。
+
+## T64 v1.8.7 真机（resign-active 驱动的触控 ID 取消——切应用场景终审）
+
+> 背景：T63 复判失败——台前调度把窗口收进左缘缩块后缩块仍在屏渲染，occlusion
+> Visible 位不翻转，四轮活体弹窗零 -9。v1.8.7 补 app 级 resign-active 信号。
+
+1. **切应用取消（核心验收，用户实测场景）**：锁屏自动弹指 → 指纹框在场时切到任意
+   应用（Cmd-Tab 或点其他窗口）→ 指纹框 **≤0.5s 内消失**；链路通证 = 统一日志
+   出现 `Code=-9`（`log stream --predicate 'process == "pwdvault" AND subsystem
+   == "com.apple.LocalAuthentication"'`，或文件日志 `logs/pwdvault.log.*` 出现
+   "biometric prompt cancelled: resign-active"）；回 app → 锁屏静默无横幅。
+2. **台前调度收块取消**：开启台前调度，指纹框在场时切应用使 PwdVault 收进左缘
+   缩块 → 指纹框即时消失（本轮修复的直接靶场景）。
+3. **Cmd+M Dock 最小化取消（occlusion 路径回归）**：指纹框在场时 Cmd+M → 预期
+   消失；若菜单项因对话框持有 key 无效、窗口实际未缩，属系统行为记录之（非回归）。
+4. **Cmd+H 隐藏取消（occlusion 路径回归）**：指纹框在场时 Cmd+H → 预期消失。
+5. **托盘/red-button 关闭取消（CloseRequested 路径回归）**：同 T63-3。
+6. **回焦不重弹（once-per-episode 回归）**：切走取消后回 app → 锁屏静默，手动
+   Use Touch ID 按钮可用且解锁正常；锁 RESET 后重新自动弹指。
+7. **正常流回归**：指纹框在场、窗口完整可见且 PwdVault 前台 → 不自取消；Touch ID
+   解锁正常；取消仍静默（无红横幅）。
+8. **T62/T63 回归**：T63 各项重跑（部分遮挡保位、整盖取消等）；T57（自动弹出、
+   取消静默）/T59（焦点门控）抽查。
+9. **持续观察项（每版复验）**：弹窗出现时菜单栏归属仍是 PwdVault（不夺 active）
+   ——若未来 macOS 改变此行为，resign 路径会自灭，此观察项是预警哨。
