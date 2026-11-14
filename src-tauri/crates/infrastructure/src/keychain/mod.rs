@@ -207,9 +207,13 @@ pub use macos::{MacSecretStore, MacSyncSecretStore};
 /// Ask the in-flight Touch ID dialog (the legacy-gate `LAContext`
 /// evaluation) to dismiss itself: the dialog is a system panel that does
 /// not follow the app window, so the main window's minimize/hide event
-/// handlers call this to drop the pending evaluation's context
-/// (drop = invalidate = the panel goes away). No-op when no prompt is
-/// pending — the flag is reset unconditionally at the next gate entry.
+/// handlers call this to raise the cancel request the gate's wait loop
+/// polls for; past the raise grace the wait returns and runs the explicit
+/// invalidate call, which dismisses the panel (v1.8.8 falsification:
+/// dropping the evaluation's Rust-side context alone does not —
+/// LocalAuthentication retains it for the whole evaluation). No-op when no
+/// prompt is pending — the flag is reset unconditionally at the next gate
+/// entry.
 ///
 /// The cfg PAIR here is load-bearing (v1.8.5 R1): the naive alternative —
 /// re-exporting a macOS-only symbol — would compile on a macOS

@@ -49,13 +49,36 @@ export function UnlockScreen() {
 	useEffect(() => {
 		let cancelled = false;
 		let eventSeen = false;
+		// v1.8.8 (F5) edge detection: only a genuine false→true TRANSITION on
+		// THIS mount re-arms the auto-prompt. A false event does NOT reset
+		// the edge (level, not count: a stray blur between repeated trues
+		// must not multiply re-arms), while repeated true events with no
+		// false in between must never wipe the episode MARK. Every real
+		// cancel cycle remounts this screen (the Loading swap), so the next
+		// away-and-back always lands on a fresh edge.
+		let wasFocused = false;
 		let unlisten: (() => void) | undefined;
 		void (async () => {
 			try {
 				const current = getCurrentWindow();
 				const un = await current.onFocusChanged(({ payload: focused }) => {
 					eventSeen = true;
-					if (!cancelled) setWindowFocused(focused);
+					if (!cancelled) {
+						setWindowFocused(focused);
+						// v1.8.8 (F5): the rising edge of a genuine focus arrival
+						// re-arms the auto-prompt — attention returned, so the
+						// prompt cancelled while the user was away should come
+						// back. This is EVENT-only: the probe path below must
+						// NEVER re-arm (it answers "already focused at mount",
+						// not an attention transition — re-arming there would
+						// replay the v1.8.0 P0 unlimited-mismatch retry loop,
+						// since biometric failures never count against the
+						// rate limit).
+						if (focused && !wasFocused) {
+							wasFocused = true;
+							actions.rearmBiometricAutoPrompt();
+						}
+					}
 				});
 				if (cancelled) {
 					un();
@@ -65,7 +88,7 @@ export function UnlockScreen() {
 				// Subscribe FIRST, then probe; apply the probe only if no event
 				// arrived meanwhile (the event is always fresher than the probe —
 				// a focus change racing between them must not be overwritten by
-				// the stale initial answer).
+				// the stale initial answer). The probe never re-arms (see above).
 				const focused = await current.isFocused();
 				if (!cancelled && !eventSeen) setWindowFocused(focused);
 			} catch {
@@ -76,7 +99,7 @@ export function UnlockScreen() {
 			cancelled = true;
 			unlisten?.();
 		};
-	}, []);
+	}, [actions]);
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -116,6 +139,16 @@ export function UnlockScreen() {
 	// requires windowFocused === true: an idle lock firing while the user is
 	// away stays silent, and the focus event then prompts exactly once (the
 	// episode flag semantics are untouched).
+	// v1.8.8 (F5): the "exactly once" wording no longer holds across
+	// switches. A cancellation is now the routine outcome of every app
+	// switch (F1-F4 cancel the prompt on resign/occlusion/workspace
+	// activation), so a strict once-per-episode flag would never re-prompt
+	// on the way back. The subscription's rising focus EDGE now re-arms the
+	// flag (rearmBiometricAutoPrompt): each genuine away-and-back cycle
+	// consumes one re-arm and prompts once more. The probe path and
+	// in-place failures (biometric mismatch — no focus transition, hence no
+	// remount-triggered re-arm) never re-arm, keeping the v1.8.0 P0 loop
+	// guard intact.
 	// StrictMode note (wording per plan review): on mount showTouchId is
 	// ALWAYS false (bioStatus starts null, the probe is async), so the first
 	// double-invoked effect run exits early — the protection comes from the

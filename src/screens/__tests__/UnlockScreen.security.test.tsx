@@ -10,6 +10,13 @@ import { vi, describe, it, expect, beforeEach } from "vitest";
 const unlock = vi.fn();
 const unlockBiometric = vi.fn();
 const navigate = vi.fn();
+// v1.8.8 (F5): the re-arm action. Mimics the real reducer — re-arming clears
+// the episode flag — so the focus-edge path in the subscription behaves like
+// the provider wiring. clearAllMocks keeps this implementation (see the
+// beforeEach note below).
+const rearmBiometricAutoPrompt = vi.fn(() => {
+	mockState.biometricAutoPrompted = false;
+});
 // v1.8.0: mutable auth-state mock shared by reference. biometricAutoPrompted
 // defaults to TRUE so every pre-existing case keeps its no-auto-fire
 // behavior; the auto-prompt cases below flip it explicitly. The actions
@@ -20,7 +27,12 @@ const mockState = {
 	error: null as string | null,
 	biometricAutoPrompted: true,
 };
-const mockActions = { unlock, unlockBiometric, navigate };
+const mockActions = {
+	unlock,
+	unlockBiometric,
+	navigate,
+	rearmBiometricAutoPrompt,
+};
 
 vi.mock("../../context/AppContext", () => ({
 	useAuth: () => ({
@@ -188,7 +200,7 @@ describe("UnlockScreen security affordances", () => {
 		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 	});
 
-	it("prompts exactly once across focus flips true→false→true (episode flag)", async () => {
+	it("re-prompts after a genuine away-and-back cycle (v1.8.8 F5 re-arm)", async () => {
 		biometricStatus.mockResolvedValue({ available: true, enabled: true });
 		// Mimic the real context: the attempt marks the episode flag on entry.
 		unlockBiometric.mockImplementation(() => {
@@ -203,22 +215,45 @@ describe("UnlockScreen security affordances", () => {
 			return () => {};
 		});
 		const { UnlockScreen } = await import("../UnlockScreen");
-		render(<UnlockScreen />);
+		const first = render(<UnlockScreen />);
 
 		await act(async () => {
 			await captured?.({ payload: true });
 		});
 		await waitFor(() => expect(unlockBiometric).toHaveBeenCalledTimes(1));
 
-		// Blur + refocus inside the SAME lock episode → the flag holds at one.
+		// Blur alone: no re-arm (the level-false arm never touches the flag) —
+		// the negative arm R3-P3 asked to keep.
 		await act(async () => {
 			await captured?.({ payload: false });
 		});
+		expect(unlockBiometric).toHaveBeenCalledTimes(1);
+
+		// Stray repeated TRUE on the SAME subscription: the rising-edge guard
+		// (!wasFocused) must keep it from re-arming — one mount, one real
+		// transition, at most one re-arm (react-reviewer P3-1: sandbox-proven
+		// that removing the guard otherwise leaves the whole suite green).
 		await act(async () => {
 			await captured?.({ payload: true });
 		});
-		await waitFor(() => expect(biometricStatus).toHaveBeenCalled());
 		expect(unlockBiometric).toHaveBeenCalledTimes(1);
+
+		// v1.8.8 (F5) reverses the v1.8.2 deliberate pin ("the flag holds at
+		// one across focus flips"): the return trip prompts a SECOND time.
+		// In the real topology the blur cancels the prompt and the auth tree
+		// remounts (fresh subscription + fresh rising edge), simulated here
+		// with an unmount/remount; the in-mount repeated true is deliberately
+		// NOT a re-arm trigger (R3-P3 edge detection keeps stray re-dispatched
+		// true events from wiping MARK).
+		first.unmount();
+		render(<UnlockScreen />);
+		await waitFor(() =>
+			expect(windowMock.onFocusChanged).toHaveBeenCalledTimes(2),
+		);
+		await act(async () => {
+			await captured?.({ payload: true });
+		});
+		await waitFor(() => expect(unlockBiometric).toHaveBeenCalledTimes(2));
 		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 	});
 

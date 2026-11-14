@@ -1,6 +1,6 @@
 [package]
 name = "pwdvault"
-version = "1.8.7"
+version = "1.8.8"
 description = "A secure, local-first password manager"
 authors = ["andylee"]
 license = "MIT"
@@ -79,6 +79,21 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
     "NSNotification",
     "NSOperation",
     "block2",
+] }
+# v1.8.8 (F4): workspace-activation observer for the Touch ID prompt cancel
+# (registration block in lib.rs) — the state-independent companion to the
+# resign-active observer (a panel that permanently strips our active status
+# leaves no active→inactive transition for resign to fire on). Same
+# target-scoping rationale as the crates above; already in the lockfile
+# transitively (tao), so this adds zero new packages — only the pwdvault
+# entry's dependency list grows (v1.8.6 precedent).
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSWorkspace",
+    "NSRunningApplication",
+    # processIdentifier returns libc::pid_t and lives behind the "libc"
+    # feature gate (objc2-app-kit 0.3.2).
+    "libc",
 ] }
 
 [dev-dependencies]

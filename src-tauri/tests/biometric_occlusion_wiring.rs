@@ -1,12 +1,13 @@
 //! v1.8.6 source-contract test for the Touch ID prompt cancel wiring.
 //!
 //! The v1.8.5 window-event cancel arms were empirically falsified (tao's
-//! macOS delegate has no windowDidMiniaturize, and measured on-device
-//! 2026-11-13 the app stays active while the prompt is up — the arms'
-//! focus-loss premise never fires), so the cancel REQUEST must now come
-//! from the AppKit occlusion-state observer in `src/lib.rs`. This test pins
-//! the wiring in the lib.rs SOURCE (include_str! — the
-//! capability_contract.rs:25 precedent):
+//! macOS delegate has no windowDidMiniaturize — the arms' focus-loss
+//! premise never fires; the earlier "the app stays active while the prompt
+//! is up" reading was itself falsified on-device 2026-11-13: the panel
+//! strips the app's active status ~50ms after it appears), so the cancel
+//! REQUEST must now come from the AppKit occlusion-state observer in
+//! `src/lib.rs`. This test pins the wiring in the lib.rs SOURCE
+//! (include_str! — the capability_contract.rs:25 precedent):
 //!
 //! ① the occlusion observer registration exists, anchored on the
 //!    `addObserverForName` CALL SHAPE — never on the notification-name
@@ -26,10 +27,11 @@
 //!
 //! The test's own assertion strings live in THIS file while the scanned
 //! source lives in lib.rs — no self-collision is possible (the v1.8.4 #18③
-//! lesson is why this is a separate integration-test file at all). Two test
-//! functions: this one (v1.8.6 occlusion wiring, budget 464 → 465) and
-//! `resign_active_observer_cancels_pending_prompt` below (v1.8.7
-//! resign-active wiring, budget 465 → 466).
+//! lesson is why this is a separate integration-test file at all). Three test
+//! functions: this one (v1.8.6 occlusion wiring, budget 464 → 465),
+//! `resign_active_observer_cancels_pending_prompt` (v1.8.7 resign-active
+//! wiring, budget 465 → 466) and `workspace_activation_observer_cancels_
+//! pending_prompt` (v1.8.8 workspace wiring, budget 466 → 467).
 
 const LIB_SRC: &str = include_str!("../src/lib.rs");
 
@@ -119,10 +121,11 @@ fn occlusion_cancel_wiring_contract() {
 ///    (lib.rs is forbidden from carrying the full name in comments —
 ///    "resign-active" prose only — so the quoted literal is a
 ///    non-tautological registration anchor);
-/// ⑥ the registration call shape occurs exactly TWICE, occlusion first in
-///    file order (the v1.8.6 first-occurrence anchors in
-///    `occlusion_cancel_wiring_contract` must keep pointing at it) and the
-///    resign registration second;
+/// ⑥ the registration call shape occurs exactly THREE times, occlusion
+///    first in file order (the v1.8.6 first-occurrence anchors in
+///    `occlusion_cancel_wiring_contract` must keep pointing at it), the
+///    resign registration second, and the v1.8.8 workspace-activation
+///    registration third;
 /// ⑦ the resign segment — from the name literal to the SECOND registration
 ///    call (`match_indices().nth(1)`, never a bare find, which would hit the
 ///    occlusion registration and invert the bounds) — produces the cancel
@@ -140,7 +143,7 @@ fn resign_active_observer_cancels_pending_prompt() {
          satisfied by prose"
     );
 
-    // --- ⑥ exactly two registration calls, occlusion first -----------------
+    // --- ⑥ exactly three registration calls, occlusion first ----------------
     let registration_call = "addObserverForName_object_queue_usingBlock(";
     let call_sites: Vec<usize> = LIB_SRC
         .match_indices(registration_call)
@@ -148,9 +151,9 @@ fn resign_active_observer_cancels_pending_prompt() {
         .collect();
     assert_eq!(
         call_sites.len(),
-        2,
-        "lib.rs must register exactly two AppKit observers (occlusion + \
-         resign-active) through the same call shape"
+        3,
+        "lib.rs must register exactly three AppKit observers (occlusion + \
+         resign-active + workspace activation) through the same call shape"
     );
     assert!(
         call_sites[0] < call_sites[1],
@@ -191,5 +194,69 @@ fn resign_active_observer_cancels_pending_prompt() {
         "the resign-active block must produce the cancel request — the \
          polling cancel loop in infrastructure has no other trigger for \
          app-switch episodes"
+    );
+}
+
+/// v1.8.8 (F4): the workspace-activation observer — the state-INDEPENDENT
+/// companion to the resign-active observer. Scenario A: if the auth panel
+/// permanently strips the app's active status at raise time, a later user
+/// switch produces NO active→inactive transition, and resign-active can
+/// never fire again while the dialog is up. A workspace activation fires
+/// whenever ANY other application gains activation, regardless of whether
+/// we were still active — both scenarios covered. The assertions:
+///
+/// ⑧ the workspace notification-name literal exists in its QUOTED form,
+///    exactly once (lib.rs is forbidden from carrying the full name in
+///    comments — "workspace activation" prose only — so the quoted literal
+///    is a non-tautological registration anchor, same discipline as ⑤);
+/// ⑨ the workspace segment — from the name literal to the THIRD
+///    registration call (`match_indices().nth(2)`, never a bare find, which
+///    would hit an earlier registration and invert the bounds) — produces
+///    the cancel request;
+/// ⑩ that segment also parses the activated application's pid
+///    (`processIdentifier` form anchor): without the pid comparison the
+///    observer cannot tell a self-activation from a genuine user switch.
+#[test]
+fn workspace_activation_observer_cancels_pending_prompt() {
+    // --- ⑧ quoted name literal, exactly once -------------------------------
+    let name_literal = "\"NSWorkspaceDidActivateApplicationNotification\"";
+    assert_eq!(
+        LIB_SRC.matches(name_literal).count(),
+        1,
+        "the workspace activation notification must be registered through \
+         its quoted string literal exactly once — lib.rs comments may not \
+         carry the full name (workspace activation prose only), so this \
+         anchor cannot be satisfied by prose"
+    );
+
+    // --- ⑨ the workspace segment (literal → third call) cancels ------------
+    let registration_call = "addObserverForName_object_queue_usingBlock(";
+    let end = LIB_SRC
+        .match_indices(registration_call)
+        .nth(2)
+        .map(|(index, _)| index)
+        .expect("the third registration call (workspace activation)");
+    let start = LIB_SRC
+        .find(name_literal)
+        .expect("workspace activation name literal position (asserted above)");
+    assert!(
+        start < end,
+        "segment bounds must be monotonic — the workspace name literal \
+         precedes its registration call (third in file order)"
+    );
+    assert!(
+        LIB_SRC[start..end].contains("cancel_pending_biometric_prompt"),
+        "the workspace activation block must produce the cancel request — \
+         the state-independent signal when resign-active can never fire \
+         again (panel-permanently-inactive scenario)"
+    );
+
+    // --- ⑩ the segment distinguishes self from others via the pid ----------
+    assert!(
+        LIB_SRC[start..end].contains("processIdentifier"),
+        "the workspace activation block must compare the activated \
+         application's pid against our own — without it the observer cannot \
+         tell a self-activation from a genuine user switch and would \
+         self-cancel every prompt"
     );
 }

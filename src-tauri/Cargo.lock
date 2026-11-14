@@ -2566,6 +2566,7 @@ checksum = "d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c"
 dependencies = [
  "bitflags 2.11.0",
  "block2",
+ "libc",
  "objc2",
  "objc2-core-foundation",
  "objc2-core-graphics",
@@ -3134,11 +3135,12 @@ dependencies = [
 
 [[package]]
 name = "pwdvault"
-version = "1.8.7"
+version = "1.8.8"
 dependencies = [
  "block2",
  "criterion",
  "objc2",
+ "objc2-app-kit",
  "objc2-foundation",
  "pwdvault-application",
  "pwdvault-domain",
@@ -3164,7 +3166,7 @@ dependencies = [
 
 [[package]]
 name = "pwdvault-application"
-version = "1.8.7"
+version = "1.8.8"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3187,7 +3189,7 @@ dependencies = [
 
 [[package]]
 name = "pwdvault-domain"
-version = "1.8.7"
+version = "1.8.8"
 dependencies = [
  "chrono",
  "serde",
@@ -3199,7 +3201,7 @@ dependencies = [
 
 [[package]]
 name = "pwdvault-infrastructure"
-version = "1.8.7"
+version = "1.8.8"
 dependencies = [
  "aes-gcm",
  "argon2",

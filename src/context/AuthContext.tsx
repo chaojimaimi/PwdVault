@@ -40,12 +40,20 @@ export interface AuthState {
 	isLoading: boolean;
 	error: string | null;
 	bootError: string | null;
-	// v1.8.0: "one biometric attempt per lock episode". Lives in the reducer —
-	// NOT in a screen ref — because unlockBiometric's SET_LOADING swaps the
-	// whole auth screen tree for the Loading screen (App.tsx), unmounting
-	// UnlockScreen mid-prompt; a component ref would die on that remount and
-	// turn every cancel into a re-prompt loop. RESET (every lock) clears it,
-	// so the next lock episode auto-prompts again.
+	// v1.8.0: one biometric attempt per lock episode. v1.8.8 (F5) adds the
+	// deliberate inverse: a GENUINE focus-arrival EVENT re-arms the flag
+	// (REARM_BIOMETRIC_AUTO_PROMPT, wired in UnlockScreen's subscription) —
+	// after F1-F4 a cancellation is the routine outcome of every app switch,
+	// so a strict once-per-episode flag would never re-prompt on the return
+	// trip. The re-arm rides the focus EVENT only, never the mount probe:
+	// the probe answers "already focused at mount", which is not an
+	// attention transition — re-arming there would replay the v1.8.0 P0
+	// unlimited-mismatch retry loop (biometric failures never count against
+	// the rate limit). Still lives in the reducer — NOT in a screen ref —
+	// because unlockBiometric's SET_LOADING swaps the whole auth screen tree
+	// for the Loading screen (App.tsx), unmounting UnlockScreen mid-prompt.
+	// RESET (every lock) clears it, so the next lock episode auto-prompts
+	// again.
 	biometricAutoPrompted: boolean;
 }
 
@@ -57,6 +65,7 @@ type AuthAction =
 	| { type: "SET_ERROR"; payload: string | null }
 	| { type: "SET_BOOT_ERROR"; payload: string | null }
 	| { type: "MARK_BIOMETRIC_AUTO_PROMPTED" }
+	| { type: "REARM_BIOMETRIC_AUTO_PROMPT" }
 	| { type: "RESET" };
 
 const initialAuthState: AuthState = {
@@ -85,6 +94,11 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
 			return { ...state, bootError: action.payload };
 		case "MARK_BIOMETRIC_AUTO_PROMPTED":
 			return { ...state, biometricAutoPrompted: true };
+		// v1.8.8 (F5): attention genuinely returned (focus EVENT) — the next
+		// episode-quiet gate opens again. Idempotent by design (StrictMode
+		// may double-dispatch; a flag already false stays false).
+		case "REARM_BIOMETRIC_AUTO_PROMPT":
+			return { ...state, biometricAutoPrompted: false };
 		case "RESET":
 			return { ...initialAuthState, isLoading: false };
 		default:
@@ -105,6 +119,7 @@ export interface AuthContextValue {
 		unlockBiometric: () => Promise<boolean>;
 		recover: (recoveryKey: string, newPassword: string) => Promise<boolean>;
 		lock: () => Promise<void>;
+		rearmBiometricAutoPrompt: () => void;
 		navigate: (screen: AppScreen) => void;
 		retryBoot: () => Promise<void>;
 	};
@@ -215,8 +230,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 			//
 			// MARK on entry: auto or manual, a biometric attempt has happened in
 			// this lock episode — the auto-prompt effect in UnlockScreen reads
-			// this flag and stays quiet for the rest of the episode. RESET (on
-			// every lock) clears it.
+			// this flag and stays quiet until a genuine focus-arrival EVENT
+			// re-arms it (v1.8.8 F5, via rearmBiometricAutoPrompt below) or
+			// RESET clears it (on every lock).
 			unlockBiometric: async () => {
 				dispatch({ type: "MARK_BIOMETRIC_AUTO_PROMPTED" });
 				dispatch({ type: "SET_LOADING", payload: true });
@@ -292,6 +308,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 					dispatch({ type: "RESET" });
 					dispatch({ type: "SET_SCREEN", payload: "unlock" });
 				}
+			},
+
+			// v1.8.8 (F5): re-arm the auto-prompt when attention GENUINELY
+			// returns (focus event, edge-detected in UnlockScreen's
+			// subscription). NEVER call this from the mount probe path — see
+			// AuthState.biometricAutoPrompted above for the mismatch-loop
+			// rationale.
+			rearmBiometricAutoPrompt: () => {
+				dispatch({ type: "REARM_BIOMETRIC_AUTO_PROMPT" });
 			},
 
 			navigate: (screen: AppScreen) => {

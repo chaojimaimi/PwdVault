@@ -416,6 +416,7 @@ pub fn run() {
                     use block2::RcBlock;
                     use objc2::msg_send;
                     use objc2::runtime::AnyObject;
+                    use objc2_app_kit::{NSRunningApplication, NSWorkspace};
                     use objc2_foundation::{
                         NSNotification, NSNotificationCenter, NSOperationQueue, NSString,
                     };
@@ -426,9 +427,11 @@ pub fn run() {
                     /// of the window is visible".
                     const NSWINDOW_OCCLUSION_STATE_VISIBLE: usize = 1 << 1;
 
-                    // Shared registration plumbing for both AppKit observers
-                    // below (occlusion + resign-active): one defaultCenter,
-                    // one mainQueue.
+                    // Shared registration plumbing for the two defaultCenter
+                    // observers below (occlusion + resign-active); the
+                    // workspace-activation observer further down uses the
+                    // workspace's own notificationCenter but shares this
+                    // mainQueue.
                     let center = NSNotificationCenter::defaultCenter();
                     let queue = NSOperationQueue::mainQueue();
 
@@ -519,12 +522,15 @@ pub fn run() {
                     // on resign-active — the app-side complement to the
                     // window-side occlusion path above.
                     //
-                    // Self-cancel safety (measured 2026-11-13): while the
-                    // prompt is up this app STAYS active — the auto-prompt
-                    // only raises behind its windowFocused gate, and the
-                    // user's real switch to another app is what resigns — so
-                    // this observer cannot cancel the very dialog it watches
-                    // at raise time.
+                    // Self-cancel safety (re-measured 2026-11-13, v1.8.8):
+                    // the panel itself strips the app's active status ~50ms
+                    // after it appears, so this observer DOES fire on every
+                    // raise — the infrastructure raise-grace window discards
+                    // cancel requests observed within the first 500ms after
+                    // the dialog appears, keeping that raise side-effect
+                    // from killing the very dialog it watches. A genuine
+                    // user switch lands seconds later, past the grace, and
+                    // cancels as intended.
                     let resign_name =
                         NSString::from_str("NSApplicationDidResignActiveNotification");
                     // Explicitly typed so the &RcBlock -> &DynBlock deref
@@ -535,10 +541,11 @@ pub fn run() {
                             // Unconditional on purpose: setting the flag
                             // while no evaluation is in flight is harmless —
                             // the gate entry resets the flag before every
-                            // episode, and the microsecond window between
-                            // that reset and evaluatePolicy is fail-closed
-                            // benign (the dialog flashes away silently,
-                            // rate-limit exempt, key never published).
+                            // episode, and any request that slips through
+                            // that window is swallowed by the infrastructure
+                            // raise grace (v1.8.8) instead of flashing the
+                            // dialog away; rate-limit exempt either way, key
+                            // never published.
                             keychain::cancel_pending_biometric_prompt();
                             tracing::info!("biometric prompt cancelled: resign-active");
                         });
@@ -546,7 +553,7 @@ pub fn run() {
                     // app-level notification, no window pointer is involved,
                     // so this producer is immune to the ns_window() handle
                     // failure the occlusion path warns about. The shared
-                    // mainQueue keeps both observers' delivery semantics
+                    // mainQueue keeps all observers' delivery semantics
                     // identical (the block touches no UI).
                     let resign_observer = unsafe {
                         center.addObserverForName_object_queue_usingBlock(
@@ -563,6 +570,71 @@ pub fn run() {
                     // token just skips an unregister this app never
                     // performs).
                     std::mem::forget(resign_observer);
+
+                    // v1.8.8 (F4): the state-INDEPENDENT companion to the
+                    // resign-active observer above. If the auth panel
+                    // permanently strips our app's active status at raise
+                    // time, a later user switch produces no active→inactive
+                    // transition — resign-active can never fire again while
+                    // the dialog is up (the app is already inactive). A
+                    // workspace activation is immune: whenever ANY other
+                    // application gains activation, the user's attention has
+                    // left us, regardless of whether we were still active.
+                    // The panel's own owner process activating at raise time
+                    // lands inside the infrastructure raise grace and is
+                    // discarded, exactly like the resign side-effect.
+                    let ws_center = NSWorkspace::sharedWorkspace().notificationCenter();
+                    let ws_name =
+                        NSString::from_str("NSWorkspaceDidActivateApplicationNotification");
+                    // Explicitly typed so the &RcBlock -> &DynBlock deref
+                    // coercion fires at the registration call (same shape as
+                    // the occlusion and resign blocks above). Unlike those
+                    // two, this block PARSES the notification: its object is
+                    // the application being activated, and only an activation
+                    // of ANOTHER process means the user left — our own
+                    // activation must not cancel our own prompt.
+                    let ws_block: RcBlock<dyn Fn(NonNull<NSNotification>)> =
+                        RcBlock::new(move |notification: NonNull<NSNotification>| {
+                            // SAFETY: the dispatching notification center
+                            // passes a valid notification pointer for the
+                            // duration of the call.
+                            let notification = unsafe { notification.as_ref() };
+                            let Some(app) = notification.object() else {
+                                return;
+                            };
+                            // Runtime-checked downcast (safe): activation
+                            // notifications carry an NSRunningApplication.
+                            let Ok(app) = app.downcast::<NSRunningApplication>() else {
+                                return;
+                            };
+                            // processIdentifier is pid_t (i32): only an
+                            // activation of ANOTHER process cancels.
+                            if app.processIdentifier() != std::process::id() as i32 {
+                                keychain::cancel_pending_biometric_prompt();
+                                tracing::info!("biometric prompt cancelled: app-switch");
+                            }
+                        });
+                    // SAFETY: standard ObjC call, same registration shape as
+                    // the resign observer above; the difference is the
+                    // center — the shared workspace's own notification
+                    // center (NOT the default center), which is where
+                    // AppKit delivers workspace activation events. Same
+                    // mainQueue.
+                    let ws_observer = unsafe {
+                        ws_center.addObserverForName_object_queue_usingBlock(
+                            Some(&ws_name),
+                            None,
+                            Some(&queue),
+                            &ws_block,
+                        )
+                    };
+                    // Intentional leak: app-lifetime observer, same
+                    // registration semantics as the other two (the
+                    // notification center copies the block at registration,
+                    // so the local RcBlock is droppable — forgetting the
+                    // token just skips an unregister this app never
+                    // performs).
+                    std::mem::forget(ws_observer);
                 }
             }
 
