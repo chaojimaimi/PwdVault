@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.8.8] - 2026-11-14
+
+### Fixed
+
+- **The Touch ID prompt dismissal actually works now**: v1.8.7 detected the
+  right moments to dismiss the prompt (app switch, minimize) but the dismissal
+  itself never happened — dropping the in-memory authentication context does
+  NOT cancel a running Touch ID evaluation, because the system keeps its own
+  reference to it. The prompt is now cancelled through the system's own
+  invalidation call, which terminates the evaluation and removes the dialog
+  (verified on-device: the system log finally shows the cancellation code that
+  was absent across every previous attempt). A short grace window after the
+  prompt appears ignores the app-focus side effect of the panel itself, so the
+  dialog cannot dismiss itself the moment it shows.
+- **The prompt also dismisses on plain app switches**: a Stage Manager tile
+  still renders the window, so the previous "is the window visible" signal
+  never fired for the most common case. A workspace-level observer now cancels
+  the prompt whenever ANY other application takes the foreground — exactly
+  the "user walked away" signal, regardless of window visibility.
+- **The prompt comes back when you do**: after an automatic dismissal, the
+  fingerprint prompt re-appears automatically the next time you return to
+  PwdVault's lock screen (previously it never re-prompted within the same
+  lock; the manual button still worked). Deliberately typed wrong fingerprints
+  or pressing Cancel while staying in the app do NOT re-prompt — only a real
+  leave-and-return cycle does.
+- Diagnostic log lines now mark every dismissal trigger
+  (resign-active / occlusion / app-switch / close-to-tray) in the retrievable
+  file log.
+
 ## [1.8.7] - 2026-11-13
 
 ### Fixed

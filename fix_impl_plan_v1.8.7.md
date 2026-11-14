@@ -37,7 +37,7 @@ app 级通知，不需要窗口指针，注册不依赖 ns_window()（顺带把�
 
 1. `NSNotificationCenter::defaultCenter()` +
    `addObserverForName_object_queue_usingBlock(Some(&name), None, Some(&mainQueue),
-   &block)`；name = `NSString::from_str("NSApplicationDidResignActiveNotification")`
+&block)`；name = `NSString::from_str("NSApplicationDidResignActiveNotification")`
    （字符串字面量，AppKit 值==符号名约定——与 v1.8.6 window 级同族约定，本机探针已
    实证该约定；注意这是 NSApplication 的通知，投递到同一个 defaultCenter）。queue =
    `NSOperationQueue::mainQueue()`（复用既有 `queue` 绑定即可——注意 occlusion 分支
@@ -89,7 +89,7 @@ item。本班落点：
 - 扩展 `src-tauri/tests/biometric_occlusion_wiring.rs`（integration、include_str 读
   lib.rs 源码契约；现有单测试函数含 ①occlusion 注册形态锚 ②块内 cancel ③旧形态
   消失 ④CloseRequested 存活）。新增第二个 `#[test] fn`：`resign_active_observer_
-  cancels_pending_prompt`：断言 ⑤ `"NSApplicationDidResignActiveNotification"`
+cancels_pending_prompt`：断言 ⑤ `"NSApplicationDidResignActiveNotification"`
   字面量存在于 lib.rs（含引号的字面量形态锚，防注释碰撞——lib.rs 注释若提及该名
   会被撞，要求实现时**注释中不出现该字面量全名**，如需指称用"resign-active"措辞）；
   ⑥ 注册调用形态计数：`addObserverForName_object_queue_usingBlock(`（带前导点形态）
@@ -138,16 +138,16 @@ commit-gate marker 三步
 
 ### R1（plan-reviewer REVISE，2026-11-13 18:0x，全折叠）
 
-| 级  | 发现                                                                                                                               | 折叠落点                                                                                                  |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| P1  | F2 前提错误：tracing 走文件日志（lib.rs:222-231）非 stdout，"零痕迹"不成立                                                          | §F2 重写：落点 logs/pwdvault.log.\*，真机验收通道仍是统一日志 LA -9 特征码；os_log 仍为未来 item           |
-| P1  | resign 观察者位置未钉 before/after——置于 match 前会使契约测试 ①② first-occurrence 锚静默重锚、变异期望落空；⑦ 段界未给次序语义     | §F1 钉死"match 之后（cfg 块尾部）、occlusion 保持文件序首个"；§测试 ⑦ 钉"第二次出现（nth(1)/rfind）"       |
-| P2  | 测试预算括号自相矛盾（+1 落在 pwdvault 集成测试非 lib 45 不变）+ AGENTS §2 测试表缺 v1.8.6 契约测试行                               | 预算行改"tauri-app 45→46"；§发布补"AGENTS §2 测试表刷新"                                                  |
-| P3  | §发布清单缺 qa_manual T64 落档步骤                                                                                                  | §发布补"qa_manual_v1.2.0.md 追加 T64 节"                                                                  |
-| P3  | 红线"既有测试零改动"与 §0 stale 措辞修正条款字面冲突                                                                                | 红线补"指断言与计数；doc 注释 'steals key' 句允许修正；不得引入 ③ 四禁形"                                 |
-| P3  | biometric_gate.rs "exactly" 枚举将因第三触发源变 stale                                                                              | 红线记遗留：不变式不破、措辞不在本班                                                                      |
-| P3  | F2 未覆盖第三个 cancel 产生端（CloseRequested）                                                                                     | §F2.1 补 close-to-tray 来源 info                                                                          |
-| P3  | DP 模式不可取消声明未沿用惯例                                                                                                       | 红线补沿用声明                                                                                            |
+| 级  | 发现                                                                                                                           | 折叠落点                                                                                             |
+| --- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| P1  | F2 前提错误：tracing 走文件日志（lib.rs:222-231）非 stdout，"零痕迹"不成立                                                     | §F2 重写：落点 logs/pwdvault.log.\*，真机验收通道仍是统一日志 LA -9 特征码；os_log 仍为未来 item     |
+| P1  | resign 观察者位置未钉 before/after——置于 match 前会使契约测试 ①② first-occurrence 锚静默重锚、变异期望落空；⑦ 段界未给次序语义 | §F1 钉死"match 之后（cfg 块尾部）、occlusion 保持文件序首个"；§测试 ⑦ 钉"第二次出现（nth(1)/rfind）" |
+| P2  | 测试预算括号自相矛盾（+1 落在 pwdvault 集成测试非 lib 45 不变）+ AGENTS §2 测试表缺 v1.8.6 契约测试行                          | 预算行改"tauri-app 45→46"；§发布补"AGENTS §2 测试表刷新"                                             |
+| P3  | §发布清单缺 qa_manual T64 落档步骤                                                                                             | §发布补"qa_manual_v1.2.0.md 追加 T64 节"                                                             |
+| P3  | 红线"既有测试零改动"与 §0 stale 措辞修正条款字面冲突                                                                           | 红线补"指断言与计数；doc 注释 'steals key' 句允许修正；不得引入 ③ 四禁形"                            |
+| P3  | biometric_gate.rs "exactly" 枚举将因第三触发源变 stale                                                                         | 红线记遗留：不变式不破、措辞不在本班                                                                 |
+| P3  | F2 未覆盖第三个 cancel 产生端（CloseRequested）                                                                                | §F2.1 补 close-to-tray 来源 info                                                                     |
+| P3  | DP 模式不可取消声明未沿用惯例                                                                                                  | 红线补沿用声明                                                                                       |
 
 R1 同时实证为真（file:line）：lib.rs 577 行/cfg 块 :405-501/:410 cfg 门；center/queue
 现绑 :434-435（上提可行）；`.addObserverForName_object_queue_usingBlock(` 现恰 1 处
